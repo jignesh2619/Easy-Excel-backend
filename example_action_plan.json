@@ -1,0 +1,17 @@
+{
+  "task": "group_by",
+  "columns_needed": ["Region", "Revenue"],
+  "chart_type": "bar",
+  "steps": [
+    "group_by Region sum Revenue",
+    "create_chart bar"
+  ],
+  "group_by_column": "Region",
+  "aggregate_function": "sum",
+  "aggregate_column": "Revenue",
+  "description": "Groups data by Region column and sums Revenue values, then generates a bar chart"
+}
+
+
+
+

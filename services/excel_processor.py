@@ -1,0 +1,1108 @@
+"""
+Excel Processor Service
+
+Executes data operations based on LLM action plans using pandas.
+Handles all data modifications deterministically.
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Dict, List, Tuple, Optional, Any
+from pathlib import Path
+import xlsxwriter
+from datetime import datetime
+from services.formula_engine import FormulaEngine
+
+
+class ExcelProcessor:
+    """Processes Excel/CSV files based on action plans"""
+    
+    def __init__(self, file_path: str):
+        """
+        Initialize Excel Processor
+        
+        Args:
+            file_path: Path to input Excel/CSV file
+        """
+        self.file_path = file_path
+        self.df: Optional[pd.DataFrame] = None
+        self.original_df: Optional[pd.DataFrame] = None
+        self.summary: List[str] = []
+        self.formatting_rules: List[Dict] = []  # Store formatting instructions
+        self.formula_result: Optional[Any] = None  # Store formula computation result
+        
+    def load_data(self, sheet_name: Optional[str] = None) -> bool:
+        """
+        Load data from file
+        
+        Args:
+            sheet_name: Sheet name for Excel files (None for CSV or first sheet)
+            
+        Returns:
+            True if loaded successfully
+        """
+        try:
+            file_ext = Path(self.file_path).suffix.lower()
+            
+            if file_ext == '.csv':
+                self.df = pd.read_csv(self.file_path)
+            elif file_ext in ['.xlsx', '.xls']:
+                # Always specify sheet_name to avoid getting a dict
+                # If sheet_name is None, use 0 to get first sheet
+                if sheet_name is None:
+                    loaded_data = pd.read_excel(self.file_path, sheet_name=0)
+                else:
+                    loaded_data = pd.read_excel(self.file_path, sheet_name=sheet_name)
+                
+                # Check if we got a dict (shouldn't happen with sheet_name specified, but double-check)
+                if isinstance(loaded_data, dict):
+                    # If it's a dict, get the first sheet
+                    if len(loaded_data) > 0:
+                        self.df = list(loaded_data.values())[0]
+                    else:
+                        raise ValueError("Excel file has no sheets")
+                else:
+                    self.df = loaded_data
+            else:
+                raise ValueError(f"Unsupported file format: {file_ext}")
+            
+            # Ensure we have a DataFrame
+            if not isinstance(self.df, pd.DataFrame):
+                raise ValueError(f"Expected DataFrame, got {type(self.df)}")
+            
+            # Keep original copy
+            self.original_df = self.df.copy()
+            self.summary.append(f"Loaded {len(self.df)} rows and {len(self.df.columns)} columns")
+            return True
+            
+        except Exception as e:
+            raise RuntimeError(f"Failed to load data: {str(e)}")
+    
+    def execute_action_plan(self, action_plan: Dict) -> Dict:
+        """
+        Execute action plan on loaded data
+        
+        Args:
+            action_plan: Structured action plan from LLM
+            
+        Returns:
+            Dictionary with processed dataframe and summary
+        """
+        if self.df is None:
+            raise ValueError("Data not loaded. Call load_data() first.")
+        
+        task = action_plan.get("task", "summarize")
+        
+        try:
+            if task == "clean":
+                self._execute_clean(action_plan)
+            elif task == "group_by":
+                self._execute_group_by(action_plan)
+            elif task == "summarize":
+                self._execute_summarize(action_plan)
+            elif task == "filter":
+                self._execute_filter(action_plan)
+            elif task == "find_missing":
+                self._execute_find_missing(action_plan)
+            elif task == "transform":
+                self._execute_transform(action_plan)
+            elif task == "delete_rows":
+                self._execute_delete_rows(action_plan)
+            elif task == "add_row":
+                self._execute_add_row(action_plan)
+            elif task == "add_column":
+                self._execute_add_column(action_plan)
+            elif task == "delete_column":
+                self._execute_delete_column(action_plan)
+            elif task == "edit_cell":
+                self._execute_edit_cell(action_plan)
+            elif task == "clear_cell":
+                self._execute_clear_cell(action_plan)
+            elif task == "auto_fill":
+                self._execute_auto_fill(action_plan)
+            elif task == "sort":
+                self._execute_sort(action_plan)
+            elif task == "format":
+                self._execute_format(action_plan)
+            elif task == "conditional_format":
+                self._execute_conditional_format(action_plan)
+            elif task == "formula":
+                self._execute_formula(action_plan)
+            else:
+                self._execute_summarize(action_plan)  # Default
+            
+            return {
+                "df": self.df,
+                "summary": self.summary,
+                "chart_needed": action_plan.get("chart_type", "none") != "none",
+                "chart_type": action_plan.get("chart_type", "none"),
+                "formula_result": self.formula_result,
+                "task": task
+            }
+            
+        except Exception as e:
+            raise RuntimeError(f"Failed to execute action plan: {str(e)}")
+    
+    def _execute_clean(self, action_plan: Dict):
+        """Execute cleaning operations"""
+        initial_rows = len(self.df)
+        
+        # Remove duplicates
+        self.df = self.df.drop_duplicates()
+        duplicates_removed = initial_rows - len(self.df)
+        if duplicates_removed > 0:
+            self.summary.append(f"Removed {duplicates_removed} duplicate rows")
+        
+        # Fix formatting - trim whitespace from string columns
+        string_columns = self.df.select_dtypes(include=['object']).columns
+        for col in string_columns:
+            self.df[col] = self.df[col].astype(str).str.strip()
+            self.df[col] = self.df[col].replace('nan', np.nan)
+        
+        if len(string_columns) > 0:
+            self.summary.append(f"Fixed formatting in {len(string_columns)} text columns")
+        
+        # Handle missing values - fill with appropriate defaults
+        missing_counts = self.df.isnull().sum()
+        for col in missing_counts[missing_counts > 0].index:
+            if self.df[col].dtype in ['int64', 'float64']:
+                self.df[col] = self.df[col].fillna(0)
+            else:
+                self.df[col] = self.df[col].fillna('')
+        
+        total_missing = missing_counts.sum()
+        if total_missing > 0:
+            self.summary.append(f"Handled {total_missing} missing values")
+        
+        self.summary.append(f"Cleaned data: {len(self.df)} rows remaining")
+    
+    def _execute_group_by(self, action_plan: Dict):
+        """Execute group by operations"""
+        group_by_col = action_plan.get("group_by_column")
+        agg_func = action_plan.get("aggregate_function", "sum")
+        agg_col = action_plan.get("aggregate_column")
+        
+        if not group_by_col:
+            self.summary.append("Group by: No column specified")
+            return
+        
+        if group_by_col not in self.df.columns:
+            raise ValueError(f"Column '{group_by_col}' not found")
+        
+        if agg_col and agg_col not in self.df.columns:
+            raise ValueError(f"Column '{agg_col}' not found")
+        
+        # Map aggregate functions
+        agg_map = {
+            "sum": "sum",
+            "mean": "mean",
+            "avg": "mean",
+            "average": "mean",
+            "count": "count",
+            "max": "max",
+            "min": "min"
+        }
+        
+        agg_func = agg_map.get(agg_func.lower(), "sum")
+        
+        if agg_col:
+            # Group by and aggregate specific column
+            grouped = self.df.groupby(group_by_col)[agg_col].agg(agg_func).reset_index()
+            grouped.columns = [group_by_col, f"{agg_func.capitalize()}_{agg_col}"]
+        else:
+            # Group by and aggregate all numeric columns
+            numeric_cols = self.df.select_dtypes(include=[np.number]).columns
+            if len(numeric_cols) == 0:
+                raise ValueError("No numeric columns to aggregate")
+            
+            grouped = self.df.groupby(group_by_col)[numeric_cols].agg(agg_func).reset_index()
+        
+        self.df = grouped
+        self.summary.append(f"Grouped by '{group_by_col}' with {agg_func} aggregation")
+        self.summary.append(f"Result: {len(self.df)} groups")
+    
+    def _execute_summarize(self, action_plan: Dict):
+        """Execute summary operations
+        
+        NOTE: This creates summary statistics (count, mean, std, etc.)
+        If user wants actual data after cleaning, use task: "clean" instead.
+        """
+        columns_needed = action_plan.get("columns_needed", [])
+        
+        if columns_needed:
+            # Summarize specific columns
+            available_cols = [col for col in columns_needed if col in self.df.columns]
+            if available_cols:
+                numeric_cols = self.df[available_cols].select_dtypes(include=[np.number]).columns
+                if len(numeric_cols) > 0:
+                    summary = self.df[numeric_cols].describe()
+                    self.df = summary.reset_index()
+                    self.summary.append(f"Generated summary statistics for {len(numeric_cols)} columns")
+                else:
+                    self.summary.append("No numeric columns found for summary")
+            else:
+                self.summary.append("None of the specified columns found")
+        else:
+            # Summarize all numeric columns
+            numeric_cols = self.df.select_dtypes(include=[np.number]).columns
+            if len(numeric_cols) > 0:
+                summary = self.df[numeric_cols].describe()
+                self.df = summary.reset_index()
+                self.summary.append(f"Generated summary statistics for all {len(numeric_cols)} numeric columns")
+            else:
+                self.summary.append("No numeric columns found for summary")
+    
+    def _execute_filter(self, action_plan: Dict):
+        """Execute filter operations"""
+        filters = action_plan.get("filters", {})
+        
+        if not filters:
+            self.summary.append("Filter: No filter conditions specified")
+            return
+        
+        column = filters.get("column")
+        condition = filters.get("condition", "==")
+        value = filters.get("value")
+        
+        if not column or column not in self.df.columns:
+            raise ValueError(f"Filter column '{column}' not found")
+        
+        initial_rows = len(self.df)
+        
+        # Apply filter
+        if condition == ">":
+            self.df = self.df[self.df[column] > value]
+        elif condition == ">=":
+            self.df = self.df[self.df[column] >= value]
+        elif condition == "<":
+            self.df = self.df[self.df[column] < value]
+        elif condition == "<=":
+            self.df = self.df[self.df[column] <= value]
+        elif condition == "==":
+            self.df = self.df[self.df[column] == value]
+        elif condition == "!=":
+            self.df = self.df[self.df[column] != value]
+        else:
+            raise ValueError(f"Unsupported filter condition: {condition}")
+        
+        filtered_rows = len(self.df)
+        removed = initial_rows - filtered_rows
+        self.summary.append(f"Filtered '{column}' {condition} {value}")
+        self.summary.append(f"Result: {filtered_rows} rows (removed {removed})")
+    
+    def _execute_find_missing(self, action_plan: Dict):
+        """Find and report missing values"""
+        missing_counts = self.df.isnull().sum()
+        missing_cols = missing_counts[missing_counts > 0]
+        
+        if len(missing_cols) == 0:
+            self.summary.append("No missing values found")
+        else:
+            self.summary.append(f"Found missing values in {len(missing_cols)} columns:")
+            for col, count in missing_cols.items():
+                percentage = (count / len(self.df)) * 100
+                self.summary.append(f"  - {col}: {count} ({percentage:.1f}%)")
+        
+        # Create a summary dataframe
+        if len(missing_cols) > 0:
+            missing_df = pd.DataFrame({
+                'Column': missing_cols.index,
+                'Missing_Count': missing_cols.values,
+                'Missing_Percentage': [(count / len(self.df)) * 100 for count in missing_cols.values]
+            })
+            self.df = missing_df
+    
+    def _execute_transform(self, action_plan: Dict):
+        """Execute transformation operations"""
+        steps = action_plan.get("steps", [])
+        
+        for step in steps:
+            step_lower = step.lower()
+            if "pivot" in step_lower:
+                # Simple pivot - would need more context in real implementation
+                self.summary.append("Transform: Pivot operation (not fully implemented)")
+            elif "normalize" in step_lower:
+                # Normalize numeric columns
+                numeric_cols = self.df.select_dtypes(include=[np.number]).columns
+                for col in numeric_cols:
+                    self.df[col] = (self.df[col] - self.df[col].min()) / (self.df[col].max() - self.df[col].min())
+                self.summary.append(f"Normalized {len(numeric_cols)} numeric columns")
+            else:
+                self.summary.append(f"Transform step: {step}")
+    
+    def save_processed_file(self, output_path: str) -> str:
+        """
+        Save processed dataframe to Excel file
+        
+        Args:
+            output_path: Path to save output file
+            
+        Returns:
+            Path to saved file
+        """
+        if self.df is None:
+            raise ValueError("No data to save")
+        
+        try:
+            # Ensure directory exists
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            
+            # Save to Excel with formatting
+            with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+                self.df.to_excel(writer, sheet_name='Processed Data', index=False)
+                
+                # Get workbook and worksheet
+                workbook = writer.book
+                worksheet = writer.sheets['Processed Data']
+                
+                # Format header row
+                header_format = workbook.add_format({
+                    'bold': True,
+                    'bg_color': '#D7E4BC',
+                    'border': 1
+                })
+                
+                for col_num, value in enumerate(self.df.columns.values):
+                    worksheet.write(0, col_num, value, header_format)
+                
+                # Apply custom formatting rules
+                self._apply_formatting_rules(workbook, worksheet)
+                
+                # Apply conditional formatting
+                self._apply_conditional_formatting(workbook, worksheet)
+                
+                # Auto-adjust column widths
+                for i, col in enumerate(self.df.columns):
+                    max_length = max(
+                        self.df[col].astype(str).map(len).max(),
+                        len(str(col))
+                    )
+                    worksheet.set_column(i, i, min(max_length + 2, 50))
+            
+            return output_path
+            
+        except Exception as e:
+            raise RuntimeError(f"Failed to save processed file: {str(e)}")
+    
+    def get_dataframe(self) -> pd.DataFrame:
+        """Get current dataframe"""
+        if self.df is None:
+            raise ValueError("Data not loaded")
+        return self.df
+    
+    def get_summary(self) -> List[str]:
+        """Get processing summary"""
+        return self.summary
+    
+    def _apply_formatting_rules(self, workbook, worksheet):
+        """Apply stored formatting rules to worksheet"""
+        for rule in self.formatting_rules:
+            if rule.get("type") != "format":
+                continue
+            
+            fmt_config = rule.get("formatting", {})
+            range_info = rule.get("range", {})
+            
+            # Create format object
+            cell_format = workbook.add_format()
+            
+            if fmt_config.get("bold"):
+                cell_format.set_bold()
+            if fmt_config.get("italic"):
+                cell_format.set_italic()
+            if fmt_config.get("text_color"):
+                cell_format.set_font_color(fmt_config["text_color"])
+            if fmt_config.get("bg_color"):
+                cell_format.set_bg_color(fmt_config["bg_color"])
+            if fmt_config.get("font_size"):
+                cell_format.set_font_size(fmt_config["font_size"])
+            if fmt_config.get("borders"):
+                cell_format.set_border(1)
+            if fmt_config.get("wrap_text"):
+                cell_format.set_text_wrap()
+            
+            align = fmt_config.get("align", "left")
+            if align == "center":
+                cell_format.set_align("center")
+            elif align == "right":
+                cell_format.set_align("right")
+            else:
+                cell_format.set_align("left")
+            
+            # Apply formatting to range
+            if "column" in range_info:
+                col_name = range_info["column"]
+                if col_name in self.df.columns:
+                    col_idx = list(self.df.columns).index(col_name)
+                    # Format entire column (skip header row)
+                    for row_idx in range(1, len(self.df) + 1):
+                        worksheet.write(row_idx, col_idx, self.df.iloc[row_idx - 1, col_idx], cell_format)
+            
+            elif "row" in range_info:
+                row_idx = range_info["row"]
+                if 0 <= row_idx < len(self.df):
+                    # Format entire row (add 1 for header)
+                    excel_row = row_idx + 1
+                    for col_idx in range(len(self.df.columns)):
+                        worksheet.write(excel_row, col_idx, self.df.iloc[row_idx, col_idx], cell_format)
+            
+            elif "cells" in range_info:
+                cells = range_info["cells"]
+                for cell in cells:
+                    row_idx = cell.get("row")
+                    col_name = cell.get("column")
+                    if col_name in self.df.columns and 0 <= row_idx < len(self.df):
+                        col_idx = list(self.df.columns).index(col_name)
+                        excel_row = row_idx + 1
+                        worksheet.write(excel_row, col_idx, self.df.iloc[row_idx, col_idx], cell_format)
+            
+            # Handle merge cells
+            if fmt_config.get("merge_cells") and "cells" in range_info:
+                cells = range_info["cells"]
+                if len(cells) >= 2:
+                    # Get first and last cell positions
+                    first_cell = cells[0]
+                    last_cell = cells[-1]
+                    first_row = first_cell.get("row", 0) + 1  # +1 for header
+                    first_col = list(self.df.columns).index(first_cell.get("column")) if first_cell.get("column") in self.df.columns else 0
+                    last_row = last_cell.get("row", 0) + 1
+                    last_col = list(self.df.columns).index(last_cell.get("column")) if last_cell.get("column") in self.df.columns else len(self.df.columns) - 1
+                    worksheet.merge_range(first_row, first_col, last_row, last_col, "", cell_format)
+    
+    def _apply_conditional_formatting(self, workbook, worksheet):
+        """Apply conditional formatting rules"""
+        for rule in self.formatting_rules:
+            if rule.get("type") != "conditional":
+                continue
+            
+            format_type = rule.get("format_type")
+            config = rule.get("config", {})
+            
+            if format_type == "duplicates":
+                column = config.get("column")
+                bg_color = config.get("bg_color", "#FFFF00")
+                if column in self.df.columns:
+                    col_idx = list(self.df.columns).index(column)
+                    # Find duplicate values
+                    duplicates = self.df[column].duplicated(keep=False)
+                    for row_idx in range(len(self.df)):
+                        if duplicates.iloc[row_idx]:
+                            excel_row = row_idx + 1
+                            dup_format = workbook.add_format({'bg_color': bg_color})
+                            worksheet.write(excel_row, col_idx, self.df.iloc[row_idx, col_idx], dup_format)
+            
+            elif format_type == "greater_than":
+                column = config.get("column")
+                value = config.get("value")
+                bg_color = config.get("bg_color", "#FF0000")
+                if column in self.df.columns:
+                    col_idx = list(self.df.columns).index(column)
+                    # Convert to numeric if possible
+                    try:
+                        numeric_col = pd.to_numeric(self.df[column], errors='coerce')
+                        for row_idx in range(len(self.df)):
+                            if pd.notna(numeric_col.iloc[row_idx]) and numeric_col.iloc[row_idx] > value:
+                                excel_row = row_idx + 1
+                                gt_format = workbook.add_format({'bg_color': bg_color})
+                                worksheet.write(excel_row, col_idx, self.df.iloc[row_idx, col_idx], gt_format)
+                    except:
+                        pass  # Skip if can't convert to numeric
+    
+    def _execute_delete_rows(self, action_plan: Dict):
+        """Execute delete rows operation"""
+        delete_rows = action_plan.get("delete_rows", {})
+        
+        initial_rows = len(self.df)
+        
+        if "start_row" in delete_rows and "end_row" in delete_rows:
+            # Delete range of rows (0-indexed)
+            start = delete_rows["start_row"]
+            end = delete_rows["end_row"] + 1  # +1 because end is inclusive
+            # Ensure valid range
+            start = max(0, min(start, len(self.df)))
+            end = max(start, min(end, len(self.df)))
+            self.df = self.df.drop(self.df.index[start:end])
+            self.summary.append(f"Deleted rows {start + 1} to {end} (0-indexed: {start} to {end - 1})")
+        elif "row_indices" in delete_rows:
+            # Delete specific row indices (0-indexed)
+            indices = delete_rows["row_indices"]
+            # Filter out invalid indices
+            valid_indices = [idx for idx in indices if 0 <= idx < len(self.df)]
+            if valid_indices:
+                self.df = self.df.drop(self.df.index[valid_indices])
+                self.summary.append(f"Deleted {len(valid_indices)} row(s) at indices: {valid_indices}")
+            else:
+                self.summary.append("No valid row indices to delete")
+        else:
+            self.summary.append("Delete rows: No valid row specification provided")
+        
+        deleted_count = initial_rows - len(self.df)
+        if deleted_count > 0:
+            self.summary.append(f"Result: {len(self.df)} rows remaining (deleted {deleted_count})")
+    
+    def _execute_add_row(self, action_plan: Dict):
+        """Execute add row operation"""
+        add_row = action_plan.get("add_row", {})
+        
+        position = add_row.get("position", -1)  # -1 means append at end
+        row_data = add_row.get("data", {})
+        
+        # Create new row with default values for all columns
+        new_row = {}
+        for col in self.df.columns:
+            new_row[col] = row_data.get(col, "")
+        
+        # Insert at specified position or append
+        if position == -1 or position >= len(self.df):
+            # Append at end
+            self.df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
+            self.summary.append(f"Added new row at the end with {len(row_data)} specified values")
+        else:
+            # Insert at position
+            position = max(0, min(position, len(self.df)))
+            self.df = pd.concat([
+                self.df.iloc[:position],
+                pd.DataFrame([new_row]),
+                self.df.iloc[position:]
+            ], ignore_index=True)
+            self.summary.append(f"Added new row at position {position + 1} (0-indexed: {position})")
+        
+        self.summary.append(f"Total rows: {len(self.df)}")
+    
+    def _execute_add_column(self, action_plan: Dict):
+        """Execute add column operation"""
+        add_column = action_plan.get("add_column", {})
+        
+        column_name = add_column.get("name", "NewColumn")
+        position = add_column.get("position", -1)  # -1 means append at end
+        default_value = add_column.get("default_value", "")
+        
+        # Check if column already exists
+        if column_name in self.df.columns:
+            # If exists, just fill with default value
+            self.df[column_name] = default_value
+            self.summary.append(f"Column '{column_name}' already exists, filled with default value")
+        else:
+            # Add new column
+            if position == -1 or position >= len(self.df.columns):
+                # Append at end
+                self.df[column_name] = default_value
+                self.summary.append(f"Added new column '{column_name}' at the end")
+            else:
+                # Insert at position
+                position = max(0, min(position, len(self.df.columns)))
+                cols = list(self.df.columns)
+                cols.insert(position, column_name)
+                self.df = self.df.reindex(columns=cols)
+                self.df[column_name] = default_value
+                self.summary.append(f"Added new column '{column_name}' at position {position + 1}")
+        
+        self.summary.append(f"Total columns: {len(self.df.columns)}")
+    
+    def _execute_delete_column(self, action_plan: Dict):
+        """Execute delete column operation"""
+        delete_column = action_plan.get("delete_column", {})
+        
+        column_name = delete_column.get("column_name")
+        
+        if not column_name:
+            self.summary.append("Delete column: No column name specified")
+            return
+        
+        if column_name not in self.df.columns:
+            raise ValueError(f"Column '{column_name}' not found")
+        
+        self.df = self.df.drop(columns=[column_name])
+        self.summary.append(f"Deleted column '{column_name}'")
+        self.summary.append(f"Total columns: {len(self.df.columns)}")
+    
+    def _execute_edit_cell(self, action_plan: Dict):
+        """Execute edit cell operation"""
+        edit_cell = action_plan.get("edit_cell", {})
+        
+        row_index = edit_cell.get("row_index")
+        column_name = edit_cell.get("column_name")
+        value = edit_cell.get("value")
+        
+        if row_index is None or column_name is None:
+            self.summary.append("Edit cell: Row index or column name not specified")
+            return
+        
+        if column_name not in self.df.columns:
+            raise ValueError(f"Column '{column_name}' not found")
+        
+        if row_index < 0 or row_index >= len(self.df):
+            raise ValueError(f"Row index {row_index} is out of range (0 to {len(self.df) - 1})")
+        
+        old_value = self.df.at[row_index, column_name]
+        self.df.at[row_index, column_name] = value
+        self.summary.append(f"Edited cell at row {row_index + 1}, column '{column_name}': '{old_value}' -> '{value}'")
+    
+    def _execute_clear_cell(self, action_plan: Dict):
+        """Execute clear cell operation"""
+        clear_cell = action_plan.get("clear_cell", {})
+        
+        row_index = clear_cell.get("row_index")
+        column_name = clear_cell.get("column_name")
+        
+        if row_index is None or column_name is None:
+            self.summary.append("Clear cell: Row index or column name not specified")
+            return
+        
+        if column_name not in self.df.columns:
+            raise ValueError(f"Column '{column_name}' not found")
+        
+        if row_index < 0 or row_index >= len(self.df):
+            raise ValueError(f"Row index {row_index} is out of range (0 to {len(self.df) - 1})")
+        
+        old_value = self.df.at[row_index, column_name]
+        self.df.at[row_index, column_name] = ""
+        self.summary.append(f"Cleared cell at row {row_index + 1}, column '{column_name}' (was: '{old_value}')")
+    
+    def _execute_auto_fill(self, action_plan: Dict):
+        """Execute auto-fill operation (fill cells down a column)"""
+        auto_fill = action_plan.get("auto_fill", {})
+        
+        column_name = auto_fill.get("column_name")
+        start_row = auto_fill.get("start_row", 0)
+        end_row = auto_fill.get("end_row", len(self.df) - 1)
+        
+        if not column_name:
+            self.summary.append("Auto-fill: No column name specified")
+            return
+        
+        if column_name not in self.df.columns:
+            raise ValueError(f"Column '{column_name}' not found")
+        
+        # Ensure valid range
+        start_row = max(0, min(start_row, len(self.df) - 1))
+        end_row = max(start_row, min(end_row, len(self.df) - 1))
+        
+        # Get the source value (from start_row)
+        source_value = self.df.at[start_row, column_name]
+        
+        # Fill down from start_row to end_row
+        for i in range(start_row + 1, end_row + 1):
+            self.df.at[i, column_name] = source_value
+        
+        filled_count = end_row - start_row
+        self.summary.append(f"Auto-filled column '{column_name}' from row {start_row + 1} to {end_row + 1} with value '{source_value}' ({filled_count} cells filled)")
+    
+    def _execute_sort(self, action_plan: Dict):
+        """Execute sort operation (A→Z, Z→A, numbers, dates, multi-column)"""
+        sort_config = action_plan.get("sort", {})
+        columns = sort_config.get("columns", [])
+        
+        if not columns:
+            self.summary.append("Sort: No columns specified for sorting")
+            return
+        
+        # Validate all columns exist
+        for col_config in columns:
+            col_name = col_config.get("column_name")
+            if col_name not in self.df.columns:
+                raise ValueError(f"Column '{col_name}' not found for sorting")
+        
+        # Build sort parameters
+        sort_by = []
+        ascending = []
+        
+        for col_config in columns:
+            col_name = col_config.get("column_name")
+            order = col_config.get("order", "asc").lower()
+            data_type = col_config.get("data_type", "auto").lower()
+            
+            # Determine ascending/descending
+            is_ascending = order in ["asc", "ascending", "a→z", "a-z", "small to big", "small→big"]
+            
+            # Handle data type conversion if needed
+            if data_type == "date":
+                # Try to convert to datetime
+                try:
+                    self.df[col_name] = pd.to_datetime(self.df[col_name], errors='coerce')
+                except:
+                    pass  # If conversion fails, sort as-is
+            elif data_type == "number":
+                # Try to convert to numeric
+                try:
+                    self.df[col_name] = pd.to_numeric(self.df[col_name], errors='coerce')
+                except:
+                    pass  # If conversion fails, sort as-is
+            
+            sort_by.append(col_name)
+            ascending.append(is_ascending)
+        
+        # Perform multi-column sort
+        self.df = self.df.sort_values(by=sort_by, ascending=ascending, na_position='last').reset_index(drop=True)
+        
+        # Build summary message
+        sort_descriptions = []
+        for i, col_config in enumerate(columns):
+            col_name = col_config.get("column_name")
+            order = col_config.get("order", "asc").lower()
+            data_type = col_config.get("data_type", "auto").lower()
+            
+            if order in ["asc", "ascending", "a→z", "a-z", "small to big", "small→big"]:
+                if data_type == "number":
+                    order_desc = "small to big"
+                elif data_type == "date":
+                    order_desc = "oldest to newest"
+                else:
+                    order_desc = "A to Z"
+            else:
+                if data_type == "number":
+                    order_desc = "big to small"
+                elif data_type == "date":
+                    order_desc = "newest to oldest"
+                else:
+                    order_desc = "Z to A"
+            
+            sort_descriptions.append(f"'{col_name}' {order_desc}")
+        
+        if len(sort_descriptions) == 1:
+            self.summary.append(f"Sorted by {sort_descriptions[0]}")
+        else:
+            self.summary.append(f"Multi-column sorted by: {', '.join(sort_descriptions)}")
+        
+        self.summary.append(f"Total rows: {len(self.df)}")
+    
+    def _execute_formula(self, action_plan: Dict):
+        """Execute formula operations using FormulaEngine"""
+        formula_config = action_plan.get("formula", {})
+        
+        if not formula_config:
+            self.summary.append("Formula: No formula configuration specified")
+            return
+        
+        formula_type = formula_config.get("type", "").lower()
+        params = formula_config.get("parameters", {})
+        column = formula_config.get("column")
+        columns = formula_config.get("columns", [])
+        
+        try:
+            # Basic Math Formulas
+            if formula_type == "sum":
+                if not column:
+                    raise ValueError("Column required for SUM")
+                result = FormulaEngine.SUM(self.df, column)
+                self.formula_result = result
+                self.summary.append(f"SUM({column}) = {result}")
+            
+            elif formula_type == "average":
+                if not column:
+                    raise ValueError("Column required for AVERAGE")
+                # Apply filter if specified
+                df_to_use = self.df
+                if params.get("filter_column") and params.get("condition") and params.get("value"):
+                    filter_col = params["filter_column"]
+                    condition = params["condition"]
+                    value = params["value"]
+                    if condition == "==":
+                        df_to_use = self.df[self.df[filter_col] == value]
+                    elif condition == "!=":
+                        df_to_use = self.df[self.df[filter_col] != value]
+                result = FormulaEngine.AVERAGE(df_to_use, column)
+                self.formula_result = result
+                self.summary.append(f"AVERAGE({column}) = {result}")
+            
+            elif formula_type == "min":
+                if not column:
+                    raise ValueError("Column required for MIN")
+                result = FormulaEngine.MIN(self.df, column)
+                self.formula_result = result
+                self.summary.append(f"MIN({column}) = {result}")
+            
+            elif formula_type == "max":
+                if not column:
+                    raise ValueError("Column required for MAX")
+                result = FormulaEngine.MAX(self.df, column)
+                self.formula_result = result
+                self.summary.append(f"MAX({column}) = {result}")
+            
+            elif formula_type == "count":
+                if not column:
+                    raise ValueError("Column required for COUNT")
+                result = FormulaEngine.COUNT(self.df, column)
+                self.formula_result = result
+                self.summary.append(f"COUNT({column}) = {result}")
+            
+            elif formula_type == "countif":
+                if not column:
+                    raise ValueError("Column required for COUNTIF")
+                condition = params.get("condition", "==")
+                value = params.get("value")
+                result = FormulaEngine.COUNTIF(self.df, column, condition, value)
+                self.formula_result = result
+                self.summary.append(f"COUNTIF({column} {condition} {value}) = {result}")
+            
+            elif formula_type == "counta":
+                if not column:
+                    raise ValueError("Column required for COUNTA")
+                result = FormulaEngine.COUNTA(self.df, column)
+                self.formula_result = result
+                self.summary.append(f"COUNTA({column}) = {result}")
+            
+            elif formula_type == "unique":
+                if not column:
+                    raise ValueError("Column required for UNIQUE")
+                result = FormulaEngine.UNIQUE(self.df, column)
+                self.formula_result = result
+                self.summary.append(f"UNIQUE({column}) = {len(result)} unique values")
+            
+            elif formula_type == "round":
+                if not column:
+                    raise ValueError("Column required for ROUND")
+                decimals = params.get("decimals", 0)
+                self.df = FormulaEngine.ROUND(self.df, column, decimals)
+                self.summary.append(f"ROUND({column}, {decimals}) applied")
+            
+            # Text Functions
+            elif formula_type == "concat":
+                if not columns:
+                    raise ValueError("Columns required for CONCAT")
+                separator = params.get("separator", "")
+                self.df = FormulaEngine.CONCAT(self.df, columns, separator)
+                self.summary.append(f"CONCAT({', '.join(columns)}) applied")
+            
+            elif formula_type == "textjoin":
+                if not columns:
+                    raise ValueError("Columns required for TEXTJOIN")
+                separator = params.get("separator", ", ")
+                self.df = FormulaEngine.TEXTJOIN(self.df, columns, separator)
+                self.summary.append(f"TEXTJOIN({', '.join(columns)}) applied")
+            
+            elif formula_type == "left":
+                if not column:
+                    raise ValueError("Column required for LEFT")
+                num_chars = params.get("num_chars", 1)
+                self.df = FormulaEngine.LEFT(self.df, column, num_chars)
+                self.summary.append(f"LEFT({column}, {num_chars}) applied")
+            
+            elif formula_type == "right":
+                if not column:
+                    raise ValueError("Column required for RIGHT")
+                num_chars = params.get("num_chars", 1)
+                self.df = FormulaEngine.RIGHT(self.df, column, num_chars)
+                self.summary.append(f"RIGHT({column}, {num_chars}) applied")
+            
+            elif formula_type == "mid":
+                if not column:
+                    raise ValueError("Column required for MID")
+                start = params.get("start", 1)
+                num_chars = params.get("num_chars", 1)
+                self.df = FormulaEngine.MID(self.df, column, start, num_chars)
+                self.summary.append(f"MID({column}, {start}, {num_chars}) applied")
+            
+            elif formula_type == "trim":
+                if not column:
+                    raise ValueError("Column required for TRIM")
+                self.df = FormulaEngine.TRIM(self.df, column)
+                self.summary.append(f"TRIM({column}) applied")
+            
+            elif formula_type == "lower":
+                if not column:
+                    raise ValueError("Column required for LOWER")
+                self.df = FormulaEngine.LOWER(self.df, column)
+                self.summary.append(f"LOWER({column}) applied")
+            
+            elif formula_type == "upper":
+                if not column:
+                    raise ValueError("Column required for UPPER")
+                self.df = FormulaEngine.UPPER(self.df, column)
+                self.summary.append(f"UPPER({column}) applied")
+            
+            elif formula_type == "proper":
+                if not column:
+                    raise ValueError("Column required for PROPER")
+                self.df = FormulaEngine.PROPER(self.df, column)
+                self.summary.append(f"PROPER({column}) applied")
+            
+            elif formula_type == "find":
+                if not column:
+                    raise ValueError("Column required for FIND")
+                search_text = params.get("search_text", "")
+                case_sensitive = params.get("case_sensitive", True)
+                self.df = FormulaEngine.FIND(self.df, column, search_text, case_sensitive)
+                self.summary.append(f"FIND({column}, '{search_text}') applied")
+            
+            elif formula_type == "search":
+                if not column:
+                    raise ValueError("Column required for SEARCH")
+                search_text = params.get("search_text", "")
+                self.df = FormulaEngine.SEARCH(self.df, column, search_text)
+                self.summary.append(f"SEARCH({column}, '{search_text}') applied")
+            
+            # Date & Time Functions
+            elif formula_type == "today":
+                result = FormulaEngine.TODAY()
+                self.formula_result = result
+                self.summary.append(f"TODAY() = {result}")
+            
+            elif formula_type == "now":
+                result = FormulaEngine.NOW()
+                self.formula_result = result
+                self.summary.append(f"NOW() = {result}")
+            
+            elif formula_type == "year":
+                if not column:
+                    raise ValueError("Column required for YEAR")
+                self.df = FormulaEngine.YEAR(self.df, column)
+                self.summary.append(f"YEAR({column}) applied")
+            
+            elif formula_type == "month":
+                if not column:
+                    raise ValueError("Column required for MONTH")
+                self.df = FormulaEngine.MONTH(self.df, column)
+                self.summary.append(f"MONTH({column}) applied")
+            
+            elif formula_type == "day":
+                if not column:
+                    raise ValueError("Column required for DAY")
+                self.df = FormulaEngine.DAY(self.df, column)
+                self.summary.append(f"DAY({column}) applied")
+            
+            elif formula_type == "datedif":
+                start_column = params.get("start_column") or column
+                end_column = params.get("end_column")
+                if not start_column or not end_column:
+                    raise ValueError("start_column and end_column required for DATEDIF")
+                unit = params.get("unit", "days")
+                self.df = FormulaEngine.DATEDIF(self.df, start_column, end_column, unit)
+                self.summary.append(f"DATEDIF({start_column}, {end_column}, {unit}) applied")
+            
+            # Logical Functions
+            elif formula_type == "if":
+                if not column:
+                    raise ValueError("Column required for IF")
+                condition = params.get("condition", "==")
+                value = params.get("value")
+                true_value = params.get("true_value")
+                false_value = params.get("false_value")
+                self.df = FormulaEngine.IF(self.df, column, condition, value, true_value, false_value)
+                self.summary.append(f"IF({column} {condition} {value}) applied")
+            
+            elif formula_type == "and":
+                if not columns:
+                    raise ValueError("Columns required for AND")
+                conditions = params.get("conditions", [])
+                values = params.get("values", [])
+                self.df = FormulaEngine.AND(self.df, columns, conditions, values)
+                self.summary.append(f"AND({', '.join(columns)}) applied")
+            
+            elif formula_type == "or":
+                if not columns:
+                    raise ValueError("Columns required for OR")
+                conditions = params.get("conditions", [])
+                values = params.get("values", [])
+                self.df = FormulaEngine.OR(self.df, columns, conditions, values)
+                self.summary.append(f"OR({', '.join(columns)}) applied")
+            
+            elif formula_type == "not":
+                if not column:
+                    raise ValueError("Column required for NOT")
+                self.df = FormulaEngine.NOT(self.df, column)
+                self.summary.append(f"NOT({column}) applied")
+            
+            # Lookup Functions
+            elif formula_type == "vlookup":
+                lookup_value = params.get("lookup_value")
+                lookup_column = params.get("lookup_column")
+                return_column = params.get("return_column")
+                exact_match = params.get("exact_match", True)
+                if not all([lookup_value, lookup_column, return_column]):
+                    raise ValueError("lookup_value, lookup_column, and return_column required for VLOOKUP")
+                result = FormulaEngine.VLOOKUP(self.df, lookup_value, lookup_column, return_column, exact_match)
+                self.formula_result = result
+                self.summary.append(f"VLOOKUP({lookup_value}, {lookup_column}, {return_column}) = {result}")
+            
+            elif formula_type == "xlookup":
+                lookup_value = params.get("lookup_value")
+                lookup_column = params.get("lookup_column")
+                return_column = params.get("return_column")
+                not_found = params.get("not_found")
+                if not all([lookup_value, lookup_column, return_column]):
+                    raise ValueError("lookup_value, lookup_column, and return_column required for XLOOKUP")
+                result = FormulaEngine.XLOOKUP(self.df, lookup_value, lookup_column, return_column, not_found)
+                self.formula_result = result
+                self.summary.append(f"XLOOKUP({lookup_value}, {lookup_column}, {return_column}) = {result}")
+            
+            # Data Cleaning
+            elif formula_type == "remove_duplicates":
+                if columns:
+                    self.df = FormulaEngine.remove_duplicates(self.df, columns)
+                    self.summary.append(f"Removed duplicates based on {', '.join(columns)}")
+                else:
+                    self.df = FormulaEngine.remove_duplicates(self.df)
+                    self.summary.append("Removed duplicate rows")
+            
+            elif formula_type == "highlight_duplicates":
+                if not column:
+                    raise ValueError("Column required for highlight_duplicates")
+                self.df = FormulaEngine.highlight_duplicates(self.df, column)
+                self.summary.append(f"Highlighted duplicates in {column}")
+            
+            elif formula_type == "remove_empty_rows":
+                initial_rows = len(self.df)
+                self.df = FormulaEngine.remove_empty_rows(self.df)
+                removed = initial_rows - len(self.df)
+                self.summary.append(f"Removed {removed} empty rows")
+            
+            elif formula_type == "normalize_text":
+                if not column:
+                    raise ValueError("Column required for normalize_text")
+                self.df = FormulaEngine.normalize_text(self.df, column)
+                self.summary.append(f"Normalized text in {column}")
+            
+            elif formula_type == "fix_date_formats":
+                if not column:
+                    raise ValueError("Column required for fix_date_formats")
+                target_format = params.get("target_format", "%Y-%m-%d")
+                self.df = FormulaEngine.fix_date_formats(self.df, column, target_format)
+                self.summary.append(f"Fixed date formats in {column}")
+            
+            elif formula_type == "convert_text_to_numbers":
+                if not column:
+                    raise ValueError("Column required for convert_text_to_numbers")
+                self.df = FormulaEngine.convert_text_to_numbers(self.df, column)
+                self.summary.append(f"Converted text to numbers in {column}")
+            
+            # Grouping & Summaries
+            elif formula_type == "group_by_category":
+                if not column:
+                    raise ValueError("Column required for group_by_category")
+                agg_function = params.get("agg_function", "count")
+                agg_column = params.get("agg_column")
+                self.df = FormulaEngine.group_by_category(self.df, column, agg_function, agg_column)
+                self.summary.append(f"Grouped by {column} with {agg_function} aggregation")
+            
+            # Additional Operations
+            elif formula_type == "sort":
+                if not column:
+                    raise ValueError("Column required for SORT")
+                ascending = params.get("ascending", True)
+                if isinstance(ascending, str):
+                    ascending = ascending.lower() in ["asc", "ascending", "true", "1"]
+                limit = params.get("limit")
+                self.df = FormulaEngine.SORT(self.df, column, ascending, limit)
+                order = "ascending" if ascending else "descending"
+                limit_text = f" (top {limit})" if limit else ""
+                self.summary.append(f"Sorted by {column} {order}{limit_text}")
+            
+            elif formula_type == "filter":
+                if not column:
+                    raise ValueError("Column required for FILTER")
+                condition = params.get("condition", "==")
+                value = params.get("value")
+                initial_rows = len(self.df)
+                self.df = FormulaEngine.FILTER(self.df, column, condition, value)
+                filtered_rows = len(self.df)
+                removed = initial_rows - filtered_rows
+                self.summary.append(f"Filtered '{column}' {condition} {value}: {filtered_rows} rows (removed {removed})")
+            
+            else:
+                raise ValueError(f"Unsupported formula type: {formula_type}")
+        
+        except Exception as e:
+            raise RuntimeError(f"Formula execution failed: {str(e)}")
+
+

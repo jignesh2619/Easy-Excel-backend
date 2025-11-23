@@ -1,0 +1,74 @@
+name: Deploy Backend to DigitalOcean Droplet
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Deploy to Droplet
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.DROPLET_HOST }}
+        username: ${{ secrets.DROPLET_USER }}
+        key: ${{ secrets.DROPLET_SSH_KEY }}
+        script: |
+          # Navigate to app directory
+          cd /opt/easyexcel-backend || {
+            echo "Creating app directory..."
+            mkdir -p /opt/easyexcel-backend
+            cd /opt/easyexcel-backend
+            git clone https://github.com/${{ github.repository }}.git .
+          }
+          
+          # Pull latest code
+          echo "Pulling latest code..."
+          git fetch origin
+          git reset --hard origin/main
+          
+          # Activate virtual environment or use system Python
+          if [ -d "venv" ]; then
+            source venv/bin/activate
+          else
+            echo "Creating virtual environment..."
+            python3.11 -m venv venv
+            source venv/bin/activate
+          fi
+          
+          # Install/update dependencies
+          echo "Installing dependencies..."
+          pip install --upgrade pip
+          pip install -r requirements.txt --quiet
+          
+          # Load environment variables from .env file
+          if [ -f .env ]; then
+            export $(cat .env | grep -v '^#' | xargs)
+          fi
+          
+          # Restart the service
+          echo "Restarting service..."
+          sudo systemctl restart easyexcel-backend || {
+            echo "Service not found, starting manually..."
+            # If systemd service doesn't exist, run directly
+            pkill -f "python.*start_server.py" || true
+            nohup python start_server.py > /var/log/easyexcel-backend.log 2>&1 &
+          }
+          
+          # Wait a moment and check if service is running
+          sleep 3
+          if curl -f http://localhost:8000/health > /dev/null 2>&1; then
+            echo "✅ Deployment successful! Service is running."
+          else
+            echo "⚠️  Service may not be running. Check logs:"
+            tail -n 20 /var/log/easyexcel-backend.log
+            exit 1
+          fi
+

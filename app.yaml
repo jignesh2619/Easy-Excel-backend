@@ -1,0 +1,51 @@
+name: easyexcel-backend
+services:
+- name: api
+  github:
+    repo: your-username/your-repo-name
+    branch: main
+    deploy_on_push: true
+  run_command: python start_server.py
+  environment_slug: python
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  http_port: 8080
+  health_check:
+    http_path: /health
+    initial_delay_seconds: 10
+    period_seconds: 10
+    timeout_seconds: 3
+    success_threshold: 1
+    failure_threshold: 3
+  envs:
+  - key: GEMINI_API_KEY
+    value: your_actual_gemini_key
+    scope: RUN_TIME
+    type: SECRET
+  - key: PORT
+    value: "8080"
+    scope: RUN_TIME
+  - key: PAYPAL_CLIENT_ID
+    value: ATEF1de5CXpZ5E7PXmkXqqmFXor69bPrpJOrr9ZpHXH55ZlPWNmiYfJGDUOOaXTgIGSBN70P5EP4hfDL
+    scope: RUN_TIME
+    type: SECRET
+  - key: PAYPAL_CLIENT_SECRET
+    value: EIsw28kLVXE9u08OPsv8ZLQzzjVR9YgU_QBbvKmFNMA24xadoLrNNz3H0x47smXPJZ0AWRaHaIRjfKAr
+    scope: RUN_TIME
+    type: SECRET
+  - key: PAYPAL_MODE
+    value: sandbox
+    scope: RUN_TIME
+  - key: PAYPAL_PLAN_ID_STARTER
+    value: your_starter_plan_id
+    scope: RUN_TIME
+  - key: PAYPAL_PLAN_ID_PRO
+    value: your_pro_plan_id
+    scope: RUN_TIME
+  - key: PAYPAL_RETURN_URL
+    value: https://your-frontend-domain.vercel.app/payment/success
+    scope: RUN_TIME
+  - key: PAYPAL_CANCEL_URL
+    value: https://your-frontend-domain.vercel.app/payment/cancel
+    scope: RUN_TIME
+
