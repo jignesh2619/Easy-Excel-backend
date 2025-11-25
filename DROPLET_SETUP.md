@@ -266,3 +266,7 @@ sudo kill -9 PID
 4. ✅ Set up GitHub Actions for auto-deploy
 5. ✅ Configure custom domain (optional)
 
+
+
+
+

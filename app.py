@@ -12,7 +12,10 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import os
 import traceback
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 import sys
 from pathlib import Path
@@ -53,18 +56,38 @@ user_service = UserService()
 security = HTTPBearer(auto_error=False)
 
 def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Dict[str, Any]:
-    """Get current user from API key."""
+    """
+    Get current user from Supabase Auth token or API key.
+    Supports both Supabase Auth tokens and legacy API keys.
+    """
     if not credentials:
-        raise HTTPException(status_code=401, detail="API key required. Please provide your API key in the Authorization header.")
+        raise HTTPException(status_code=401, detail="Authentication required. Please provide your access token in the Authorization header.")
     
-    api_key = credentials.credentials
-    user = user_service.get_user_by_api_key(api_key)
+    token = credentials.credentials
     
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    # Try Supabase Auth token first (format: Bearer <token>)
+    try:
+        from services.supabase_client import SupabaseClient
+        supabase = SupabaseClient.get_client()
+        
+        # Verify token and get user
+        user_info = supabase.auth.get_user(token)
+        
+        if user_info and user_info.user:
+            # Get user from our database
+            user = user_service.get_user_by_supabase_id(user_info.user.id)
+            if user:
+                return user
+    except Exception:
+        # If Supabase auth fails, try API key (legacy support)
+        pass
     
-    return user
-user_service = UserService()
+    # Fallback to API key authentication (legacy)
+    user = user_service.get_user_by_api_key(token)
+    if user:
+        return user
+    
+    raise HTTPException(status_code=401, detail="Invalid authentication token")
 
 # Initialize LLM agent with Google Gemini (will raise error if API key not set)
 try:
@@ -111,7 +134,8 @@ async def health():
 @app.post("/process-file", response_model=ProcessFileResponse)
 async def process_file(
     file: UploadFile = File(...),
-    prompt: str = Form(...)
+    prompt: str = Form(...),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ):
     """
     Process uploaded Excel/CSV file based on user prompt
@@ -162,17 +186,21 @@ async def process_file(
                 file_manager.delete_file(temp_file_path)
                 raise HTTPException(status_code=400, detail=error)
         
-        # 7. Check subscription and token limits
+        # 7. Check subscription and token limits if a valid API key is provided
         # Estimate tokens needed (rough estimate: 100 tokens per row + prompt tokens)
         estimated_tokens = len(df) * 100 + len(prompt) * 2
-        token_check = user_service.check_token_limit(user["user_id"], estimated_tokens)
+        user = None
+        if credentials and credentials.credentials:
+            user = user_service.get_user_by_api_key(credentials.credentials)
         
-        if not token_check.get("can_proceed"):
-            file_manager.delete_file(temp_file_path)
-            raise HTTPException(
-                status_code=403,
-                detail=token_check.get("error", "Insufficient tokens. Please upgrade your plan.")
-            )
+        if user:
+            token_check = user_service.check_token_limit(user["user_id"], estimated_tokens)
+            if not token_check.get("can_proceed"):
+                file_manager.delete_file(temp_file_path)
+                raise HTTPException(
+                    status_code=403,
+                    detail=token_check.get("error", "Insufficient tokens. Please upgrade your plan.")
+                )
         
         # 7. Process file
         processor = ExcelProcessor(temp_file_path)
@@ -324,9 +352,10 @@ async def process_file(
         else:
             result_value = processed_data
         
-        # Record token usage
-        actual_tokens_used = estimated_tokens  # In production, calculate actual tokens used
-        user_service.record_token_usage(user["user_id"], actual_tokens_used, "file_processing")
+        # Record token usage if we have an authenticated user
+        if user:
+            actual_tokens_used = estimated_tokens  # In production, calculate actual tokens used
+            user_service.record_token_usage(user["user_id"], actual_tokens_used, "file_processing")
         
         return ProcessFileResponse(
             status="success",
@@ -361,12 +390,16 @@ async def process_file(
 
 
 @app.get("/download/{filename}")
-async def download_file(filename: str):
+async def download_file(
+    filename: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
     """
-    Download processed file
+    Download processed file (requires authentication)
     
     Args:
         filename: Name of file to download
+        user: Authenticated user (from token)
         
     Returns:
         File download response
@@ -384,12 +417,16 @@ async def download_file(filename: str):
 
 
 @app.get("/download/charts/{filename}")
-async def download_chart(filename: str):
+async def download_chart(
+    filename: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
     """
-    Download chart image
+    Download chart image (requires authentication)
     
     Args:
         filename: Name of chart file to download
+        user: Authenticated user (from token)
         
     Returns:
         Chart image download response
@@ -410,6 +447,14 @@ async def download_chart(filename: str):
 class CreateUserRequest(BaseModel):
     email: str
     plan: str = "Free"
+
+class LoginRequest(BaseModel):
+    email: str
+
+class SupabaseAuthRequest(BaseModel):
+    access_token: str  # Supabase Auth access token
+    user_id: str  # Supabase Auth user ID
+    email: str  # User email from Supabase Auth
 
 class CreateSubscriptionRequest(BaseModel):
     plan_name: str
@@ -444,6 +489,98 @@ async def register_user(request: CreateUserRequest):
         raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
 
 
+@app.post("/api/users/login")
+async def login_user(request: LoginRequest):
+    """
+    Login with email (for email/password auth via Supabase).
+    If user doesn't exist, creates a new user with Free plan.
+    
+    Args:
+        request: Login request with email
+        
+    Returns:
+        User data
+    """
+    try:
+        # Check if user exists
+        user = user_service.get_user_by_email(request.email)
+        
+        if not user:
+            # Create new user with Free plan
+            user = user_service.create_user(request.email, "Free")
+        
+        return JSONResponse(content={
+            "status": "success",
+            "user": user
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to login: {str(e)}")
+
+
+@app.post("/api/users/supabase-auth")
+async def supabase_auth(request: SupabaseAuthRequest):
+    """
+    Authenticate with Supabase Auth token.
+    Verifies the token and creates/returns user.
+    
+    Args:
+        request: Supabase auth request with access_token, user_id, and email
+        
+    Returns:
+        User data
+    """
+    try:
+        from services.supabase_client import SupabaseClient
+        import traceback
+        
+        # Verify Supabase token by getting user info
+        supabase = SupabaseClient.get_client()
+        
+        # Verify token and get user - use the access token directly
+        try:
+            user_info = supabase.auth.get_user(request.access_token)
+        except Exception as e:
+            logger.error(f"Supabase get_user error: {e}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=401, detail=f"Invalid Supabase token: {str(e)}")
+        
+        if not user_info or not user_info.user:
+            raise HTTPException(status_code=401, detail="Invalid Supabase token - no user found")
+        
+        # Verify the user ID matches
+        if user_info.user.id != request.user_id:
+            logger.warning(f"User ID mismatch: token user_id={user_info.user.id}, request user_id={request.user_id}")
+            # Still proceed, but use the ID from the token (more trustworthy)
+            actual_user_id = user_info.user.id
+        else:
+            actual_user_id = request.user_id
+        
+        # Get or create user in our database
+        user = user_service.get_user_by_supabase_id(actual_user_id)
+        
+        if not user:
+            # Use email from token if available, otherwise use request email
+            user_email = user_info.user.email or request.email
+            # Create new user with Free plan
+            user = user_service.create_user_from_supabase_auth(
+                actual_user_id,
+                user_email,
+                "Free"
+            )
+        
+        return JSONResponse(content={
+            "status": "success",
+            "user": user
+        })
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Supabase auth endpoint error: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Supabase authentication failed: {str(e)}")
+
+
 @app.get("/api/users/me")
 async def get_current_user_info(user: Dict[str, Any] = Depends(get_current_user)):
     """
@@ -460,12 +597,16 @@ async def get_current_user_info(user: Dict[str, Any] = Depends(get_current_user)
 
 # PayPal Payment Endpoints
 @app.post("/api/payments/create-subscription")
-async def create_subscription(request: CreateSubscriptionRequest):
+async def create_subscription(
+    request: CreateSubscriptionRequest,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+):
     """
     Create a PayPal subscription for a user.
     
     Args:
         request: Subscription request with plan_name, user_email, and optional user_id
+        credentials: Optional authentication token (Bearer token)
         
     Returns:
         Subscription details with approval URL
@@ -477,13 +618,55 @@ async def create_subscription(request: CreateSubscriptionRequest):
                 content={"error": "Free plan does not require payment"}
             )
         
-        # Create or get user
-        user = user_service.create_user(request.user_email, "Free")  # Start with Free, upgrade after payment
-        user_id = request.user_id or user["user_id"]
+        # Try to get authenticated user if token is provided
+        user_id = request.user_id
+        user_email = request.user_email
+        
+        if credentials and credentials.credentials:
+            try:
+                # Get authenticated user
+                authenticated_user = get_current_user(credentials)
+                if authenticated_user:
+                    user_id = authenticated_user.get("user_id")
+                    user_email = authenticated_user.get("email") or user_email
+                    logger.info(f"Using authenticated user: {user_id}")
+            except HTTPException:
+                # If auth fails, continue with provided user_id/email
+                pass
+        
+        # If no user_id provided and not authenticated, create new user
+        if not user_id:
+            # Check if user exists by email first
+            existing_user = user_service.get_user_by_email(user_email)
+            if existing_user:
+                user_id = existing_user["user_id"]
+            else:
+                user = user_service.create_user(user_email, "Free")  # Start with Free, upgrade after payment
+                user_id = user["user_id"]
+        else:
+            # User ID provided - verify user exists by checking email
+            existing_user = user_service.get_user_by_email(user_email)
+            if existing_user and existing_user.get("user_id") == user_id:
+                # User exists and IDs match
+                pass
+            elif existing_user:
+                # Email exists but different user_id - use existing user
+                user_id = existing_user["user_id"]
+            else:
+                # User doesn't exist, but we have user_id from auth - user should exist
+                # Just proceed with the provided user_id
+                pass
+        
+        # Check if PayPal is configured
+        if not paypal_service.api:
+            raise HTTPException(
+                status_code=503,
+                detail="Payment service is not configured. Please contact support or try again later."
+            )
         
         result = paypal_service.create_subscription(
             plan_name=request.plan_name,
-            user_email=request.user_email,
+            user_email=user_email,
             user_id=user_id
         )
         
@@ -494,6 +677,8 @@ async def create_subscription(request: CreateSubscriptionRequest):
             "plan_name": result["plan_name"]
         })
     except Exception as e:
+        logger.error(f"Failed to create subscription: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to create subscription: {str(e)}")
 
 

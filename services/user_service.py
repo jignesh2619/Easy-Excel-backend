@@ -1,81 +1,31 @@
 """
 User and Subscription Management Service
 
-Handles user accounts, API keys, and subscription verification.
+Handles user accounts, API keys, and subscription verification using Supabase.
 """
 
-import sqlite3
 import os
 import secrets
-import hashlib
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
-from pathlib import Path
-import json
+import logging
 
-# Database path
-DB_PATH = Path(__file__).parent.parent / "data" / "users.db"
+from services.supabase_client import SupabaseClient
+
+logger = logging.getLogger(__name__)
 
 
 class UserService:
     """Service for managing users and subscriptions."""
     
     def __init__(self):
-        """Initialize database connection."""
-        # Create data directory if it doesn't exist
-        DB_PATH.parent.mkdir(exist_ok=True)
-        
-        # Initialize database
-        self._init_database()
-    
-    def _init_database(self):
-        """Create database tables if they don't exist."""
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # Users table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                email TEXT UNIQUE NOT NULL,
-                api_key TEXT UNIQUE NOT NULL,
-                plan TEXT NOT NULL DEFAULT 'Free',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # Subscriptions table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS subscriptions (
-                id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                paypal_subscription_id TEXT UNIQUE,
-                plan_name TEXT NOT NULL,
-                status TEXT NOT NULL,
-                tokens_used INTEGER DEFAULT 0,
-                tokens_limit INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            )
-        """)
-        
-        # Token usage tracking
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS token_usage (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT NOT NULL,
-                tokens_used INTEGER NOT NULL,
-                operation TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            )
-        """)
-        
-        conn.commit()
-        conn.close()
+        """Initialize Supabase connection."""
+        try:
+            self.supabase = SupabaseClient.get_client()
+            logger.info("UserService initialized with Supabase.")
+        except ValueError as e:
+            logger.warning(f"Supabase not configured: {e}. User features will be disabled.")
+            self.supabase = None
     
     def create_user(self, email: str, plan: str = "Free") -> Dict[str, Any]:
         """
@@ -88,54 +38,248 @@ class UserService:
         Returns:
             User data with API key
         """
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        if not self.supabase:
+            raise ValueError("Supabase is not configured. Please set SUPABASE_URL and SUPABASE_KEY.")
         
         # Generate unique user ID and API key
         user_id = f"user_{secrets.token_urlsafe(16)}"
         api_key = f"ex_{secrets.token_urlsafe(32)}"
         
         try:
-            cursor.execute("""
-                INSERT INTO users (id, email, api_key, plan)
-                VALUES (?, ?, ?, ?)
-            """, (user_id, email, api_key, plan))
+            # Check if user already exists
+            existing_user = self.supabase.table("users").select("*").eq("email", email).execute()
+            
+            if existing_user.data:
+                # User exists, return existing user
+                user = existing_user.data[0]
+                return {
+                    "user_id": user["id"],
+                    "email": user["email"],
+                    "api_key": user["api_key"],
+                    "plan": user["plan"]
+                }
+            
+            # Create new user
+            user_data = {
+                "id": user_id,
+                "email": email,
+                "api_key": api_key,
+                "plan": plan,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table("users").insert(user_data).execute()
+            
+            if not result.data:
+                raise Exception("Failed to create user")
+            
+            user = result.data[0]
             
             # Create subscription record
             tokens_limit = self._get_tokens_limit(plan)
-            cursor.execute("""
-                INSERT INTO subscriptions (id, user_id, plan_name, status, tokens_limit)
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                f"sub_{secrets.token_urlsafe(16)}",
-                user_id,
-                plan,
-                "active",
-                tokens_limit
-            ))
+            subscription_data = {
+                "id": f"sub_{secrets.token_urlsafe(16)}",
+                "user_id": user_id,
+                "plan_name": plan,
+                "status": "active",
+                "tokens_used": 0,
+                "tokens_limit": tokens_limit,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }
             
-            conn.commit()
+            self.supabase.table("subscriptions").insert(subscription_data).execute()
             
             return {
-                "user_id": user_id,
-                "email": email,
-                "api_key": api_key,
-                "plan": plan
+                "user_id": user["id"],
+                "email": user["email"],
+                "api_key": user["api_key"],
+                "plan": user["plan"]
             }
-        except sqlite3.IntegrityError:
-            # User already exists, get existing user
-            cursor.execute("SELECT id, email, api_key, plan FROM users WHERE email = ?", (email,))
-            row = cursor.fetchone()
-            if row:
-                return {
-                    "user_id": row[0],
-                    "email": row[1],
-                    "api_key": row[2],
-                    "plan": row[3]
-                }
+            
+        except Exception as e:
+            logger.error(f"Error creating user: {e}")
             raise
-        finally:
-            conn.close()
+    
+    def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """
+        Get user by email.
+        
+        Args:
+            email: User's email address
+            
+        Returns:
+            User data or None if not found
+        """
+        if not self.supabase:
+            return None
+        
+        try:
+            user_result = self.supabase.table("users").select("*").eq("email", email).execute()
+            
+            if not user_result.data:
+                return None
+            
+            user = user_result.data[0]
+            user_id = user["id"]
+            
+            # Get latest subscription for this user
+            subscription_result = self.supabase.table("subscriptions").select("*").eq(
+                "user_id", user_id
+            ).order("created_at", desc=True).limit(1).execute()
+            
+            subscription = subscription_result.data[0] if subscription_result.data else None
+            
+            tokens_limit = subscription.get("tokens_limit") if subscription else self._get_tokens_limit(user["plan"])
+            tokens_used = subscription.get("tokens_used", 0) if subscription else 0
+            
+            return {
+                "user_id": user["id"],
+                "email": user["email"],
+                "api_key": user.get("api_key"),  # May not exist if using Supabase Auth
+                "plan": user["plan"],
+                "subscription_status": subscription.get("status", "active") if subscription else "active",
+                "tokens_used": tokens_used,
+                "tokens_limit": tokens_limit,
+                "expires_at": subscription.get("expires_at") if subscription else None
+            }
+        except Exception as e:
+            logger.error(f"Error getting user by email: {e}")
+            return None
+    
+    def get_user_by_supabase_id(self, supabase_user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get user by Supabase Auth user ID.
+        
+        Args:
+            supabase_user_id: Supabase Auth user ID
+            
+        Returns:
+            User data or None if not found
+        """
+        if not self.supabase:
+            return None
+        
+        try:
+            # Check if we have a mapping in users table (supabase_auth_id column)
+            user_result = self.supabase.table("users").select("*").eq("supabase_auth_id", supabase_user_id).execute()
+            
+            if not user_result.data:
+                return None
+            
+            user = user_result.data[0]
+            user_id = user["id"]
+            
+            # Get latest subscription
+            subscription_result = self.supabase.table("subscriptions").select("*").eq(
+                "user_id", user_id
+            ).order("created_at", desc=True).limit(1).execute()
+            
+            subscription = subscription_result.data[0] if subscription_result.data else None
+            
+            tokens_limit = subscription.get("tokens_limit") if subscription else self._get_tokens_limit(user["plan"])
+            tokens_used = subscription.get("tokens_used", 0) if subscription else 0
+            
+            return {
+                "user_id": user["id"],
+                "email": user["email"],
+                "plan": user["plan"],
+                "subscription_status": subscription.get("status", "active") if subscription else "active",
+                "tokens_used": tokens_used,
+                "tokens_limit": tokens_limit,
+                "expires_at": subscription.get("expires_at") if subscription else None
+            }
+        except Exception as e:
+            logger.error(f"Error getting user by Supabase ID: {e}")
+            return None
+    
+    def create_user_from_supabase_auth(self, supabase_user_id: str, email: str, plan: str = "Free") -> Dict[str, Any]:
+        """
+        Create a new user from Supabase Auth.
+        
+        Args:
+            supabase_user_id: Supabase Auth user ID
+            email: User's email address
+            plan: Subscription plan (Free, Starter, Pro)
+            
+        Returns:
+            User data
+        """
+        if not self.supabase:
+            raise ValueError("Supabase is not configured.")
+        
+        # Generate unique user ID
+        user_id = f"user_{secrets.token_urlsafe(16)}"
+        
+        try:
+            # Check if user already exists by Supabase Auth ID
+            existing_user = self.supabase.table("users").select("*").eq("supabase_auth_id", supabase_user_id).execute()
+            
+            if existing_user.data:
+                user = existing_user.data[0]
+                return {
+                    "user_id": user["id"],
+                    "email": user["email"],
+                    "plan": user["plan"]
+                }
+            
+            # Check if user exists by email
+            existing_by_email = self.supabase.table("users").select("*").eq("email", email).execute()
+            if existing_by_email.data:
+                # Update existing user with Supabase Auth ID
+                user = existing_by_email.data[0]
+                self.supabase.table("users").update({
+                    "supabase_auth_id": supabase_user_id,
+                    "updated_at": datetime.now().isoformat()
+                }).eq("id", user["id"]).execute()
+                return {
+                    "user_id": user["id"],
+                    "email": user["email"],
+                    "plan": user["plan"]
+                }
+            
+            # Create new user
+            user_data = {
+                "id": user_id,
+                "supabase_auth_id": supabase_user_id,
+                "email": email,
+                "plan": plan,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table("users").insert(user_data).execute()
+            
+            if not result.data:
+                raise Exception("Failed to create user")
+            
+            user = result.data[0]
+            
+            # Create subscription record
+            tokens_limit = self._get_tokens_limit(plan)
+            subscription_data = {
+                "id": f"sub_{secrets.token_urlsafe(16)}",
+                "user_id": user_id,
+                "plan_name": plan,
+                "status": "active",
+                "tokens_used": 0,
+                "tokens_limit": tokens_limit,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }
+            
+            self.supabase.table("subscriptions").insert(subscription_data).execute()
+            
+            return {
+                "user_id": user["id"],
+                "email": user["email"],
+                "plan": user["plan"]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating user from Supabase Auth: {e}")
+            raise
     
     def get_user_by_api_key(self, api_key: str) -> Optional[Dict[str, Any]]:
         """
@@ -147,32 +291,41 @@ class UserService:
         Returns:
             User data or None if not found
         """
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        if not self.supabase:
+            return None
         
-        cursor.execute("""
-            SELECT u.id, u.email, u.plan, s.status, s.tokens_used, s.tokens_limit, s.expires_at
-            FROM users u
-            LEFT JOIN subscriptions s ON u.id = s.user_id
-            WHERE u.api_key = ?
-            ORDER BY s.created_at DESC
-            LIMIT 1
-        """, (api_key,))
-        
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row:
+        try:
+            # Get user
+            user_result = self.supabase.table("users").select("*").eq("api_key", api_key).execute()
+            
+            if not user_result.data:
+                return None
+            
+            user = user_result.data[0]
+            user_id = user["id"]
+            
+            # Get latest subscription for this user
+            subscription_result = self.supabase.table("subscriptions").select("*").eq(
+                "user_id", user_id
+            ).order("created_at", desc=True).limit(1).execute()
+            
+            subscription = subscription_result.data[0] if subscription_result.data else None
+            
+            tokens_limit = subscription.get("tokens_limit") if subscription else self._get_tokens_limit(user["plan"])
+            tokens_used = subscription.get("tokens_used", 0) if subscription else 0
+            
             return {
-                "user_id": row[0],
-                "email": row[1],
-                "plan": row[2],
-                "subscription_status": row[3] or "active",
-                "tokens_used": row[4] or 0,
-                "tokens_limit": row[5] or self._get_tokens_limit(row[2]),
-                "expires_at": row[6]
+                "user_id": user["id"],
+                "email": user["email"],
+                "plan": user["plan"],
+                "subscription_status": subscription.get("status", "active") if subscription else "active",
+                "tokens_used": tokens_used,
+                "tokens_limit": tokens_limit,
+                "expires_at": subscription.get("expires_at") if subscription else None
             }
-        return None
+        except Exception as e:
+            logger.error(f"Error getting user by API key: {e}")
+            return None
     
     def update_subscription(self, user_id: str, paypal_subscription_id: str, plan_name: str, status: str):
         """
@@ -184,43 +337,54 @@ class UserService:
             plan_name: Plan name (Starter, Pro)
             status: Subscription status
         """
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        if not self.supabase:
+            raise ValueError("Supabase is not configured.")
         
-        # Update user plan
-        cursor.execute("UPDATE users SET plan = ?, updated_at = ? WHERE id = ?", 
-                      (plan_name, datetime.now(), user_id))
-        
-        # Update or create subscription
-        cursor.execute("""
-            SELECT id FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1
-        """, (user_id,))
-        
-        sub_row = cursor.fetchone()
-        
-        tokens_limit = self._get_tokens_limit(plan_name)
-        expires_at = None
-        if plan_name != "Free":
-            # Set expiration to 30 days from now for paid plans
-            expires_at = datetime.now() + timedelta(days=30)
-        
-        if sub_row:
-            # Update existing subscription
-            cursor.execute("""
-                UPDATE subscriptions 
-                SET paypal_subscription_id = ?, plan_name = ?, status = ?, 
-                    tokens_limit = ?, expires_at = ?, updated_at = ?
-                WHERE id = ?
-            """, (paypal_subscription_id, plan_name, status, tokens_limit, expires_at, datetime.now(), sub_row[0]))
-        else:
-            # Create new subscription
-            cursor.execute("""
-                INSERT INTO subscriptions (id, user_id, paypal_subscription_id, plan_name, status, tokens_limit, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (f"sub_{secrets.token_urlsafe(16)}", user_id, paypal_subscription_id, plan_name, status, tokens_limit, expires_at))
-        
-        conn.commit()
-        conn.close()
+        try:
+            # Update user plan
+            self.supabase.table("users").update({
+                "plan": plan_name,
+                "updated_at": datetime.now().isoformat()
+            }).eq("id", user_id).execute()
+            
+            # Get latest subscription for user
+            result = self.supabase.table("subscriptions").select("*").eq(
+                "user_id", user_id
+            ).order("created_at", desc=True).limit(1).execute()
+            
+            tokens_limit = self._get_tokens_limit(plan_name)
+            expires_at = None
+            if plan_name != "Free":
+                # Set expiration to 30 days from now for paid plans
+                expires_at = (datetime.now() + timedelta(days=30)).isoformat()
+            
+            subscription_data = {
+                "paypal_subscription_id": paypal_subscription_id,
+                "plan_name": plan_name,
+                "status": status,
+                "tokens_limit": tokens_limit,
+                "expires_at": expires_at,
+                "updated_at": datetime.now().isoformat()
+            }
+            
+            if result.data:
+                # Update existing subscription
+                self.supabase.table("subscriptions").update(subscription_data).eq(
+                    "id", result.data[0]["id"]
+                ).execute()
+            else:
+                # Create new subscription
+                subscription_data.update({
+                    "id": f"sub_{secrets.token_urlsafe(16)}",
+                    "user_id": user_id,
+                    "tokens_used": 0,
+                    "created_at": datetime.now().isoformat()
+                })
+                self.supabase.table("subscriptions").insert(subscription_data).execute()
+                
+        except Exception as e:
+            logger.error(f"Error updating subscription: {e}")
+            raise
     
     def check_token_limit(self, user_id: str, tokens_needed: int = 0) -> Dict[str, Any]:
         """
@@ -233,53 +397,60 @@ class UserService:
         Returns:
             Dictionary with can_proceed, tokens_used, tokens_limit, tokens_remaining
         """
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT tokens_used, tokens_limit, status, expires_at
-            FROM subscriptions
-            WHERE user_id = ?
-            ORDER BY created_at DESC
-            LIMIT 1
-        """, (user_id,))
-        
-        row = cursor.fetchone()
-        conn.close()
-        
-        if not row:
+        if not self.supabase:
             return {
                 "can_proceed": False,
-                "error": "No subscription found"
+                "error": "Supabase is not configured"
             }
         
-        tokens_used, tokens_limit, status, expires_at = row
-        
-        # Check if subscription is active
-        if status != "active":
-            return {
-                "can_proceed": False,
-                "error": "Subscription is not active"
-            }
-        
-        # Check expiration
-        if expires_at:
-            expires = datetime.fromisoformat(expires_at) if isinstance(expires_at, str) else expires_at
-            if datetime.now() > expires:
+        try:
+            result = self.supabase.table("subscriptions").select("*").eq(
+                "user_id", user_id
+            ).order("created_at", desc=True).limit(1).execute()
+            
+            if not result.data:
                 return {
                     "can_proceed": False,
-                    "error": "Subscription has expired"
+                    "error": "No subscription found"
                 }
-        
-        tokens_remaining = tokens_limit - (tokens_used or 0)
-        
-        return {
-            "can_proceed": tokens_remaining >= tokens_needed,
-            "tokens_used": tokens_used or 0,
-            "tokens_limit": tokens_limit,
-            "tokens_remaining": tokens_remaining,
-            "status": status
-        }
+            
+            subscription = result.data[0]
+            tokens_used = subscription.get("tokens_used", 0) or 0
+            tokens_limit = subscription.get("tokens_limit", 0)
+            status = subscription.get("status", "inactive")
+            expires_at = subscription.get("expires_at")
+            
+            # Check if subscription is active
+            if status != "active":
+                return {
+                    "can_proceed": False,
+                    "error": "Subscription is not active"
+                }
+            
+            # Check expiration
+            if expires_at:
+                expires = datetime.fromisoformat(expires_at.replace("Z", "+00:00") if "Z" in expires_at else expires_at)
+                if datetime.now() > expires:
+                    return {
+                        "can_proceed": False,
+                        "error": "Subscription has expired"
+                    }
+            
+            tokens_remaining = tokens_limit - tokens_used
+            
+            return {
+                "can_proceed": tokens_remaining >= tokens_needed,
+                "tokens_used": tokens_used,
+                "tokens_limit": tokens_limit,
+                "tokens_remaining": tokens_remaining,
+                "status": status
+            }
+        except Exception as e:
+            logger.error(f"Error checking token limit: {e}")
+            return {
+                "can_proceed": False,
+                "error": f"Error checking token limit: {str(e)}"
+            }
     
     def record_token_usage(self, user_id: str, tokens_used: int, operation: str = "file_processing"):
         """
@@ -290,24 +461,40 @@ class UserService:
             tokens_used: Number of tokens used
             operation: Type of operation
         """
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        if not self.supabase:
+            logger.warning("Supabase not configured. Token usage not recorded.")
+            return
         
-        # Record usage
-        cursor.execute("""
-            INSERT INTO token_usage (user_id, tokens_used, operation)
-            VALUES (?, ?, ?)
-        """, (user_id, tokens_used, operation))
-        
-        # Update subscription tokens_used
-        cursor.execute("""
-            UPDATE subscriptions
-            SET tokens_used = tokens_used + ?, updated_at = ?
-            WHERE user_id = ? AND status = 'active'
-        """, (tokens_used, datetime.now(), user_id))
-        
-        conn.commit()
-        conn.close()
+        try:
+            # Record usage in token_usage table
+            usage_data = {
+                "user_id": user_id,
+                "tokens_used": tokens_used,
+                "operation": operation,
+                "created_at": datetime.now().isoformat()
+            }
+            self.supabase.table("token_usage").insert(usage_data).execute()
+            
+            # Update subscription tokens_used
+            # Get current tokens_used (latest subscription)
+            result = self.supabase.table("subscriptions").select("id, tokens_used").eq(
+                "user_id", user_id
+            ).eq("status", "active").order("created_at", desc=True).limit(1).execute()
+            
+            if result.data:
+                subscription = result.data[0]
+                subscription_id = subscription["id"]
+                current_tokens = subscription.get("tokens_used", 0) or 0
+                new_tokens = current_tokens + tokens_used
+                
+                # Update the specific subscription
+                self.supabase.table("subscriptions").update({
+                    "tokens_used": new_tokens,
+                    "updated_at": datetime.now().isoformat()
+                }).eq("id", subscription_id).execute()
+                
+        except Exception as e:
+            logger.error(f"Error recording token usage: {e}")
     
     def _get_tokens_limit(self, plan: str) -> int:
         """Get token limit for a plan."""
@@ -317,5 +504,3 @@ class UserService:
             "Pro": 7000000
         }
         return limits.get(plan, 200000)
-
-

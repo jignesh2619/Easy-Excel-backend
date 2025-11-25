@@ -23,17 +23,44 @@ class PayPalService:
         self.client_secret = os.getenv("PAYPAL_CLIENT_SECRET")
         self.mode = os.getenv("PAYPAL_MODE", "sandbox")  # sandbox or live
         
+        # Strip whitespace and quotes if present
+        if self.client_id:
+            self.client_id = self.client_id.strip().strip("'").strip('"')
+        if self.client_secret:
+            self.client_secret = self.client_secret.strip().strip("'").strip('"')
+        if self.mode:
+            self.mode = self.mode.strip().strip("'").strip('"')
+        
         if not self.client_id or not self.client_secret:
             logger.warning("PayPal credentials not found. Payment features will be disabled.")
             self.api = None
         else:
-            # Configure PayPal API
-            configure({
-                "mode": self.mode,
-                "client_id": self.client_id,
-                "client_secret": self.client_secret
-            })
-            self.api = Api()
+            try:
+                # Validate credentials are not empty after stripping
+                if not self.client_id.strip() or not self.client_secret.strip():
+                    raise ValueError("PayPal credentials are empty after processing")
+                
+                # Configure PayPal API (for global configuration)
+                configure({
+                    "mode": self.mode,
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret
+                })
+                # Create Api instance with credentials passed directly
+                self.api = Api({
+                    "mode": self.mode,
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret
+                })
+                logger.info("PayPal service initialized successfully.")
+            except KeyError as e:
+                logger.error(f"PayPal configuration error - missing key: {e}")
+                logger.warning("Payment features will be disabled.")
+                self.api = None
+            except Exception as e:
+                logger.error(f"Failed to initialize PayPal service: {type(e).__name__}: {e}")
+                logger.warning("Payment features will be disabled.")
+                self.api = None
     
     def create_subscription(self, plan_name: str, user_email: str, user_id: str) -> Dict[str, Any]:
         """
@@ -61,10 +88,22 @@ class PayPalService:
         
         plan_id = plan_mapping[plan_name]
         
+        # Validate plan ID is not a placeholder
+        if plan_id == "P-XXXXXXXXXX" or not plan_id or not plan_id.startswith("P-"):
+            raise ValueError(
+                f"PayPal plan ID for {plan_name} is not configured. "
+                f"Please set PAYPAL_PLAN_ID_{plan_name.upper()} in your .env file. "
+                f"Create the plan in PayPal first, then add the plan ID to .env"
+            )
+        
+        # Set start_time to current time + 1 minute (PayPal requires future time)
+        from datetime import datetime, timedelta
+        start_time = (datetime.utcnow() + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        
         # Create subscription
         subscription = {
             "plan_id": plan_id,
-            "start_time": "",  # PayPal will set this
+            "start_time": start_time,
             "subscriber": {
                 "name": {
                     "given_name": user_id,
@@ -127,7 +166,19 @@ class PayPalService:
             )
             
             if sub_response.status_code not in [200, 201]:
-                raise Exception(f"Failed to create subscription: {sub_response.text}")
+                error_data = sub_response.json() if sub_response.headers.get('content-type', '').startswith('application/json') else {}
+                error_name = error_data.get('name', 'UNKNOWN_ERROR')
+                error_message = error_data.get('message', sub_response.text)
+                
+                # Provide helpful error messages
+                if error_name == 'RESOURCE_NOT_FOUND' or 'INVALID_RESOURCE_ID' in str(error_data):
+                    raise ValueError(
+                        f"PayPal plan '{plan_id}' not found. "
+                        f"Please create the subscription plan in PayPal first, then update PAYPAL_PLAN_ID_{plan_name.upper()} in your .env file. "
+                        f"See PAYPAL_SETUP.md for instructions."
+                    )
+                else:
+                    raise Exception(f"Failed to create subscription: {error_message} (Error: {error_name})")
             
             subscription_data = sub_response.json()
             
@@ -265,5 +316,9 @@ class PayPalService:
         )
         
         return cancel_response.status_code == 204
+
+
+
+
 
 

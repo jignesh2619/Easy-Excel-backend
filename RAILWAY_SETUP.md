@@ -56,3 +56,7 @@ npx @railway/cli up
 The Railway dashboard is the easiest way to set variables. Just go to your project and add them in the Variables tab.
 
 
+
+
+
+

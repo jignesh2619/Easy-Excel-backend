@@ -11,7 +11,10 @@ from dotenv import load_dotenv
 
 def check_api_key():
     """Check if Gemini API key is configured"""
-    load_dotenv()
+    # Load .env file from the backend directory
+    backend_dir = Path(__file__).parent
+    env_path = backend_dir / ".env"
+    load_dotenv(dotenv_path=env_path)
     api_key = os.getenv("GEMINI_API_KEY")
     
     if not api_key or api_key == "your_gemini_api_key_here":
@@ -33,6 +36,11 @@ def check_api_key():
 
 def start_server():
     """Start the FastAPI server"""
+    # Load .env file BEFORE checking API key or importing app
+    backend_dir = Path(__file__).parent
+    env_path = backend_dir / ".env"
+    load_dotenv(dotenv_path=env_path)
+    
     if not check_api_key():
         return
     
@@ -47,8 +55,8 @@ def start_server():
     try:
         import uvicorn
         # Get PORT from environment (DigitalOcean/Railway/Render sets this automatically)
-        # DigitalOcean uses 8080 by default, Railway/Render use 8000
-        port = int(os.getenv("PORT", "8080"))
+        # For local development, use 8000
+        port = int(os.getenv("PORT", "8000"))
         uvicorn.run(
             "app:app",
             host="0.0.0.0",
@@ -68,6 +76,7 @@ if __name__ == "__main__":
     backend_dir = Path(__file__).parent
     os.chdir(backend_dir)
     
+    # Note: .env is now loaded inside start_server() before app.py is imported
     start_server()
 
 

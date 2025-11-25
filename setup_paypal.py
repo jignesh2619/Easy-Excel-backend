@@ -39,12 +39,59 @@ def get_access_token(client_id: str, client_secret: str, mode: str = "sandbox") 
     return response.json()["access_token"]
 
 
-def create_plan(access_token: str, plan_name: str, price: str, mode: str = "sandbox") -> str:
+def create_product(access_token: str, product_name: str, mode: str = "sandbox") -> str:
+    """Create a product in PayPal (required before creating plans)."""
+    base_url = "https://api.sandbox.paypal.com" if mode == "sandbox" else "https://api.paypal.com"
+    
+    product_data = {
+        "name": product_name,
+        "description": f"EasyExcel {product_name} subscription",
+        "type": "SERVICE",
+        "category": "SOFTWARE"
+    }
+    
+    response = requests.post(
+        f"{base_url}/v1/catalogs/products",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        },
+        json=product_data
+    )
+    
+    if response.status_code not in [200, 201]:
+        error_text = response.text
+        # If product already exists, try to find it
+        if "already exists" in error_text.lower() or response.status_code == 409:
+            print(f"  ⚠️  Product '{product_name}' might already exist. Checking...")
+            # Try to list products and find it
+            list_response = requests.get(
+                f"{base_url}/v1/catalogs/products",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json"
+                },
+                params={"page_size": 20, "page": 1}
+            )
+            if list_response.status_code == 200:
+                products = list_response.json().get("products", [])
+                for product in products:
+                    if product.get("name") == product_name:
+                        return product.get("id")
+            return None
+        raise Exception(f"Failed to create product: {error_text}")
+    
+    product = response.json()
+    return product.get("id")
+
+
+def create_plan(access_token: str, plan_name: str, price: str, product_id: str, mode: str = "sandbox") -> str:
     """Create a subscription plan in PayPal."""
     base_url = "https://api.sandbox.paypal.com" if mode == "sandbox" else "https://api.paypal.com"
     
     plan_data = {
-        "product_id": f"PROD_{plan_name.upper()}",
+        "product_id": product_id,
         "name": f"{plan_name} Plan",
         "description": f"EasyExcel {plan_name} subscription plan",
         "status": "ACTIVE",
@@ -211,35 +258,67 @@ def main():
     starter_plan_id = None
     pro_plan_id = None
     
-    # Create Starter Plan
-    print("\n  📦 Creating Starter Plan ($4.99/month)...")
+    # Create Starter Product first
+    print("\n  📦 Creating Starter Product...")
+    starter_product_id = None
     try:
-        plan_id = create_plan(access_token, "Starter", "4.99", mode)
-        if plan_id:
-            starter_plan_id = plan_id
-            print(f"  ✅ Created Starter Plan: {plan_id}")
+        starter_product_id = create_product(access_token, "EasyExcel Starter", mode)
+        if starter_product_id:
+            print(f"  ✅ Created Starter Product: {starter_product_id}")
         else:
-            print("  ⚠️  Plan might already exist. Please enter Plan ID manually:")
-            starter_plan_id = input("  Enter Starter Plan ID (starts with P-): ").strip()
+            print("  ⚠️  Product might already exist or couldn't be created")
+            starter_product_id = input("  Enter Starter Product ID (or press Enter to skip): ").strip() or None
     except Exception as e:
-        print(f"  ⚠️  Could not create Starter Plan: {str(e)}")
-        print("  Please create it manually in PayPal Dashboard and enter the Plan ID:")
-        starter_plan_id = input("  Enter Starter Plan ID (starts with P-): ").strip()
+        print(f"  ⚠️  Could not create Starter Product: {str(e)}")
+        starter_product_id = input("  Enter Starter Product ID (or press Enter to skip): ").strip() or None
+    
+    # Create Starter Plan
+    starter_plan_id = None
+    if starter_product_id:
+        print("\n  📦 Creating Starter Plan ($4.99/month)...")
+        try:
+            plan_id = create_plan(access_token, "Starter", "4.99", starter_product_id, mode)
+            if plan_id:
+                starter_plan_id = plan_id
+                print(f"  ✅ Created Starter Plan: {plan_id}")
+            else:
+                print("  ⚠️  Plan might already exist. Please enter Plan ID manually:")
+                starter_plan_id = input("  Enter Starter Plan ID (starts with P-): ").strip()
+        except Exception as e:
+            print(f"  ⚠️  Could not create Starter Plan: {str(e)}")
+            print("  Please create it manually in PayPal Dashboard and enter the Plan ID:")
+            starter_plan_id = input("  Enter Starter Plan ID (starts with P-): ").strip()
+    
+    # Create Pro Product first
+    print("\n  📦 Creating Pro Product...")
+    pro_product_id = None
+    try:
+        pro_product_id = create_product(access_token, "EasyExcel Pro", mode)
+        if pro_product_id:
+            print(f"  ✅ Created Pro Product: {pro_product_id}")
+        else:
+            print("  ⚠️  Product might already exist or couldn't be created")
+            pro_product_id = input("  Enter Pro Product ID (or press Enter to skip): ").strip() or None
+    except Exception as e:
+        print(f"  ⚠️  Could not create Pro Product: {str(e)}")
+        pro_product_id = input("  Enter Pro Product ID (or press Enter to skip): ").strip() or None
     
     # Create Pro Plan
-    print("\n  📦 Creating Pro Plan ($12.00/month)...")
-    try:
-        plan_id = create_plan(access_token, "Pro", "12.00", mode)
-        if plan_id:
-            pro_plan_id = plan_id
-            print(f"  ✅ Created Pro Plan: {plan_id}")
-        else:
-            print("  ⚠️  Plan might already exist. Please enter Plan ID manually:")
+    pro_plan_id = None
+    if pro_product_id:
+        print("\n  📦 Creating Pro Plan ($12.00/month)...")
+        try:
+            plan_id = create_plan(access_token, "Pro", "12.00", pro_product_id, mode)
+            if plan_id:
+                pro_plan_id = plan_id
+                print(f"  ✅ Created Pro Plan: {plan_id}")
+            else:
+                print("  ⚠️  Plan might already exist. Please enter Plan ID manually:")
+                pro_plan_id = input("  Enter Pro Plan ID (starts with P-): ").strip()
+        except Exception as e:
+            print(f"  ⚠️  Could not create Pro Plan: {str(e)}")
+            print("  Please create it manually in PayPal Dashboard and enter the Plan ID:")
             pro_plan_id = input("  Enter Pro Plan ID (starts with P-): ").strip()
-    except Exception as e:
-        print(f"  ⚠️  Could not create Pro Plan: {str(e)}")
-        print("  Please create it manually in PayPal Dashboard and enter the Plan ID:")
-        pro_plan_id = input("  Enter Pro Plan ID (starts with P-): ").strip()
     
     print()
     print("Step 4: Saving Configuration")
