@@ -62,19 +62,21 @@ class LLMAgent:
         available_columns: List[str]
     ) -> Dict:
         """
-        Interpret user prompt and return structured action plan
+        Interpret user prompt and return structured action plan with token usage
         
         Args:
             user_prompt: Natural language user request
             available_columns: List of available column names in the data
             
         Returns:
-            Structured action plan dictionary with:
-            - task: Operation to perform
-            - columns_needed: Required columns
-            - chart_type: Type of chart if needed
-            - steps: List of steps to execute
-            - Additional fields based on operation type
+            Dictionary with:
+            - action_plan: Structured action plan dictionary with:
+              - task: Operation to perform
+              - columns_needed: Required columns
+              - chart_type: Type of chart if needed
+              - steps: List of steps to execute
+              - Additional fields based on operation type
+            - tokens_used: Actual token count from Gemini API (prompt + response)
         """
         try:
             prompt = get_prompt_with_context(user_prompt, available_columns)
@@ -111,6 +113,33 @@ Return your response as a valid JSON object with no additional formatting."""
                 }
             )
             
+            # Extract actual token usage from Gemini API response
+            tokens_used = 0
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                # Gemini API provides usage_metadata with token counts
+                if hasattr(response.usage_metadata, 'prompt_token_count'):
+                    prompt_tokens = response.usage_metadata.prompt_token_count or 0
+                else:
+                    prompt_tokens = 0
+                
+                if hasattr(response.usage_metadata, 'candidates_token_count'):
+                    response_tokens = response.usage_metadata.candidates_token_count or 0
+                elif hasattr(response.usage_metadata, 'total_token_count'):
+                    # Some versions use total_token_count
+                    total_tokens = response.usage_metadata.total_token_count or 0
+                    response_tokens = total_tokens - prompt_tokens if total_tokens > prompt_tokens else 0
+                else:
+                    response_tokens = 0
+                
+                tokens_used = prompt_tokens + response_tokens
+            
+            # If usage_metadata is not available, estimate based on prompt length (fallback)
+            if tokens_used == 0:
+                # Rough estimate: ~4 characters per token, plus response tokens
+                prompt_tokens_estimate = len(full_prompt) // 4
+                response_tokens_estimate = len(response.text) // 4 if hasattr(response, 'text') and response.text else 0
+                tokens_used = prompt_tokens_estimate + response_tokens_estimate
+            
             # Extract text from response
             content = response.text.strip()
             
@@ -133,7 +162,13 @@ Return your response as a valid JSON object with no additional formatting."""
                     raise ValueError(f"Could not parse JSON from response: {content[:200]}")
             
             # Validate and normalize action plan
-            return self._normalize_action_plan(action_plan)
+            normalized_plan = self._normalize_action_plan(action_plan)
+            
+            # Return both action plan and token usage
+            return {
+                "action_plan": normalized_plan,
+                "tokens_used": tokens_used
+            }
             
         except json.JSONDecodeError as e:
             raise ValueError(f"Failed to parse LLM response as JSON: {str(e)}")

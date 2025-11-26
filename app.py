@@ -169,26 +169,7 @@ async def process_file(
         # 4. Get available columns
         available_columns = list(df.columns)
         
-        # 5. Interpret prompt with LLM
-        if llm_agent is None:
-            raise HTTPException(
-                status_code=500, 
-                detail="LLM service not available. Please set GEMINI_API_KEY environment variable."
-            )
-        
-        action_plan = llm_agent.interpret_prompt(prompt, available_columns)
-        
-        # 6. Validate required columns exist
-        columns_needed = action_plan.get("columns_needed", [])
-        if columns_needed:
-            is_valid, error, missing = validator.validate_columns_exist(df, columns_needed)
-            if not is_valid:
-                file_manager.delete_file(temp_file_path)
-                raise HTTPException(status_code=400, detail=error)
-        
-        # 7. Check subscription and token limits if authenticated
-        # Estimate tokens needed (rough estimate: 100 tokens per row + prompt tokens)
-        estimated_tokens = len(df) * 100 + len(prompt) * 2
+        # 5. Get user authentication before processing
         user = None
         if credentials and credentials.credentials:
             token = credentials.credentials
@@ -203,6 +184,12 @@ async def process_file(
                 # If Supabase auth fails, try API key (legacy support)
                 user = user_service.get_user_by_api_key(token)
         
+        # 6. Check token limits before LLM call (use conservative estimate)
+        # Estimate: prompt tokens (~4 chars per token) + response tokens (estimate 500 for JSON response)
+        # This is much more accurate than the old 100 tokens per row estimate
+        prompt_tokens_estimate = len(prompt) // 4
+        estimated_tokens = prompt_tokens_estimate + 500  # Conservative estimate for LLM response
+        
         if user:
             token_check = user_service.check_token_limit(user["user_id"], estimated_tokens)
             if not token_check.get("can_proceed"):
@@ -211,6 +198,25 @@ async def process_file(
                     status_code=403,
                     detail=token_check.get("error", "Insufficient tokens. Please upgrade your plan.")
                 )
+        
+        # 7. Interpret prompt with LLM
+        if llm_agent is None:
+            raise HTTPException(
+                status_code=500, 
+                detail="LLM service not available. Please set GEMINI_API_KEY environment variable."
+            )
+        
+        llm_result = llm_agent.interpret_prompt(prompt, available_columns)
+        action_plan = llm_result.get("action_plan", {})
+        actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)  # Use actual tokens from API
+        
+        # 8. Validate required columns exist
+        columns_needed = action_plan.get("columns_needed", [])
+        if columns_needed:
+            is_valid, error, missing = validator.validate_columns_exist(df, columns_needed)
+            if not is_valid:
+                file_manager.delete_file(temp_file_path)
+                raise HTTPException(status_code=400, detail=error)
         
         # 7. Process file
         processor = ExcelProcessor(temp_file_path)
@@ -362,9 +368,8 @@ async def process_file(
         else:
             result_value = processed_data
         
-        # Record token usage if we have an authenticated user
+        # Record token usage if we have an authenticated user (use actual tokens from LLM API)
         if user:
-            actual_tokens_used = estimated_tokens  # In production, calculate actual tokens used
             user_service.record_token_usage(user["user_id"], actual_tokens_used, "file_processing")
         
         return ProcessFileResponse(
