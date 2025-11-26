@@ -766,6 +766,94 @@ class ExcelProcessor:
         
         self.summary.append(f"Total rows: {len(self.df)}")
     
+    def _execute_format(self, action_plan: Dict):
+        """Execute format operation - store formatting rules to apply when saving"""
+        format_config = action_plan.get("format", {})
+        
+        if not format_config:
+            self.summary.append("Format: No format configuration specified")
+            return
+        
+        # Extract formatting details
+        formatting = format_config.get("formatting", {})
+        range_info = format_config.get("range", {})
+        
+        # Store formatting rule to apply when saving
+        rule = {
+            "type": "format",
+            "formatting": formatting,
+            "range": range_info
+        }
+        self.formatting_rules.append(rule)
+        
+        # Build summary message
+        format_parts = []
+        if formatting.get("bold"):
+            format_parts.append("bold")
+        if formatting.get("italic"):
+            format_parts.append("italic")
+        if formatting.get("text_color"):
+            format_parts.append(f"text color: {formatting['text_color']}")
+        if formatting.get("bg_color"):
+            format_parts.append(f"background: {formatting['bg_color']}")
+        if formatting.get("font_size"):
+            format_parts.append(f"font size: {formatting['font_size']}")
+        if formatting.get("align"):
+            format_parts.append(f"align: {formatting['align']}")
+        
+        range_desc = ""
+        if "column" in range_info:
+            range_desc = f"column '{range_info['column']}'"
+        elif "row" in range_info:
+            range_desc = f"row {range_info['row'] + 1}"
+        elif "cells" in range_info:
+            range_desc = f"{len(range_info['cells'])} cell(s)"
+        
+        if format_parts:
+            self.summary.append(f"Applied formatting ({', '.join(format_parts)}) to {range_desc}")
+        else:
+            self.summary.append(f"Formatting rule stored for {range_desc}")
+    
+    def _execute_conditional_format(self, action_plan: Dict):
+        """Execute conditional format operation - store conditional formatting rules"""
+        conditional_format = action_plan.get("conditional_format", {})
+        
+        if not conditional_format:
+            self.summary.append("Conditional format: No configuration specified")
+            return
+        
+        # Extract conditional formatting details
+        format_type = conditional_format.get("format_type", "")
+        config = conditional_format.get("config", {})
+        
+        # Store conditional formatting rule to apply when saving
+        rule = {
+            "type": "conditional",
+            "format_type": format_type,
+            "config": config
+        }
+        self.formatting_rules.append(rule)
+        
+        # Build summary message
+        if format_type == "duplicates":
+            column = config.get("column", "unknown")
+            self.summary.append(f"Conditional formatting: Highlight duplicates in column '{column}'")
+        elif format_type == "greater_than":
+            column = config.get("column", "unknown")
+            value = config.get("value", "unknown")
+            self.summary.append(f"Conditional formatting: Highlight values > {value} in column '{column}'")
+        elif format_type == "less_than":
+            column = config.get("column", "unknown")
+            value = config.get("value", "unknown")
+            self.summary.append(f"Conditional formatting: Highlight values < {value} in column '{column}'")
+        elif format_type == "between":
+            column = config.get("column", "unknown")
+            min_val = config.get("min_value", "unknown")
+            max_val = config.get("max_value", "unknown")
+            self.summary.append(f"Conditional formatting: Highlight values between {min_val} and {max_val} in column '{column}'")
+        else:
+            self.summary.append(f"Conditional formatting rule stored: {format_type}")
+    
     def _execute_formula(self, action_plan: Dict):
         """Execute formula operations using FormulaEngine"""
         formula_config = action_plan.get("formula", {})
