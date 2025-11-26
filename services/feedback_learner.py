@@ -8,7 +8,7 @@ This enables the system to learn from real user interactions.
 import json
 import logging
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from services.supabase_client import SupabaseClient
 
@@ -222,7 +222,7 @@ class FeedbackLearner:
         
         try:
             # Get all feedback from last N days
-            cutoff_date = (datetime.now() - datetime.timedelta(days=days)).isoformat()
+            cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
             result = self.supabase.table(self.feedback_table).select("success").gte(
                 "created_at", cutoff_date
             ).execute()
