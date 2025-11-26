@@ -91,6 +91,10 @@ class LLMAgent:
             full_prompt = f"""You are a data analysis assistant that returns ONLY valid JSON. 
 Do not include any markdown formatting, code blocks, or explanatory text. Return pure JSON only.
 
+CRITICAL: Provide detailed "execution_instructions" in the "operations" array for each operation.
+This allows the system to execute your plan dynamically without hardcoded if-else statements.
+Think step-by-step about how to execute the user's request using pandas operations or formula functions.
+
 KNOWLEDGE BASE CONTEXT:
 {kb_summary}
 
@@ -101,7 +105,8 @@ Confidence: {task_suggestions.get('confidence', 0)}
 
 {prompt}
 
-Return your response as a valid JSON object with no additional formatting."""
+Return your response as a valid JSON object with no additional formatting.
+Include "operations" array with "execution_instructions" for each operation."""
 
             # Generate response using Gemini
             response = self.client.generate_content(
