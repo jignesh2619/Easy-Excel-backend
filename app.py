@@ -165,14 +165,28 @@ async def process_file(
             raise HTTPException(status_code=400, detail=error)
         
         # 2. Save uploaded file
-        file_content = await file.read()
-        temp_file_path = file_manager.save_uploaded_file(file_content, file.filename)
+        try:
+            file_content = await file.read()
+            if not file_content or len(file_content) == 0:
+                raise HTTPException(status_code=400, detail="Uploaded file is empty")
+            temp_file_path = file_manager.save_uploaded_file(file_content, file.filename)
+        except Exception as e:
+            logger.error(f"Error saving uploaded file: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Failed to save uploaded file: {str(e)}")
         
         # 3. Validate file content
-        is_valid, error, df = validator.validate_complete_file(temp_file_path, file.filename)
-        if not is_valid:
+        try:
+            is_valid, error, df = validator.validate_complete_file(temp_file_path, file.filename)
+            if not is_valid:
+                file_manager.delete_file(temp_file_path)
+                logger.error(f"File validation failed: {error}")
+                raise HTTPException(status_code=400, detail=error)
+        except HTTPException:
+            raise
+        except Exception as e:
             file_manager.delete_file(temp_file_path)
-            raise HTTPException(status_code=400, detail=error)
+            logger.error(f"Error validating file: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Error reading file: {str(e)}. Please ensure the file is not corrupted.")
         
         # 4. Get available columns
         available_columns = list(df.columns)

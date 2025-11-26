@@ -84,14 +84,44 @@ class DataValidator:
             file_ext = Path(file_path).suffix.lower()
             
             if file_ext == '.csv':
-                df = pd.read_csv(file_path)
+                # Try different encodings for CSV files
+                encodings = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252']
+                df = None
+                last_error = None
+                for encoding in encodings:
+                    try:
+                        df = pd.read_csv(file_path, encoding=encoding, on_bad_lines='skip')
+                        break
+                    except UnicodeDecodeError as e:
+                        last_error = e
+                        continue
+                    except Exception as e:
+                        last_error = e
+                        continue
+                
+                if df is None:
+                    return False, f"Error reading CSV file. Please ensure the file is properly formatted. Details: {str(last_error)}", None
+                    
             elif file_ext in ['.xlsx', '.xls']:
                 # Always specify sheet_name to avoid getting a dict
                 # If sheet_name is None, use 0 to get first sheet
-                if sheet_name is None:
-                    df = pd.read_excel(file_path, sheet_name=0)
-                else:
-                    df = pd.read_excel(file_path, sheet_name=sheet_name)
+                try:
+                    if sheet_name is None:
+                        df = pd.read_excel(file_path, sheet_name=0, engine='openpyxl' if file_ext == '.xlsx' else None)
+                    else:
+                        df = pd.read_excel(file_path, sheet_name=sheet_name, engine='openpyxl' if file_ext == '.xlsx' else None)
+                except Exception as e:
+                    # Try without engine specification for .xls files
+                    if file_ext == '.xls':
+                        try:
+                            if sheet_name is None:
+                                df = pd.read_excel(file_path, sheet_name=0)
+                            else:
+                                df = pd.read_excel(file_path, sheet_name=sheet_name)
+                        except Exception as e2:
+                            return False, f"Error reading Excel file. The file may be corrupted or in an unsupported format. Details: {str(e2)}", None
+                    else:
+                        return False, f"Error reading Excel file. The file may be corrupted or in an unsupported format. Details: {str(e)}", None
                 
                 # Check if we got a dict (shouldn't happen with sheet_name specified, but double-check)
                 if isinstance(df, dict):
@@ -108,15 +138,21 @@ class DataValidator:
                 return False, f"Unexpected data type: {type(df)}. Expected DataFrame.", None
             
             if df.empty:
-                return False, "File is empty - no data found", None
+                return False, "File is empty - no data found. Please ensure your file contains data rows.", None
             
             if len(df.columns) == 0:
-                return False, "File has no columns", None
+                return False, "File has no columns. Please ensure your file has a header row.", None
             
             return True, None, df
             
+        except pd.errors.EmptyDataError:
+            return False, "File appears to be empty or corrupted. Please check the file and try again.", None
+        except pd.errors.ParserError as e:
+            return False, f"Error parsing file structure. Please ensure the file is properly formatted. Details: {str(e)}", None
         except Exception as e:
-            return False, f"Error reading file: {str(e)}", None
+            import traceback
+            error_details = traceback.format_exc()
+            return False, f"Error reading file: {str(e)}. Please ensure the file is not corrupted and is in a supported format (CSV, XLSX, or XLS).", None
     
     @staticmethod
     def validate_columns_exist(df: pd.DataFrame, required_columns: List[str]) -> Tuple[bool, Optional[str], List[str]]:

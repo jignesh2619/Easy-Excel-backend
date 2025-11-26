@@ -45,14 +45,49 @@ class ExcelProcessor:
             file_ext = Path(self.file_path).suffix.lower()
             
             if file_ext == '.csv':
-                self.df = pd.read_csv(self.file_path)
+                # Try different encodings for CSV files
+                encodings = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252']
+                self.df = None
+                last_error = None
+                for encoding in encodings:
+                    try:
+                        self.df = pd.read_csv(self.file_path, encoding=encoding, on_bad_lines='skip')
+                        break
+                    except (UnicodeDecodeError, Exception) as e:
+                        last_error = e
+                        continue
+                
+                if self.df is None:
+                    raise RuntimeError(f"Failed to read CSV file with multiple encodings. Last error: {str(last_error)}")
+                    
             elif file_ext in ['.xlsx', '.xls']:
                 # Always specify sheet_name to avoid getting a dict
                 # If sheet_name is None, use 0 to get first sheet
-                if sheet_name is None:
-                    loaded_data = pd.read_excel(self.file_path, sheet_name=0)
-                else:
-                    loaded_data = pd.read_excel(self.file_path, sheet_name=sheet_name)
+                try:
+                    if sheet_name is None:
+                        loaded_data = pd.read_excel(
+                            self.file_path, 
+                            sheet_name=0,
+                            engine='openpyxl' if file_ext == '.xlsx' else None
+                        )
+                    else:
+                        loaded_data = pd.read_excel(
+                            self.file_path, 
+                            sheet_name=sheet_name,
+                            engine='openpyxl' if file_ext == '.xlsx' else None
+                        )
+                except Exception as e:
+                    # Try without engine specification for .xls files
+                    if file_ext == '.xls':
+                        try:
+                            if sheet_name is None:
+                                loaded_data = pd.read_excel(self.file_path, sheet_name=0)
+                            else:
+                                loaded_data = pd.read_excel(self.file_path, sheet_name=sheet_name)
+                        except Exception as e2:
+                            raise RuntimeError(f"Failed to read Excel file. The file may be corrupted. Error: {str(e2)}")
+                    else:
+                        raise RuntimeError(f"Failed to read Excel file. The file may be corrupted. Error: {str(e)}")
                 
                 # Check if we got a dict (shouldn't happen with sheet_name specified, but double-check)
                 if isinstance(loaded_data, dict):
@@ -75,8 +110,12 @@ class ExcelProcessor:
             self.summary.append(f"Loaded {len(self.df)} rows and {len(self.df.columns)} columns")
             return True
             
+        except pd.errors.EmptyDataError:
+            raise RuntimeError("File appears to be empty or corrupted. Please check the file and try again.")
+        except pd.errors.ParserError as e:
+            raise RuntimeError(f"Error parsing file structure. Please ensure the file is properly formatted. Details: {str(e)}")
         except Exception as e:
-            raise RuntimeError(f"Failed to load data: {str(e)}")
+            raise RuntimeError(f"Failed to load data: {str(e)}. Please ensure the file is not corrupted and is in a supported format.")
     
     def execute_action_plan(self, action_plan: Dict) -> Dict:
         """
