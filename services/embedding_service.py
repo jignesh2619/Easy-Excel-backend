@@ -22,7 +22,11 @@ def get_embedding_model():
             from sentence_transformers import SentenceTransformer
             # Using a lightweight, fast model
             # 'all-MiniLM-L6-v2' is fast and good for semantic search
-            _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+            # Set cache_dir to avoid /tmp issues
+            import os
+            cache_dir = os.path.expanduser('~/.cache/sentence_transformers')
+            os.makedirs(cache_dir, exist_ok=True)
+            _embedding_model = SentenceTransformer('all-MiniLM-L6-v2', cache_folder=cache_dir)
             logger.info("Embedding model loaded: all-MiniLM-L6-v2")
         except ImportError:
             logger.warning("sentence-transformers not installed. Install with: pip install sentence-transformers")
