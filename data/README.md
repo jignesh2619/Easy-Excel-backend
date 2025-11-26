@@ -12,12 +12,25 @@ Place your training datasets here:
 
 ## File Format
 
+### Standard Format (Recommended):
 Each Excel file should contain examples with:
-- **Column A**: User prompts (natural language requests)
-- **Column B**: Expected action plans (JSON format)
+- **Column A**: `user_message` - User prompts (natural language requests)
+- **Column B**: `model_response` - Action plans in JSON format (can include JSON + explanation)
 - **Column C**: Execution instructions (optional, detailed execution steps)
 
-Or any format that can be parsed - we'll create a loader script to handle different formats.
+### Supported Column Names:
+The loader automatically detects these column names:
+- **Prompts**: `user_message`, `prompt`, `user_prompt`, `input`, `query`, `request`
+- **Responses**: `model_response`, `action_plan`, `response`, `output`, `json`, `plan`
+- **Instructions**: `execution`, `instructions`, `execution_instructions`, `steps`
+
+### Response Format:
+The `model_response` column can contain:
+- Pure JSON: `{"task": "clean", "chart_type": "bar", ...}`
+- JSON + explanation: `{"task": "clean", ...} This cleans the data and creates a bar chart.`
+- JSON in code blocks: `` ```json {"task": "clean", ...} ``` ``
+
+The loader will automatically extract the JSON part.
 
 ## Usage
 

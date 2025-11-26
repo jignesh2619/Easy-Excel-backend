@@ -69,20 +69,20 @@ class TrainingDataLoader:
                 action_plan_col = None
                 execution_col = None
                 
-                # Find prompt column (usually first column or named "prompt", "user_prompt", "input")
+                # Find prompt column (usually first column or named "prompt", "user_prompt", "input", "user_message")
                 for col in df.columns:
                     col_lower = str(col).lower()
-                    if col_lower in ["prompt", "user_prompt", "input", "query", "request", "user"]:
+                    if col_lower in ["prompt", "user_prompt", "input", "query", "request", "user", "user_message"]:
                         prompt_col = col
                         break
                 
                 if prompt_col is None and len(df.columns) > 0:
                     prompt_col = df.columns[0]  # Default to first column
                 
-                # Find action plan column
+                # Find action plan column (model_response, action_plan, response, output, json, plan)
                 for col in df.columns:
                     col_lower = str(col).lower()
-                    if col_lower in ["action_plan", "response", "output", "json", "plan"]:
+                    if col_lower in ["action_plan", "response", "output", "json", "plan", "model_response"]:
                         action_plan_col = col
                         break
                 
@@ -103,19 +103,35 @@ class TrainingDataLoader:
                         if not prompt or prompt.lower() in ["nan", "none", ""]:
                             continue
                         
-                        # Parse action plan
+                        # Parse action plan (handles JSON + explanation format)
                         action_plan = None
                         if action_plan_col and pd.notna(row[action_plan_col]):
                             action_plan_str = str(row[action_plan_col]).strip()
+                            
+                            # Handle format: JSON + explanation (extract JSON part)
+                            # Try to find JSON object in the response
+                            import re
+                            
+                            # First, try direct JSON parse
                             try:
                                 action_plan = json.loads(action_plan_str)
                             except json.JSONDecodeError:
-                                # Try to extract JSON from text
-                                import re
-                                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', action_plan_str)
+                                # Try to extract JSON from text (handles "JSON + explanation" format)
+                                # Look for JSON object (handles multi-line JSON)
+                                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', action_plan_str, re.DOTALL)
                                 if json_match:
-                                    action_plan = json.loads(json_match.group())
-                                else:
+                                    try:
+                                        action_plan = json.loads(json_match.group())
+                                    except json.JSONDecodeError:
+                                        # Try to find JSON in code blocks
+                                        code_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', action_plan_str, re.DOTALL)
+                                        if code_block_match:
+                                            try:
+                                                action_plan = json.loads(code_block_match.group(1))
+                                            except json.JSONDecodeError:
+                                                pass
+                                
+                                if not action_plan:
                                     logger.warning(f"Could not parse action plan for prompt: {prompt[:50]}")
                                     continue
                         
