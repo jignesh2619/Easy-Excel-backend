@@ -31,8 +31,10 @@ class TrainingDataLoader:
         self.datasets: List[Dict] = []
         self.embedding_service = EmbeddingService()
         self.embeddings_cache: Dict[str, np.ndarray] = {}  # Cache embeddings
+        self._embeddings_generated = False  # Lazy loading flag
         self._load_datasets()
-        self._generate_embeddings()
+        # Don't generate embeddings on init - do it lazily on first use
+        # self._generate_embeddings()
     
     def _load_datasets(self):
         """Load all datasets from the data directory"""
@@ -228,6 +230,12 @@ class TrainingDataLoader:
     ) -> List[Dict]:
         """Find examples using semantic similarity"""
         try:
+            # Lazy load embeddings on first use (not on init to save memory)
+            if not self._embeddings_generated and self.embedding_service.is_available():
+                logger.info("Generating embeddings for training examples (lazy load)...")
+                self._generate_embeddings()
+                self._embeddings_generated = True
+            
             # Generate embedding for user prompt
             query_embedding = self.embedding_service.encode(user_prompt)
             if query_embedding is None:

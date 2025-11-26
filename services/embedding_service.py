@@ -26,8 +26,14 @@ def get_embedding_model():
             import os
             cache_dir = os.path.expanduser('~/.cache/sentence_transformers')
             os.makedirs(cache_dir, exist_ok=True)
-            _embedding_model = SentenceTransformer('all-MiniLM-L6-v2', cache_folder=cache_dir)
-            logger.info("Embedding model loaded: all-MiniLM-L6-v2")
+            
+            # Try to load model, but catch memory errors gracefully
+            try:
+                _embedding_model = SentenceTransformer('all-MiniLM-L6-v2', cache_folder=cache_dir)
+                logger.info("Embedding model loaded: all-MiniLM-L6-v2")
+            except (MemoryError, OSError) as e:
+                logger.warning(f"Could not load embedding model (likely out of memory): {e}. Falling back to keyword search.")
+                _embedding_model = None
         except ImportError:
             logger.warning("sentence-transformers not installed. Install with: pip install sentence-transformers")
             _embedding_model = None
