@@ -11,6 +11,7 @@ from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 
 from services.supabase_client import SupabaseClient
+from services.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +24,12 @@ class FeedbackLearner:
         try:
             self.supabase = SupabaseClient.get_client()
             self.feedback_table = "llm_feedback"
+            self.embedding_service = EmbeddingService()
             logger.info("FeedbackLearner initialized with Supabase.")
         except ValueError as e:
             logger.warning(f"Supabase not configured: {e}. Feedback learning will be disabled.")
             self.supabase = None
+            self.embedding_service = None
     
     def record_success(
         self, 
@@ -99,17 +102,18 @@ class FeedbackLearner:
     def get_similar_successful_examples(
         self, 
         user_prompt: str, 
-        limit: int = 5
+        limit: int = 5,
+        use_semantic: bool = True
     ) -> List[Dict]:
         """
         Get similar successful examples for few-shot learning.
         
-        Uses simple keyword matching. For better results, consider using
-        vector similarity search or more advanced matching.
+        Uses semantic search if available, otherwise falls back to keyword matching.
         
         Args:
             user_prompt: User's prompt to find similar examples for
             limit: Maximum number of examples to return
+            use_semantic: Whether to use semantic search (True) or keyword search (False)
             
         Returns:
             List of similar successful examples
@@ -121,46 +125,109 @@ class FeedbackLearner:
             # Get recent successful examples
             result = self.supabase.table(self.feedback_table).select("*").eq(
                 "success", True
-            ).order("created_at", desc=True).limit(limit * 3).execute()
+            ).order("created_at", desc=True).limit(limit * 5).execute()
             
             if not result.data:
                 return []
             
-            # Simple similarity: check for common keywords
-            prompt_lower = user_prompt.lower()
-            prompt_words = set(prompt_lower.split())
-            
-            similar = []
-            for example in result.data:
-                example_prompt = example["user_prompt"].lower()
-                example_words = set(example_prompt.split())
-                
-                # Count common words (excluding common stop words)
-                stop_words = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by"}
-                common_words = (prompt_words & example_words) - stop_words
-                
-                # If at least 2 meaningful common words, consider it similar
-                if len(common_words) >= 2:
-                    try:
-                        similar.append({
-                            "prompt": example["user_prompt"],
-                            "action_plan": json.loads(example["action_plan"]),
-                            "similarity_score": len(common_words)
-                        })
-                    except json.JSONDecodeError:
-                        continue
-                    
-                    if len(similar) >= limit:
-                        break
-            
-            # Sort by similarity score (descending)
-            similar.sort(key=lambda x: x["similarity_score"], reverse=True)
-            
-            return similar[:limit]
+            # Use semantic search if available
+            if use_semantic and self.embedding_service and self.embedding_service.is_available():
+                return self._semantic_search_feedback(user_prompt, result.data, limit)
+            else:
+                return self._keyword_search_feedback(user_prompt, result.data, limit)
             
         except Exception as e:
             logger.error(f"Error getting similar examples: {e}")
             return []
+    
+    def _semantic_search_feedback(
+        self,
+        user_prompt: str,
+        examples: List[Dict],
+        limit: int
+    ) -> List[Dict]:
+        """Find similar examples using semantic search"""
+        try:
+            # Generate embedding for user prompt
+            query_embedding = self.embedding_service.encode(user_prompt)
+            if query_embedding is None:
+                return self._keyword_search_feedback(user_prompt, examples, limit)
+            
+            # Generate embeddings for examples and find most similar
+            candidate_embeddings = []
+            example_data = []
+            
+            for example in examples:
+                try:
+                    example_prompt = example["user_prompt"]
+                    # Generate embedding on-the-fly (could cache in future)
+                    embedding = self.embedding_service.encode(example_prompt)
+                    
+                    if embedding is not None:
+                        candidate_embeddings.append((embedding, len(example_data)))
+                        example_data.append({
+                            "prompt": example_prompt,
+                            "action_plan": json.loads(example["action_plan"]),
+                            "example": example
+                        })
+                except (json.JSONDecodeError, Exception) as e:
+                    continue
+            
+            # Find most similar
+            results = self.embedding_service.find_most_similar(
+                query_embedding,
+                [(emb, idx) for emb, idx in candidate_embeddings],
+                top_k=limit * 2
+            )
+            
+            # Extract examples with similarity scores
+            similar = []
+            for similarity, idx in results:
+                if similarity >= 0.3:  # Minimum similarity threshold
+                    ex = example_data[idx].copy()
+                    ex["similarity_score"] = similarity
+                    similar.append(ex)
+            
+            return similar[:limit]
+            
+        except Exception as e:
+            logger.error(f"Error in semantic search: {e}")
+            return self._keyword_search_feedback(user_prompt, examples, limit)
+    
+    def _keyword_search_feedback(
+        self,
+        user_prompt: str,
+        examples: List[Dict],
+        limit: int
+    ) -> List[Dict]:
+        """Find similar examples using keyword matching (fallback)"""
+        prompt_lower = user_prompt.lower()
+        prompt_words = set(prompt_lower.split())
+        
+        similar = []
+        stop_words = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by"}
+        
+        for example in examples:
+            example_prompt = example["user_prompt"].lower()
+            example_words = set(example_prompt.split())
+            
+            common_words = (prompt_words & example_words) - stop_words
+            
+            if len(common_words) >= 2:
+                try:
+                    similar.append({
+                        "prompt": example["user_prompt"],
+                        "action_plan": json.loads(example["action_plan"]),
+                        "similarity_score": len(common_words)
+                    })
+                except json.JSONDecodeError:
+                    continue
+                
+                if len(similar) >= limit:
+                    break
+        
+        similar.sort(key=lambda x: x["similarity_score"], reverse=True)
+        return similar[:limit]
     
     def get_failure_patterns(self, limit: int = 10) -> Dict[str, List[Dict]]:
         """
