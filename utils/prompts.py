@@ -204,6 +204,9 @@ Available Operations:
 - normalize_text: Normalize text formatting (trim, lowercase)
 - fix_date_formats: Fix date formats in a column
 - convert_text_to_numbers: Convert text numbers to actual numeric values
+- remove_characters: Remove specific characters from columns (e.g., remove dots from start of phone numbers)
+  - Use params: {"column": "ColumnName", "character": ".", "position": "start|end|all"}
+  - Or use execution_instructions with pandas.str.lstrip/rstrip/replace methods
 
 **Grouping & Summaries:**
 - group_by_category: Group by category and aggregate (count, sum, average, max, min)

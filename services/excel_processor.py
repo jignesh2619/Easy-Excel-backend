@@ -186,6 +186,56 @@ class ExcelProcessor:
         """Execute cleaning operations"""
         initial_rows = len(self.df)
         
+        # Process operations array if provided (for specific cleaning tasks)
+        operations = action_plan.get("operations", [])
+        for op in operations:
+            op_type = op.get("type", "")
+            params = op.get("params", {})
+            exec_instructions = op.get("execution_instructions", {})
+            
+            # Handle character removal/replacement operations
+            if op_type in ["remove_characters", "replace_text", "clean_text"] or "remove" in op_type.lower() or "replace" in op_type.lower():
+                column = params.get("column") or exec_instructions.get("kwargs", {}).get("column")
+                if column and column in self.df.columns:
+                    # Get the character/pattern to remove
+                    char_to_remove = params.get("character") or params.get("pattern") or params.get("value", "")
+                    remove_from = params.get("position", "start")  # start, end, all
+                    
+                    if char_to_remove:
+                        if remove_from == "start":
+                            # Remove from beginning (lstrip)
+                            self.df[column] = self.df[column].astype(str).str.lstrip(char_to_remove)
+                            self.summary.append(f"Removed '{char_to_remove}' from start of {column}")
+                        elif remove_from == "end":
+                            # Remove from end (rstrip)
+                            self.df[column] = self.df[column].astype(str).str.rstrip(char_to_remove)
+                            self.summary.append(f"Removed '{char_to_remove}' from end of {column}")
+                        else:
+                            # Remove all occurrences (replace)
+                            self.df[column] = self.df[column].astype(str).str.replace(char_to_remove, "", regex=False)
+                            self.summary.append(f"Removed all '{char_to_remove}' from {column}")
+            
+            # Handle execution instructions for pandas operations
+            if exec_instructions.get("method"):
+                method_path = exec_instructions.get("method", "")
+                if "pandas" in method_path or "str" in method_path:
+                    column = exec_instructions.get("kwargs", {}).get("column") or params.get("column")
+                    if column and column in self.df.columns:
+                        # Handle string operations
+                        if "lstrip" in method_path or "remove_start" in method_path.lower():
+                            char = exec_instructions.get("kwargs", {}).get("char", ".")
+                            self.df[column] = self.df[column].astype(str).str.lstrip(char)
+                            self.summary.append(f"Removed '{char}' from start of {column}")
+                        elif "rstrip" in method_path or "remove_end" in method_path.lower():
+                            char = exec_instructions.get("kwargs", {}).get("char", ".")
+                            self.df[column] = self.df[column].astype(str).str.rstrip(char)
+                            self.summary.append(f"Removed '{char}' from end of {column}")
+                        elif "replace" in method_path:
+                            old = exec_instructions.get("kwargs", {}).get("old", ".")
+                            new = exec_instructions.get("kwargs", {}).get("new", "")
+                            self.df[column] = self.df[column].astype(str).str.replace(old, new, regex=False)
+                            self.summary.append(f"Replaced '{old}' with '{new}' in {column}")
+        
         # Remove duplicates
         self.df = self.df.drop_duplicates()
         duplicates_removed = initial_rows - len(self.df)
