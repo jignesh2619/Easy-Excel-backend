@@ -206,7 +206,10 @@ async def process_file(
                 detail="LLM service not available. Please set GEMINI_API_KEY environment variable."
             )
         
-        llm_result = llm_agent.interpret_prompt(prompt, available_columns)
+        # Get user_id for feedback tracking
+        user_id = user["user_id"] if user else None
+        
+        llm_result = llm_agent.interpret_prompt(prompt, available_columns, user_id=user_id)
         action_plan = llm_result.get("action_plan", {})
         actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)  # Use actual tokens from API
         
@@ -372,6 +375,24 @@ async def process_file(
         if user:
             user_service.record_token_usage(user["user_id"], actual_tokens_used, "file_processing")
         
+        # Record successful execution for feedback learning
+        if llm_agent.feedback_learner:
+            try:
+                execution_result = {
+                    "status": "success",
+                    "task": task,
+                    "rows_processed": row_count,
+                    "chart_generated": chart_path is not None
+                }
+                llm_agent.feedback_learner.record_success(
+                    user_prompt=prompt,
+                    action_plan=action_plan,
+                    execution_result=execution_result,
+                    user_id=user_id
+                )
+            except Exception as e:
+                logger.warning(f"Failed to record feedback: {e}")
+        
         return ProcessFileResponse(
             status="success",
             processed_file_url=processed_file_url,
@@ -401,6 +422,22 @@ async def process_file(
             "traceback": traceback.format_exc()
         }
         print(f"Error processing file: {error_detail}")
+        
+        # Record failed execution for feedback learning
+        if llm_agent and llm_agent.feedback_learner:
+            try:
+                user_id = user["user_id"] if user else None
+                # Try to get action_plan if it was created before error
+                action_plan = locals().get("action_plan", {})
+                llm_agent.feedback_learner.record_failure(
+                    user_prompt=prompt,
+                    action_plan=action_plan,
+                    error=str(e),
+                    user_id=user_id
+                )
+            except Exception as feedback_error:
+                logger.warning(f"Failed to record failure feedback: {feedback_error}")
+        
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 

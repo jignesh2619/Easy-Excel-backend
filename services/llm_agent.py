@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 from utils.prompts import get_prompt_with_context
 from utils.knowledge_base import get_knowledge_base_summary, get_task_decision_guide
+from services.feedback_learner import FeedbackLearner
 
 load_dotenv()
 
@@ -55,11 +56,19 @@ class LLMAgent:
             )
         except Exception as e:
             raise ValueError(f"Failed to initialize Gemini model: {str(e)}")
+        
+        # Initialize feedback learner for continuous improvement
+        try:
+            self.feedback_learner = FeedbackLearner()
+        except Exception as e:
+            # If feedback learner fails to initialize, continue without it
+            self.feedback_learner = None
     
     def interpret_prompt(
         self, 
         user_prompt: str, 
-        available_columns: List[str]
+        available_columns: List[str],
+        user_id: Optional[str] = None
     ) -> Dict:
         """
         Interpret user prompt and return structured action plan with token usage
@@ -67,6 +76,7 @@ class LLMAgent:
         Args:
             user_prompt: Natural language user request
             available_columns: List of available column names in the data
+            user_id: Optional user ID for feedback tracking
             
         Returns:
             Dictionary with:
@@ -87,6 +97,21 @@ class LLMAgent:
             # Get task decision suggestions (for validation, not enforcement)
             task_suggestions = get_task_decision_guide(user_prompt)
             
+            # Get similar successful examples for few-shot learning (if feedback learner is available)
+            similar_examples_text = ""
+            if self.feedback_learner:
+                try:
+                    similar_examples = self.feedback_learner.get_similar_successful_examples(user_prompt, limit=3)
+                    if similar_examples:
+                        similar_examples_text = "\n\nSIMILAR SUCCESSFUL EXAMPLES FROM PAST EXECUTIONS:\n"
+                        for i, ex in enumerate(similar_examples, 1):
+                            similar_examples_text += f"\nExample {i}:\n"
+                            similar_examples_text += f"User: {ex['prompt']}\n"
+                            similar_examples_text += f"Response: {json.dumps(ex['action_plan'], indent=2)}\n"
+                except Exception as e:
+                    # If getting examples fails, continue without them
+                    pass
+            
             # Create full prompt with system instructions and knowledge base
             full_prompt = f"""You are a data analysis assistant that returns ONLY valid JSON. 
 Do not include any markdown formatting, code blocks, or explanatory text. Return pure JSON only.
@@ -102,6 +127,7 @@ TASK DECISION HINT (use as guidance, not strict rule):
 Based on the user prompt, the suggested task is: {task_suggestions.get('suggested_task', 'auto-detect')}
 Reasoning: {', '.join(task_suggestions.get('reasoning', []))}
 Confidence: {task_suggestions.get('confidence', 0)}
+{similar_examples_text}
 
 {prompt}
 
