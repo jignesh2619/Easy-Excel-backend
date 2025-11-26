@@ -17,6 +17,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from utils.prompts import get_prompt_with_context
 from utils.knowledge_base import get_knowledge_base_summary, get_task_decision_guide
 from services.feedback_learner import FeedbackLearner
+from services.training_data_loader import TrainingDataLoader
 
 load_dotenv()
 
@@ -63,6 +64,13 @@ class LLMAgent:
         except Exception as e:
             # If feedback learner fails to initialize, continue without it
             self.feedback_learner = None
+        
+        # Initialize training data loader for few-shot learning
+        try:
+            self.training_data_loader = TrainingDataLoader()
+        except Exception as e:
+            # If training data loader fails, continue without it
+            self.training_data_loader = None
     
     def interpret_prompt(
         self, 
@@ -97,20 +105,40 @@ class LLMAgent:
             # Get task decision suggestions (for validation, not enforcement)
             task_suggestions = get_task_decision_guide(user_prompt)
             
-            # Get similar successful examples for few-shot learning (if feedback learner is available)
+            # Get similar examples for few-shot learning
             similar_examples_text = ""
+            all_examples = []
+            
+            # 1. Get examples from training datasets (GPT-generated)
+            if self.training_data_loader:
+                try:
+                    training_examples = self.training_data_loader.get_examples_for_prompt(user_prompt, limit=3)
+                    all_examples.extend(training_examples)
+                except Exception as e:
+                    pass
+            
+            # 2. Get similar successful examples from feedback (real user interactions)
             if self.feedback_learner:
                 try:
-                    similar_examples = self.feedback_learner.get_similar_successful_examples(user_prompt, limit=3)
-                    if similar_examples:
-                        similar_examples_text = "\n\nSIMILAR SUCCESSFUL EXAMPLES FROM PAST EXECUTIONS:\n"
-                        for i, ex in enumerate(similar_examples, 1):
-                            similar_examples_text += f"\nExample {i}:\n"
-                            similar_examples_text += f"User: {ex['prompt']}\n"
-                            similar_examples_text += f"Response: {json.dumps(ex['action_plan'], indent=2)}\n"
+                    feedback_examples = self.feedback_learner.get_similar_successful_examples(user_prompt, limit=2)
+                    # Convert feedback format to match training format
+                    for ex in feedback_examples:
+                        all_examples.append({
+                            "prompt": ex["prompt"],
+                            "action_plan": ex["action_plan"]
+                        })
                 except Exception as e:
-                    # If getting examples fails, continue without them
                     pass
+            
+            # Combine and format examples
+            if all_examples:
+                similar_examples_text = "\n\nFEW-SHOT LEARNING EXAMPLES (from training data and past executions):\n"
+                for i, ex in enumerate(all_examples[:5], 1):  # Limit to 5 total examples
+                    similar_examples_text += f"\nExample {i}:\n"
+                    similar_examples_text += f"User: {ex['prompt']}\n"
+                    similar_examples_text += f"Response: {json.dumps(ex['action_plan'], indent=2)}\n"
+                    if ex.get('execution_instructions'):
+                        similar_examples_text += f"Execution: {ex['execution_instructions']}\n"
             
             # Create full prompt with system instructions and knowledge base
             full_prompt = f"""You are a data analysis assistant that returns ONLY valid JSON. 
