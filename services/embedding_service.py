@@ -18,12 +18,18 @@ def get_embedding_model():
     """Get or initialize embedding model (lazy loading)"""
     global _embedding_model
     if _embedding_model is None:
+        # Check if embeddings are disabled via environment variable
+        import os
+        if os.getenv('DISABLE_EMBEDDINGS', '').lower() in ('true', '1', 'yes'):
+            logger.info("Embeddings disabled via DISABLE_EMBEDDINGS environment variable")
+            _embedding_model = False  # Use False to indicate disabled (not None)
+            return None
+        
         try:
             from sentence_transformers import SentenceTransformer
             # Using a lightweight, fast model
             # 'all-MiniLM-L6-v2' is fast and good for semantic search
             # Set cache_dir to avoid /tmp issues
-            import os
             cache_dir = os.path.expanduser('~/.cache/sentence_transformers')
             os.makedirs(cache_dir, exist_ok=True)
             
@@ -37,7 +43,10 @@ def get_embedding_model():
         except ImportError:
             logger.warning("sentence-transformers not installed. Install with: pip install sentence-transformers")
             _embedding_model = None
-    return _embedding_model
+        except Exception as e:
+            logger.warning(f"Error loading embedding model: {e}. Falling back to keyword search.")
+            _embedding_model = None
+    return _embedding_model if _embedding_model is not False else None
 
 
 class EmbeddingService:
