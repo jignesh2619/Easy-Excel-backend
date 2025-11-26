@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS token_usage (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- LLM Feedback table for fine-tuning and learning
+CREATE TABLE IF NOT EXISTS llm_feedback (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_prompt TEXT NOT NULL,
+    action_plan JSONB NOT NULL,
+    execution_result JSONB,
+    error TEXT,
+    success BOOLEAN NOT NULL,
+    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_api_key ON users(api_key);
@@ -46,6 +58,11 @@ CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
 CREATE INDEX IF NOT EXISTS idx_token_usage_user_id ON token_usage(user_id);
 CREATE INDEX IF NOT EXISTS idx_token_usage_created_at ON token_usage(created_at);
+CREATE INDEX IF NOT EXISTS idx_llm_feedback_success ON llm_feedback(success, created_at);
+CREATE INDEX IF NOT EXISTS idx_llm_feedback_user_id ON llm_feedback(user_id);
+CREATE INDEX IF NOT EXISTS idx_llm_feedback_created_at ON llm_feedback(created_at);
+-- Full-text search index for prompt similarity matching
+CREATE INDEX IF NOT EXISTS idx_llm_feedback_prompt ON llm_feedback USING gin(to_tsvector('english', user_prompt));
 
 -- Enable Row Level Security (RLS) - Optional but recommended
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
@@ -61,6 +78,9 @@ CREATE POLICY "Service role can access subscriptions" ON subscriptions
     FOR ALL USING (true);
 
 CREATE POLICY "Service role can access token_usage" ON token_usage
+    FOR ALL USING (true);
+
+CREATE POLICY "Service role can access llm_feedback" ON llm_feedback
     FOR ALL USING (true);
 
 
