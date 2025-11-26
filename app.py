@@ -789,15 +789,25 @@ async def paypal_webhook(request: Request):
                 user = user_service.create_user(email, plan_name)
                 user_service.update_subscription(user["user_id"], subscription_id, plan_name, "active")
         elif event_type == "BILLING.SUBSCRIPTION.CANCELLED":
-            # Subscription cancelled
+            # Subscription cancelled - downgrade to Free
             if email:
                 user = user_service.create_user(email, "Free")  # Downgrade to Free
                 user_service.update_subscription(user["user_id"], subscription_id, "Free", "cancelled")
+        elif event_type == "BILLING.SUBSCRIPTION.SUSPENDED":
+            # Subscription suspended (payment failure) - downgrade to Free
+            if email:
+                user = user_service.create_user(email, "Free")
+                user_service.handle_payment_failure(user["user_id"], subscription_id)
         elif event_type == "PAYMENT.SALE.COMPLETED":
             # Payment completed - subscription is active
             if email:
                 user = user_service.create_user(email, plan_name)
                 user_service.update_subscription(user["user_id"], subscription_id, plan_name, "active")
+        elif event_type == "PAYMENT.SALE.DENIED" or event_type == "PAYMENT.CAPTURE.DENIED":
+            # Payment denied/failed - downgrade to Free
+            if email:
+                user = user_service.create_user(email, "Free")
+                user_service.handle_payment_failure(user["user_id"], subscription_id)
         
         return JSONResponse(content={"status": "success"})
     except Exception as e:
@@ -810,6 +820,30 @@ async def cleanup_old_files():
     """Clean up old files"""
     deleted_count = file_manager.clean_old_files(days=7)
     return {"status": "success", "files_deleted": deleted_count}
+
+
+@app.post("/api/subscriptions/maintenance")
+async def run_subscription_maintenance():
+    """
+    Run subscription maintenance tasks.
+    
+    This endpoint should be called periodically (e.g., daily via cron job) to:
+    - Refresh tokens for free users after 30 days
+    - Downgrade expired paid subscriptions to Free
+    
+    Returns:
+        Dictionary with counts of actions taken
+    """
+    try:
+        results = user_service.run_subscription_maintenance()
+        return JSONResponse(content={
+            "status": "success",
+            "tokens_refreshed": results["tokens_refreshed"],
+            "users_downgraded": results["users_downgraded"]
+        })
+    except Exception as e:
+        logger.error(f"Error running subscription maintenance: {e}")
+        raise HTTPException(status_code=500, detail=f"Maintenance failed: {str(e)}")
 
 
 if __name__ == "__main__":

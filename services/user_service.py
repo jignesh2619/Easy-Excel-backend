@@ -527,6 +527,200 @@ class UserService:
         except Exception as e:
             logger.error(f"Error recording token usage: {e}")
     
+    def refresh_free_user_tokens(self) -> int:
+        """
+        Refresh tokens for free users whose subscription is 30+ days old.
+        Resets tokens_used to 0 for free plan users.
+        
+        Returns:
+            Number of users whose tokens were refreshed
+        """
+        if not self.supabase:
+            logger.warning("Supabase not configured. Token refresh skipped.")
+            return 0
+        
+        try:
+            # Get all active Free plan subscriptions that are 30+ days old
+            thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
+            
+            # Find free subscriptions created 30+ days ago
+            result = self.supabase.table("subscriptions").select("*").eq(
+                "plan_name", "Free"
+            ).eq("status", "active").lte("created_at", thirty_days_ago).execute()
+            
+            refreshed_count = 0
+            for subscription in result.data:
+                subscription_id = subscription["id"]
+                user_id = subscription["user_id"]
+                
+                # Reset tokens_used to 0 and update created_at to now (reset the 30-day cycle)
+                self.supabase.table("subscriptions").update({
+                    "tokens_used": 0,
+                    "created_at": datetime.now().isoformat(),
+                    "updated_at": datetime.now().isoformat()
+                }).eq("id", subscription_id).execute()
+                
+                refreshed_count += 1
+                logger.info(f"Refreshed tokens for free user {user_id}")
+            
+            return refreshed_count
+        except Exception as e:
+            logger.error(f"Error refreshing free user tokens: {e}")
+            return 0
+    
+    def downgrade_expired_paid_users(self) -> int:
+        """
+        Downgrade Pro/Starter users to Free if their subscription expired or payment failed.
+        
+        Returns:
+            Number of users downgraded
+        """
+        if not self.supabase:
+            logger.warning("Supabase not configured. Downgrade skipped.")
+            return 0
+        
+        try:
+            downgraded_count = 0
+            now = datetime.now()
+            
+            # Get all active paid subscriptions (Pro or Starter)
+            result = self.supabase.table("subscriptions").select("*").in_(
+                "plan_name", ["Pro", "Starter"]
+            ).eq("status", "active").execute()
+            
+            for subscription in result.data:
+                subscription_id = subscription["id"]
+                user_id = subscription["user_id"]
+                plan_name = subscription["plan_name"]
+                expires_at = subscription.get("expires_at")
+                
+                # Check if subscription expired
+                should_downgrade = False
+                if expires_at:
+                    expires = datetime.fromisoformat(expires_at.replace("Z", "+00:00") if "Z" in expires_at else expires_at)
+                    if now > expires:
+                        should_downgrade = True
+                        logger.info(f"Subscription expired for user {user_id} (plan: {plan_name})")
+                
+                # Also check if subscription is 30+ days old without renewal (for safety)
+                created_at = subscription.get("created_at")
+                if created_at and not expires_at:
+                    created = datetime.fromisoformat(created_at.replace("Z", "+00:00") if "Z" in created_at else created_at)
+                    if (now - created).days >= 30:
+                        should_downgrade = True
+                        logger.info(f"Subscription expired (30+ days old) for user {user_id} (plan: {plan_name})")
+                
+                if should_downgrade:
+                    # Update user plan to Free
+                    self.supabase.table("users").update({
+                        "plan": "Free",
+                        "updated_at": datetime.now().isoformat()
+                    }).eq("id", user_id).execute()
+                    
+                    # Mark old subscription as expired
+                    self.supabase.table("subscriptions").update({
+                        "status": "expired",
+                        "updated_at": datetime.now().isoformat()
+                    }).eq("id", subscription_id).execute()
+                    
+                    # Create new Free subscription with reset tokens
+                    tokens_limit = self._get_tokens_limit("Free")
+                    new_subscription_data = {
+                        "id": f"sub_{secrets.token_urlsafe(16)}",
+                        "user_id": user_id,
+                        "plan_name": "Free",
+                        "status": "active",
+                        "tokens_used": 0,
+                        "tokens_limit": tokens_limit,
+                        "created_at": datetime.now().isoformat(),
+                        "updated_at": datetime.now().isoformat()
+                    }
+                    self.supabase.table("subscriptions").insert(new_subscription_data).execute()
+                    
+                    downgraded_count += 1
+                    logger.info(f"Downgraded user {user_id} from {plan_name} to Free")
+            
+            return downgraded_count
+        except Exception as e:
+            logger.error(f"Error downgrading expired paid users: {e}")
+            return 0
+    
+    def handle_payment_failure(self, user_id: str, subscription_id: Optional[str] = None):
+        """
+        Handle payment failure by downgrading user to Free plan.
+        
+        Args:
+            user_id: User ID
+            subscription_id: Optional subscription ID to mark as failed
+        """
+        if not self.supabase:
+            logger.warning("Supabase not configured. Payment failure handling skipped.")
+            return
+        
+        try:
+            # Get user's current plan
+            user_result = self.supabase.table("users").select("*").eq("id", user_id).execute()
+            if not user_result.data:
+                logger.warning(f"User {user_id} not found for payment failure handling")
+                return
+            
+            user = user_result.data[0]
+            current_plan = user.get("plan", "Free")
+            
+            # Only downgrade if user is on a paid plan
+            if current_plan in ["Pro", "Starter"]:
+                # Update user plan to Free
+                self.supabase.table("users").update({
+                    "plan": "Free",
+                    "updated_at": datetime.now().isoformat()
+                }).eq("id", user_id).execute()
+                
+                # Mark subscription as failed/cancelled
+                if subscription_id:
+                    self.supabase.table("subscriptions").update({
+                        "status": "cancelled",
+                        "updated_at": datetime.now().isoformat()
+                    }).eq("id", subscription_id).execute()
+                else:
+                    # Mark all active paid subscriptions for this user as cancelled
+                    self.supabase.table("subscriptions").update({
+                        "status": "cancelled",
+                        "updated_at": datetime.now().isoformat()
+                    }).eq("user_id", user_id).in_("plan_name", ["Pro", "Starter"]).eq("status", "active").execute()
+                
+                # Create new Free subscription with reset tokens
+                tokens_limit = self._get_tokens_limit("Free")
+                new_subscription_data = {
+                    "id": f"sub_{secrets.token_urlsafe(16)}",
+                    "user_id": user_id,
+                    "plan_name": "Free",
+                    "status": "active",
+                    "tokens_used": 0,
+                    "tokens_limit": tokens_limit,
+                    "created_at": datetime.now().isoformat(),
+                    "updated_at": datetime.now().isoformat()
+                }
+                self.supabase.table("subscriptions").insert(new_subscription_data).execute()
+                
+                logger.info(f"Downgraded user {user_id} from {current_plan} to Free due to payment failure")
+        except Exception as e:
+            logger.error(f"Error handling payment failure for user {user_id}: {e}")
+    
+    def run_subscription_maintenance(self) -> Dict[str, int]:
+        """
+        Run all subscription maintenance tasks.
+        
+        Returns:
+            Dictionary with counts of actions taken
+        """
+        refreshed = self.refresh_free_user_tokens()
+        downgraded = self.downgrade_expired_paid_users()
+        
+        return {
+            "tokens_refreshed": refreshed,
+            "users_downgraded": downgraded
+        }
+    
     def _get_tokens_limit(self, plan: str) -> int:
         """Get token limit for a plan."""
         limits = {
