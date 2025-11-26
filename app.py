@@ -186,12 +186,22 @@ async def process_file(
                 file_manager.delete_file(temp_file_path)
                 raise HTTPException(status_code=400, detail=error)
         
-        # 7. Check subscription and token limits if a valid API key is provided
+        # 7. Check subscription and token limits if authenticated
         # Estimate tokens needed (rough estimate: 100 tokens per row + prompt tokens)
         estimated_tokens = len(df) * 100 + len(prompt) * 2
         user = None
         if credentials and credentials.credentials:
-            user = user_service.get_user_by_api_key(credentials.credentials)
+            token = credentials.credentials
+            # Try Supabase Auth token first (same logic as get_current_user)
+            try:
+                from services.supabase_client import SupabaseClient
+                supabase = SupabaseClient.get_client()
+                user_info = supabase.auth.get_user(token)
+                if user_info and user_info.user:
+                    user = user_service.get_user_by_supabase_id(user_info.user.id)
+            except Exception:
+                # If Supabase auth fails, try API key (legacy support)
+                user = user_service.get_user_by_api_key(token)
         
         if user:
             token_check = user_service.check_token_limit(user["user_id"], estimated_tokens)

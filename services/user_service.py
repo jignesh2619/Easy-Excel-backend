@@ -124,10 +124,10 @@ class UserService:
             user = user_result.data[0]
             user_id = user["id"]
             
-            # Get latest subscription for this user
+            # Get latest ACTIVE subscription for this user
             subscription_result = self.supabase.table("subscriptions").select("*").eq(
                 "user_id", user_id
-            ).order("created_at", desc=True).limit(1).execute()
+            ).eq("status", "active").order("created_at", desc=True).limit(1).execute()
             
             subscription = subscription_result.data[0] if subscription_result.data else None
             
@@ -171,10 +171,10 @@ class UserService:
             user = user_result.data[0]
             user_id = user["id"]
             
-            # Get latest subscription
+            # Get latest ACTIVE subscription
             subscription_result = self.supabase.table("subscriptions").select("*").eq(
                 "user_id", user_id
-            ).order("created_at", desc=True).limit(1).execute()
+            ).eq("status", "active").order("created_at", desc=True).limit(1).execute()
             
             subscription = subscription_result.data[0] if subscription_result.data else None
             
@@ -218,10 +218,22 @@ class UserService:
             
             if existing_user.data:
                 user = existing_user.data[0]
+                user_id = user["id"]
+                # Get ACTIVE subscription data
+                subscription_result = self.supabase.table("subscriptions").select("*").eq(
+                    "user_id", user_id
+                ).eq("status", "active").order("created_at", desc=True).limit(1).execute()
+                subscription = subscription_result.data[0] if subscription_result.data else None
+                tokens_limit = subscription.get("tokens_limit") if subscription else self._get_tokens_limit(user["plan"])
+                tokens_used = subscription.get("tokens_used", 0) if subscription else 0
                 return {
                     "user_id": user["id"],
                     "email": user["email"],
-                    "plan": user["plan"]
+                    "plan": user["plan"],
+                    "subscription_status": subscription.get("status", "active") if subscription else "active",
+                    "tokens_used": tokens_used,
+                    "tokens_limit": tokens_limit,
+                    "expires_at": subscription.get("expires_at") if subscription else None
                 }
             
             # Check if user exists by email
@@ -229,14 +241,26 @@ class UserService:
             if existing_by_email.data:
                 # Update existing user with Supabase Auth ID
                 user = existing_by_email.data[0]
+                user_id = user["id"]
                 self.supabase.table("users").update({
                     "supabase_auth_id": supabase_user_id,
                     "updated_at": datetime.now().isoformat()
-                }).eq("id", user["id"]).execute()
+                }).eq("id", user_id).execute()
+                # Get ACTIVE subscription data
+                subscription_result = self.supabase.table("subscriptions").select("*").eq(
+                    "user_id", user_id
+                ).eq("status", "active").order("created_at", desc=True).limit(1).execute()
+                subscription = subscription_result.data[0] if subscription_result.data else None
+                tokens_limit = subscription.get("tokens_limit") if subscription else self._get_tokens_limit(user["plan"])
+                tokens_used = subscription.get("tokens_used", 0) if subscription else 0
                 return {
                     "user_id": user["id"],
                     "email": user["email"],
-                    "plan": user["plan"]
+                    "plan": user["plan"],
+                    "subscription_status": subscription.get("status", "active") if subscription else "active",
+                    "tokens_used": tokens_used,
+                    "tokens_limit": tokens_limit,
+                    "expires_at": subscription.get("expires_at") if subscription else None
                 }
             
             # Create new user
@@ -274,7 +298,11 @@ class UserService:
             return {
                 "user_id": user["id"],
                 "email": user["email"],
-                "plan": user["plan"]
+                "plan": user["plan"],
+                "subscription_status": "active",
+                "tokens_used": 0,
+                "tokens_limit": tokens_limit,
+                "expires_at": None
             }
             
         except Exception as e:
@@ -304,10 +332,10 @@ class UserService:
             user = user_result.data[0]
             user_id = user["id"]
             
-            # Get latest subscription for this user
+            # Get latest ACTIVE subscription for this user
             subscription_result = self.supabase.table("subscriptions").select("*").eq(
                 "user_id", user_id
-            ).order("created_at", desc=True).limit(1).execute()
+            ).eq("status", "active").order("created_at", desc=True).limit(1).execute()
             
             subscription = subscription_result.data[0] if subscription_result.data else None
             
@@ -347,10 +375,10 @@ class UserService:
                 "updated_at": datetime.now().isoformat()
             }).eq("id", user_id).execute()
             
-            # Get latest subscription for user
+            # Get latest ACTIVE subscription for user (to preserve tokens_used if reactivating)
             result = self.supabase.table("subscriptions").select("*").eq(
                 "user_id", user_id
-            ).order("created_at", desc=True).limit(1).execute()
+            ).eq("status", "active").order("created_at", desc=True).limit(1).execute()
             
             tokens_limit = self._get_tokens_limit(plan_name)
             expires_at = None
@@ -367,13 +395,15 @@ class UserService:
                 "updated_at": datetime.now().isoformat()
             }
             
-            if result.data:
-                # Update existing subscription
+            if result.data and status == "active":
+                # Update existing active subscription (preserve tokens_used)
+                existing_sub = result.data[0]
+                subscription_data["tokens_used"] = existing_sub.get("tokens_used", 0)
                 self.supabase.table("subscriptions").update(subscription_data).eq(
-                    "id", result.data[0]["id"]
+                    "id", existing_sub["id"]
                 ).execute()
             else:
-                # Create new subscription
+                # Create new subscription (reset tokens_used to 0 for new subscriptions)
                 subscription_data.update({
                     "id": f"sub_{secrets.token_urlsafe(16)}",
                     "user_id": user_id,
@@ -404,20 +434,21 @@ class UserService:
             }
         
         try:
+            # Get latest ACTIVE subscription
             result = self.supabase.table("subscriptions").select("*").eq(
                 "user_id", user_id
-            ).order("created_at", desc=True).limit(1).execute()
+            ).eq("status", "active").order("created_at", desc=True).limit(1).execute()
             
             if not result.data:
                 return {
                     "can_proceed": False,
-                    "error": "No subscription found"
+                    "error": "No active subscription found"
                 }
             
             subscription = result.data[0]
             tokens_used = subscription.get("tokens_used", 0) or 0
             tokens_limit = subscription.get("tokens_limit", 0)
-            status = subscription.get("status", "inactive")
+            status = subscription.get("status", "active")
             expires_at = subscription.get("expires_at")
             
             # Check if subscription is active
