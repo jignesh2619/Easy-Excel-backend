@@ -883,7 +883,7 @@ Example 5: "remove the initial dot from phone numbers column"
 }
 """
 
-def get_prompt_with_context(user_prompt: str, available_columns: list, sample_data: Optional[List[Dict]] = None) -> str:
+def get_prompt_with_context(user_prompt: str, available_columns: list, sample_data: Optional[list] = None) -> str:
     """
     Generate prompt with context about available columns and sample data
     
