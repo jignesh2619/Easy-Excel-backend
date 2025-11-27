@@ -175,10 +175,13 @@ KNOWLEDGE BASE - TASK SELECTION GUIDE:
 - NEVER USE: When user wants to see actual data after cleaning/filtering
 
 **TASK: "filter"**
-- USE WHEN: User wants to show only specific rows based on conditions
+- USE WHEN: User wants to show only specific rows based on conditions OR remove rows based on conditions
 - OUTPUT: Returns filtered data rows (same structure, fewer rows)
-- KEYWORDS: "filter", "show only", "where", "find rows", "rows where"
-- EXAMPLE: "show rows where amount > 500" -> task: "filter"
+- KEYWORDS: "filter", "show only", "where", "find rows", "rows where", "remove rows which has", "delete rows containing"
+- EXAMPLES: 
+  * "show rows where amount > 500" -> task: "filter", filters: {{"column": "Amount", "condition": ">", "value": 500}}
+  * "remove rows which has website in column L" -> task: "filter", filters: {{"column": "ActualColumnNameFromL", "condition": "not_contains", "value": "website"}}
+- NOTE: "remove rows which has X" means KEEP rows that DON'T have X (use condition: "not_contains")
 
 **TASK: "group_by"**
 - USE WHEN: User wants to group data and aggregate (like pivot table)
