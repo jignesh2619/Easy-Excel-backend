@@ -24,12 +24,12 @@ class SampleResult:
 
 class SampleSelector:
     """
-    Builds representative samples that:
-        - Preserve ALL columns
-        - Cover categorical variety
-        - Capture numeric extremes/median/outliers
-        - Include rare rows or edge cases
-        - Provide a short explanation of the chosen rows
+    Smart sample selector that:
+        - Preserves ALL columns
+        - Selects diverse, representative rows (no duplicates)
+        - Uses quantile-based sampling for numeric columns
+        - Ensures categorical variety
+        - Captures edge cases and outliers
     """
 
     def __init__(self, max_rows: int = 20, min_rows: int = 10):
@@ -37,133 +37,166 @@ class SampleSelector:
         self.min_rows = min_rows
 
     def build_sample(self, df: pd.DataFrame) -> SampleResult:
-        """Return a representative sample DataFrame and explanation."""
+        """Return a representative sample DataFrame with ALL columns and diverse rows."""
         if df.empty:
             return SampleResult(df.copy(), "Dataset is empty. Returning empty sample.", {})
 
         if len(df) <= self.min_rows:
-            return SampleResult(df.copy(), "Dataset contains <=30 rows; returning all rows.", {
+            return SampleResult(df.copy(), f"Dataset contains <= {self.min_rows} rows; returning all rows.", {
                 "total_rows": len(df),
                 "strategy": "full_dataset"
             })
 
+        # Identify column types
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
         categorical_cols = df.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
         datetime_cols = df.select_dtypes(include=["datetime", "datetimetz"]).columns.tolist()
 
-        selected_indices = set()
-        rationale: List[str] = []
+        # Use smart selection that ensures diversity
+        selected_indices = self._smart_select_rows(
+            df, numeric_cols, categorical_cols, datetime_cols
+        )
 
-        # 1. Numeric variation: min/median/max (+ optional outliers)
-        for col in numeric_cols:
-            col_data = df[col].dropna()
-            if col_data.empty:
-                continue
-            quantiles = {
-                "min": col_data.idxmin(),
-                "median": col_data.sub(col_data.median()).abs().idxmin(),
-                "max": col_data.idxmax()
-            }
-            for label, idx in quantiles.items():
-                selected_indices.add(int(idx))
-            # Outliers (beyond 1.5 IQR)
-            q1, q3 = np.percentile(col_data, [25, 75])
-            iqr = q3 - q1
-            lower_bound = q1 - 1.5 * iqr
-            upper_bound = q3 + 1.5 * iqr
-            outliers = col_data[(col_data < lower_bound) | (col_data > upper_bound)]
-            if not outliers.empty:
-                selected_indices.update(outliers.index[:2])
-            rationale.append(f"Captured numeric spread for '{col}' (min/median/max + outliers).")
+        # Ensure we have at least min_rows
+        if len(selected_indices) < self.min_rows:
+            remaining = [idx for idx in df.index if idx not in selected_indices]
+            needed = self.min_rows - len(selected_indices)
+            selected_indices.extend(remaining[:needed])
 
-        # 2. Categorical coverage: ensure all major categories appear
-        for col in categorical_cols:
-            value_counts = df[col].fillna("<NULL>").value_counts()
-            top_categories = value_counts.index.tolist()
-            for category in top_categories:
-                idx = df[df[col].fillna("<NULL>") == category].index[0]
-                selected_indices.add(int(idx))
-            rationale.append(f"Included representatives for categories in '{col}'.")
+        # Ensure index bounds and remove duplicates
+        selected_indices = sorted(set([int(idx) for idx in selected_indices if 0 <= idx < len(df)]))
 
-        # 3. Date coverage
-        for col in datetime_cols:
-            col_data = df[col].dropna()
-            if col_data.empty:
-                continue
-            sorted_idx = col_data.sort_values()
-            first_idx = sorted_idx.index[0]
-            last_idx = sorted_idx.index[-1]
-            mid_idx = sorted_idx.index[len(sorted_idx) // 2]
-            selected_indices.update([first_idx, mid_idx, last_idx])
-            rationale.append(f"Covered date range extremes for '{col}'.")
+        # Limit to max_rows
+        if len(selected_indices) > self.max_rows:
+            selected_indices = selected_indices[:self.max_rows]
 
-        # 4. Rare rows: include rows with high missing values or unique combos
-        missing_counts = df.isna().sum(axis=1)
-        top_missing = missing_counts.sort_values(ascending=False).head(2).index.tolist()
-        selected_indices.update(top_missing)
-        rationale.append("Captured rows with high missing values.")
-
-        # 5. If still under limit, add random diverse rows using stratified sampling
-        if len(selected_indices) < self.max_rows:
-            remaining_slots = self.max_rows - len(selected_indices)
-            additional_indices = self._stratified_fill(
-                df,
-                exclude_indices=selected_indices,
-                target_count=remaining_slots,
-                categorical_cols=categorical_cols
-            )
-            selected_indices.update(additional_indices)
-            if additional_indices:
-                rationale.append("Added stratified rows to cover remaining diversity.")
-
-        # Ensure index bounds
-        selected_indices = [idx for idx in selected_indices if 0 <= idx < len(df)]
-
-        sample_df = df.loc[sorted(selected_indices)].copy()
-        explanation = self._build_explanation(len(df), sample_df, rationale)
+        sample_df = df.loc[selected_indices].copy()
+        
+        # Build explanation
+        explanation = self._build_explanation(len(df), len(sample_df), numeric_cols, categorical_cols, datetime_cols)
+        
         details = {
             "total_rows": len(df),
             "sample_rows": len(sample_df),
-            "numeric_columns": numeric_cols,
-            "categorical_columns": categorical_cols,
-            "datetime_columns": datetime_cols
+            "numeric_columns": len(numeric_cols),
+            "categorical_columns": len(categorical_cols),
+            "datetime_columns": len(datetime_cols),
+            "strategy": "smart_diverse_selection"
         }
+        
         return SampleResult(sample_df, explanation, details)
 
-    def _stratified_fill(
+    def _smart_select_rows(
         self,
         df: pd.DataFrame,
-        exclude_indices: set,
-        target_count: int,
-        categorical_cols: List[str]
+        numeric_cols: List[str],
+        categorical_cols: List[str],
+        datetime_cols: List[str]
     ) -> List[int]:
-        """Add rows to reach target_count using simple stratified sampling."""
-        remaining_indices = [idx for idx in df.index if idx not in exclude_indices]
-        if not remaining_indices or target_count <= 0:
-            return []
-
-        selected: List[int] = []
+        """Select diverse rows using quantile-based and categorical sampling."""
+        selected = set()
+        
+        # Strategy 1: Quantile-based sampling for numeric columns (ensures distribution)
+        if numeric_cols:
+            # Use percentiles: 0%, 25%, 50%, 75%, 100% for each numeric column
+            for col in numeric_cols[:5]:  # Limit to first 5 numeric cols to avoid too many selections
+                col_data = df[col].dropna()
+                if len(col_data) < 2:
+                    continue
+                
+                percentiles = [0, 25, 50, 75, 100]
+                for p in percentiles:
+                    if len(col_data) > 0:
+                        value = np.percentile(col_data, p)
+                        # Find row closest to this percentile value
+                        closest_idx = (col_data - value).abs().idxmin()
+                        selected.add(int(closest_idx))
+        
+        # Strategy 2: Categorical diversity - one row per unique value (up to reasonable limit)
         if categorical_cols:
-            cat_col = categorical_cols[0]
-            grouped = df.loc[remaining_indices].groupby(cat_col)
-            per_group = max(1, target_count // max(1, len(grouped)))
-            for _, group in grouped:
-                sample_indices = group.index[:per_group].tolist()
-                selected.extend(sample_indices)
-                if len(selected) >= target_count:
-                    break
+            for col in categorical_cols[:3]:  # Limit to first 3 categorical cols
+                unique_values = df[col].fillna("<NULL>").unique()
+                # Limit to top 10 most common categories to avoid explosion
+                value_counts = df[col].fillna("<NULL>").value_counts()
+                top_values = value_counts.head(10).index.tolist()
+                
+                for val in top_values:
+                    matching_rows = df[df[col].fillna("<NULL>") == val].index
+                    if len(matching_rows) > 0:
+                        # Pick first row with this value that we haven't selected
+                        for idx in matching_rows:
+                            if int(idx) not in selected:
+                                selected.add(int(idx))
+                                break
+        
+        # Strategy 3: Date range coverage
+        if datetime_cols:
+            for col in datetime_cols[:2]:  # Limit to first 2 date cols
+                col_data = df[col].dropna()
+                if len(col_data) > 0:
+                    # Earliest, middle, latest
+                    sorted_data = col_data.sort_values()
+                    selected.add(int(sorted_data.index[0]))  # Earliest
+                    selected.add(int(sorted_data.index[-1]))  # Latest
+                    if len(sorted_data) > 1:
+                        mid_idx = sorted_data.index[len(sorted_data) // 2]
+                        selected.add(int(mid_idx))
+        
+        # Strategy 4: Edge cases - rows with most/least missing values
+        missing_counts = df.isna().sum(axis=1)
+        if len(missing_counts) > 0:
+            # Row with most missing values
+            most_missing_idx = missing_counts.idxmax()
+            selected.add(int(most_missing_idx))
+            # Row with least missing values (most complete)
+            least_missing_idx = missing_counts.idxmin()
+            selected.add(int(least_missing_idx))
+        
+        # Strategy 5: Outlier detection for numeric columns
+        if numeric_cols:
+            for col in numeric_cols[:3]:  # Check first 3 numeric cols
+                col_data = df[col].dropna()
+                if len(col_data) < 4:
+                    continue
+                
+                q1, q3 = np.percentile(col_data, [25, 75])
+                iqr = q3 - q1
+                if iqr > 0:
+                    lower_bound = q1 - 1.5 * iqr
+                    upper_bound = q3 + 1.5 * iqr
+                    outliers = col_data[(col_data < lower_bound) | (col_data > upper_bound)]
+                    # Add up to 2 outliers per column
+                    for idx in outliers.index[:2]:
+                        selected.add(int(idx))
+        
+        # Strategy 6: Evenly distributed sampling to fill remaining slots
+        current_count = len(selected)
+        if current_count < self.max_rows:
+            remaining_slots = self.max_rows - current_count
+            available_indices = [idx for idx in df.index if int(idx) not in selected]
+            
+            if len(available_indices) > 0:
+                # Use systematic sampling (every Nth row) for even distribution
+                step = max(1, len(available_indices) // remaining_slots)
+                for i in range(0, len(available_indices), step):
+                    if len(selected) >= self.max_rows:
+                        break
+                    selected.add(int(available_indices[i]))
+        
+        return sorted(list(selected))
 
-        # If still short, fill with first remaining rows
-        if len(selected) < target_count:
-            remaining_pool = [idx for idx in remaining_indices if idx not in selected]
-            selected.extend(remaining_pool[: target_count - len(selected)])
-
-        return selected
-
-    def _build_explanation(self, total_rows: int, sample_df: pd.DataFrame, rationale: List[str]) -> str:
-        explanation_parts = [
-            f"Selected {len(sample_df)} rows out of {total_rows} total to balance numeric ranges, categories, dates, and missing-value edge cases."
+    def _build_explanation(
+        self,
+        total_rows: int,
+        sample_rows: int,
+        numeric_cols: List[str],
+        categorical_cols: List[str],
+        datetime_cols: List[str]
+    ) -> str:
+        """Build explanation of sampling strategy."""
+        parts = [
+            f"Selected {sample_rows} diverse, representative rows from {total_rows} total rows.",
+            "Selection strategy: quantile-based sampling for numeric columns, categorical diversity, date range coverage, edge cases, and systematic distribution.",
+            f"All {len(numeric_cols) + len(categorical_cols) + len(datetime_cols)} columns are preserved in the sample."
         ]
-        explanation_parts.extend(rationale)
-        return " ".join(explanation_parts)
-
+        return " ".join(parts)
