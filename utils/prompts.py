@@ -665,9 +665,11 @@ Conditional Format:
     "chart_type": "none",
     "steps": ["highlight duplicates in Amount column"],
     "conditional_format": {
-        "type": "duplicates",
-        "column": "Amount",
-        "bg_color": "#FFFF00"
+        "format_type": "duplicates",
+        "config": {
+            "column": "Amount",
+            "bg_color": "#FFFF00"
+        }
     }
 }
 
