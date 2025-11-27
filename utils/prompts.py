@@ -1051,7 +1051,8 @@ Use this complete data to:
         last_col = available_columns[-1] if available_columns else 'N/A'
         last_idx = len(available_columns) - 1 if available_columns else 0
         
-        sample_data_text += f"""
+        # Build reminder text safely without nested quotes in f-strings
+        reminder_text = f"""
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DATASET SUMMARY:
   • Total Rows: {total_rows}
@@ -1064,10 +1065,9 @@ CRITICAL REMINDER: You have the COMPLETE Excel dataset above.
 YOUR TASK: Convert natural language to Python-executable JSON with ACTUAL column names.
 
 When user says "delete 2nd column" or "delete second column":
-  STEP 1: Look at the column list above - Column at index 1 = SECOND column = {second_col}
-  STEP 2: Return JSON with ACTUAL column name: {{"task": "delete_column", "delete_column": {{"column_name": "{0}"}}}}
-  STEP 3: NEVER return "2nd" or "second" or index numbers - ALWAYS use the actual column name {0}
-""".format(second_col, second_col)
+  STEP 1: Look at the column list above - Column at index 1 = SECOND column (find actual name from list)
+  STEP 2: Return JSON with ACTUAL column name: {{"task": "delete_column", "delete_column": {{"column_name": "ActualColumnNameFromList"}}}}
+  STEP 3: NEVER return "2nd" or "second" or index numbers - ALWAYS use the actual column name from available_columns
 
 When user says "highlight columns with phone numbers":
   STEP 1: Search through ALL rows in the dataset above to find which column contains phone numbers
@@ -1075,14 +1075,15 @@ When user says "highlight columns with phone numbers":
   STEP 3: Return JSON with that ACTUAL column name, not "phone numbers column"
 
 Column Position Reference (for your understanding only - DO NOT return these in JSON):
-  - Column at index 0 = FIRST column = {first_col}
-  - Column at index 1 = SECOND column = {second_col}
-  - Column at index 2 = THIRD column = {third_col}
-  - Last column = {last_col} (index {last_idx})
+  - Column at index 0 = FIRST column (find from available_columns list)
+  - Column at index 1 = SECOND column (find from available_columns list)
+  - Column at index 2 = THIRD column (find from available_columns list)
+  - Last column = last item in available_columns list
 
-MANDATORY: In your JSON response, ALWAYS use actual column names like "{first_col}", "{second_col}", etc.
+MANDATORY: In your JSON response, ALWAYS use actual column names from the available_columns list above.
 NEVER return positional references, indices, or vague descriptions in the JSON.
 """
+        sample_data_text += reminder_text
     else:
         sample_data_text = "\n⚠️ NOTE: No Excel data provided in this request.\n"
     
