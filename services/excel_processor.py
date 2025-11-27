@@ -519,6 +519,12 @@ class ExcelProcessor:
             self.df = self.df[self.df[column] == value]
         elif condition == "!=":
             self.df = self.df[self.df[column] != value]
+        elif condition == "contains":
+            # Filter rows where column contains the text (case-insensitive)
+            self.df = self.df[self.df[column].astype(str).str.contains(str(value), case=False, na=False)]
+        elif condition == "not_contains":
+            # Filter rows where column does NOT contain the text (case-insensitive)
+            self.df = self.df[~self.df[column].astype(str).str.contains(str(value), case=False, na=False)]
         else:
             raise ValueError(f"Unsupported filter condition: {condition}")
         

@@ -1240,6 +1240,25 @@ SCENARIO 3: User describes content (highlighting cells)
 - CRITICAL: The "text" field must contain the exact search text (e.g., "Car detailing service")
 - CRITICAL: The "column" field must be the actual column name from available_columns, not a description
 
+SCENARIO 4: User wants to remove/delete rows based on condition
+- Pattern: "remove rows which has X in column Y", "delete rows containing X in column Y", "remove rows where column Y has X"
+- Rule: 
+  * "remove rows which has X" = KEEP rows that DON'T have X (use filter with condition: "not_contains")
+  * Map column Y (can be Excel letter like "L" or column name) to actual column name
+  * If Y is Excel letter (A, B, C, L, etc.), convert to index and get actual column name
+- JSON Structure:
+  {{
+    "task": "filter",
+    "filters": {{
+      "column": "ActualColumnNameFromY",
+      "condition": "not_contains",
+      "value": "X"
+    }}
+  }}
+- Example: "remove rows which has website in column L" → 
+  * L = index 11, get actual column name from available_columns[11]
+  * {{"task": "filter", "filters": {{"column": "ActualColumnNameAtL", "condition": "not_contains", "value": "website"}}}}
+
 CRITICAL: These are RULES, not examples. Apply them to ANY similar pattern, even if you haven't seen it before.
 
 FUZZY MATCHING FOR COLUMN NAMES:
