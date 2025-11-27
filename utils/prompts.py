@@ -1134,11 +1134,14 @@ POSITIONAL REFERENCES (when user says "first", "second", "third", "last"):
 3. Return the ACTUAL column name at that position from available_columns
 4. Example: If available_columns = ["Name", "UY7F9", "Phone"], then "second column" = "UY7F9"
 
-TEXT-BASED SEARCH (when user says "highlight column with X" or "column which includes X"):
+TEXT-BASED SEARCH (when user says "highlight cells with X" or "highlight column with X" or "cells containing X"):
 1. Search through ALL {total_rows} rows in the dataset above
-2. Find which column(s) contain the specified text/pattern
+2. Find which column(s) contain the specified text/pattern (e.g., "Car detailing service")
 3. Identify the ACTUAL column name(s) from available_columns
-4. Return JSON with actual column name(s), not descriptions
+4. Return JSON with conditional_format:
+   {{"task": "conditional_format", "conditional_format": {{"format_type": "contains_text", "config": {{"column": "ActualColumnName", "text": "X", "bg_color": "#FFFF00"}}}}}}
+5. The "text" in config should be the exact search text the user provided (e.g., "Car detailing service")
+6. Use format_type: "contains_text" for partial matches, "text_equals" for exact matches
 
 JSON RESPONSE FORMAT:
 - ALWAYS use actual column names from available_columns list
@@ -1208,10 +1211,23 @@ SCENARIO 2: User uses positional reference
 - Rule: Map position to index, get actual name from available_columns[index]
 - JSON: {{"task": "delete_column", "delete_column": {{"column_name": "ActualNameFromIndex"}}}}
 
-SCENARIO 3: User describes content
-- Pattern: "highlight column with X", "column which includes X", "column containing X"
+SCENARIO 3: User describes content (highlighting cells)
+- Pattern: "highlight cells with X", "highlight column with X", "cells containing X", "highlight cells which have X"
 - Rule: Search ALL {total_rows} rows in dataset, find column containing X, get actual name
-- JSON: {{"task": "conditional_format", "conditional_format": {{"format_type": "contains_text", "config": {{"column": "ActualColumnName", "text": "X", "bg_color": "#FFFF00"}}}}}}
+- JSON Structure:
+  {{
+    "task": "conditional_format",
+    "conditional_format": {{
+      "format_type": "contains_text",
+      "config": {{
+        "column": "ActualColumnNameFromDataset",
+        "text": "X",
+        "bg_color": "#FFFF00"
+      }}
+    }}
+  }}
+- CRITICAL: The "text" field must contain the exact search text (e.g., "Car detailing service")
+- CRITICAL: The "column" field must be the actual column name from available_columns, not a description
 
 CRITICAL: These are RULES, not examples. Apply them to ANY similar pattern, even if you haven't seen it before.
 
