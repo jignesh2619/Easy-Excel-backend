@@ -1069,28 +1069,47 @@ DATASET SUMMARY:
   • Column Names: {', '.join(available_columns)}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-CRITICAL REMINDER: You have the COMPLETE Excel dataset above. 
+═══════════════════════════════════════════════════════════════════════════════
+🎯 CRITICAL INSTRUCTIONS - READ THIS CAREFULLY:
+═══════════════════════════════════════════════════════════════════════════════
 
-YOUR TASK: Convert natural language to Python-executable JSON with ACTUAL column names.
+YOU HAVE THE COMPLETE EXCEL DATASET ABOVE WITH ALL {total_rows} ROWS.
 
-When user says "delete 2nd column" or "delete second column":
-  STEP 1: Look at the column list above - Column at index 1 = SECOND column (find actual name from list)
-  STEP 2: Return JSON with ACTUAL column name: {{"task": "delete_column", "delete_column": {{"column_name": "ActualColumnNameFromList"}}}}
-  STEP 3: NEVER return "2nd" or "second" or index numbers - ALWAYS use the actual column name from available_columns
+COLUMN NAME MATCHING RULES (MANDATORY):
+1. Column names can be ANYTHING: codes (UY7F9, ABC123), numbers (123, 456), text (Name, Phone), or mixed
+2. When user mentions a column name (e.g., "remove column name UY7F9"), you MUST:
+   a. Check the available_columns list above EXACTLY as shown
+   b. Find the column name that matches (case-insensitive, but preserve exact case in response)
+   c. Use that EXACT column name from available_columns in your JSON response
+3. If user says "remove column name X" or "delete column X", X is the ACTUAL column name - use it directly
+4. NEVER ignore a column name the user provides - if they say "UY7F9", look for "UY7F9" in available_columns
+5. Column names are case-sensitive in Excel - match them exactly as they appear in available_columns
 
-When user says "highlight columns with phone numbers":
-  STEP 1: Search through ALL rows in the dataset above to find which column contains phone numbers
-  STEP 2: Identify the ACTUAL column name (e.g., "Phone", "Phone Numbers", "Contact", etc.)
-  STEP 3: Return JSON with that ACTUAL column name, not "phone numbers column"
+POSITIONAL REFERENCES (when user says "first", "second", "third", "last"):
+1. Look at the available_columns list above
+2. Map positions: first=index 0, second=index 1, third=index 2, last=index (length-1)
+3. Return the ACTUAL column name at that position from available_columns
+4. Example: If available_columns = ["Name", "UY7F9", "Phone"], then "second column" = "UY7F9"
 
-Column Position Reference (for your understanding only - DO NOT return these in JSON):
-  - Column at index 0 = FIRST column (find from available_columns list)
-  - Column at index 1 = SECOND column (find from available_columns list)
-  - Column at index 2 = THIRD column (find from available_columns list)
-  - Last column = last item in available_columns list
+TEXT-BASED SEARCH (when user says "highlight column with X" or "column which includes X"):
+1. Search through ALL {total_rows} rows in the dataset above
+2. Find which column(s) contain the specified text/pattern
+3. Identify the ACTUAL column name(s) from available_columns
+4. Return JSON with actual column name(s), not descriptions
 
-MANDATORY: In your JSON response, ALWAYS use actual column names from the available_columns list above.
-NEVER return positional references, indices, or vague descriptions in the JSON.
+JSON RESPONSE FORMAT:
+- ALWAYS use actual column names from available_columns list
+- NEVER use positional references ("2nd", "second") in JSON
+- NEVER use vague descriptions ("phone column") in JSON
+- NEVER return empty column_name - if you can't find it, check available_columns again
+- Column names must match EXACTLY (case-sensitive) as they appear in available_columns
+
+EXAMPLES OF CORRECT BEHAVIOR:
+- User: "remove column name UY7F9" → Check available_columns, find "UY7F9", return: {{"task": "delete_column", "delete_column": {{"column_name": "UY7F9"}}}}
+- User: "delete second column" → Check available_columns[1], return actual name at index 1
+- User: "highlight column with phone" → Search all rows, find column containing "phone", return actual column name
+
+═══════════════════════════════════════════════════════════════════════════════
 """
         sample_data_text += reminder_text
     else:
