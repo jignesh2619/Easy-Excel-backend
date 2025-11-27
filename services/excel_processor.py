@@ -230,24 +230,50 @@ class ExcelProcessor:
                 if column and column in self.df.columns:
                     # Get the character/pattern to remove
                     char_to_remove = params.get("character") or params.get("pattern") or params.get("value", "")
-                    # Default to "." if no character specified and operation is remove_characters
-                    if not char_to_remove and op_type == "remove_characters":
+                    remove_from = params.get("position", "all")  # start, end, all
+                    
+                    # For phone numbers, try common patterns if not specified
+                    if not char_to_remove and ("phone" in column.lower() or "number" in column.lower()):
+                        # Try common phone number patterns: middle dot "· ", regular dot ". ", or just "."
+                        # Check what's actually in the data first
+                        sample_value = str(self.df[column].iloc[0]) if len(self.df) > 0 else ""
+                        if "· " in sample_value:
+                            char_to_remove = "· "  # Middle dot + space
+                        elif ". " in sample_value:
+                            char_to_remove = ". "  # Regular dot + space
+                        elif "·" in sample_value:
+                            char_to_remove = "·"  # Middle dot only
+                        elif "." in sample_value and sample_value.startswith("."):
+                            char_to_remove = "."  # Regular dot at start
+                        else:
+                            char_to_remove = "."  # Default fallback
+                    elif not char_to_remove:
                         char_to_remove = "."
-                    remove_from = params.get("position", "start")  # start, end, all
                     
                     if char_to_remove:
                         if remove_from == "start":
-                            # Remove from beginning (lstrip)
-                            self.df[column] = self.df[column].astype(str).str.lstrip(char_to_remove)
+                            # Remove from beginning (lstrip) - handles multi-char patterns
+                            if len(char_to_remove) > 1:
+                                # For multi-character patterns, use replace with count=1 and start check
+                                self.df[column] = self.df[column].astype(str).apply(
+                                    lambda x: x[len(char_to_remove):] if x.startswith(char_to_remove) else x
+                                )
+                            else:
+                                self.df[column] = self.df[column].astype(str).str.lstrip(char_to_remove)
                             self.summary.append(f"Removed '{char_to_remove}' from start of '{column}' column")
                             operation_executed = True
                         elif remove_from == "end":
-                            # Remove from end (rstrip)
-                            self.df[column] = self.df[column].astype(str).str.rstrip(char_to_remove)
+                            # Remove from end (rstrip) - handles multi-char patterns
+                            if len(char_to_remove) > 1:
+                                self.df[column] = self.df[column].astype(str).apply(
+                                    lambda x: x[:-len(char_to_remove)] if x.endswith(char_to_remove) else x
+                                )
+                            else:
+                                self.df[column] = self.df[column].astype(str).str.rstrip(char_to_remove)
                             self.summary.append(f"Removed '{char_to_remove}' from end of '{column}' column")
                             operation_executed = True
                         else:
-                            # Remove all occurrences (replace)
+                            # Remove all occurrences (replace) - works for both single and multi-char patterns
                             self.df[column] = self.df[column].astype(str).str.replace(char_to_remove, "", regex=False)
                             self.summary.append(f"Removed all '{char_to_remove}' from '{column}' column")
                             operation_executed = True
@@ -258,11 +284,27 @@ class ExcelProcessor:
                         if possible_columns:
                             # Use first matching column
                             column = possible_columns[0]
-                            char_to_remove = params.get("character") or params.get("pattern") or params.get("value", ".") or "."
-                            remove_from = params.get("position", "start")
-                            if remove_from == "start":
-                                self.df[column] = self.df[column].astype(str).str.lstrip(char_to_remove)
-                                self.summary.append(f"Removed '{char_to_remove}' from start of '{column}' column")
+                            char_to_remove = params.get("character") or params.get("pattern") or params.get("value", "")
+                            remove_from = params.get("position", "all")
+                            
+                            # Auto-detect phone number pattern
+                            if not char_to_remove and len(self.df) > 0:
+                                sample_value = str(self.df[column].iloc[0])
+                                if "· " in sample_value:
+                                    char_to_remove = "· "
+                                elif ". " in sample_value:
+                                    char_to_remove = ". "
+                                elif "·" in sample_value:
+                                    char_to_remove = "·"
+                                elif sample_value.startswith("."):
+                                    char_to_remove = "."
+                                else:
+                                    char_to_remove = "."
+                            
+                            if char_to_remove:
+                                # Remove all occurrences (most common for phone numbers)
+                                self.df[column] = self.df[column].astype(str).str.replace(char_to_remove, "", regex=False)
+                                self.summary.append(f"Removed all '{char_to_remove}' from '{column}' column")
                                 operation_executed = True
             
             # Handle execution instructions for pandas operations

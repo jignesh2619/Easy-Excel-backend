@@ -204,21 +204,24 @@ Available Operations:
 - normalize_text: Normalize text formatting (trim, lowercase)
 - fix_date_formats: Fix date formats in a column
 - convert_text_to_numbers: Convert text numbers to actual numeric values
-- remove_characters: Remove specific characters from columns (e.g., remove dots from start of phone numbers)
+- remove_characters: Remove specific characters from columns (e.g., remove dots from phone numbers)
   - Use params: {"column": "ColumnName", "character": ".", "position": "start|end|all"}
-  - Or use execution_instructions with pandas.str.lstrip/rstrip/replace methods
-  - EXAMPLE: "remove the initial dot from phone numbers column" → 
+  - For phone numbers, common patterns are: "· " (middle dot + space), ". " (dot + space), or "." (dot only)
+  - Use position: "all" to remove from anywhere in the string (most common for phone numbers)
+  - Or use execution_instructions with pandas.str.replace methods
+  - EXAMPLE: "remove the initial dot from phone numbers column" or "remove dot from phone numbers" → 
     {
       "task": "clean",
       "operations": [{
         "type": "remove_characters",
-        "params": {"column": "phone numbers", "character": ".", "position": "start"},
+        "params": {"column": "phone numbers", "character": "· ", "position": "all"},
         "execution_instructions": {
-          "method": "pandas.str.lstrip",
-          "kwargs": {"column": "phone numbers", "char": "."}
+          "method": "pandas.str.replace",
+          "kwargs": {"column": "phone numbers", "old": "· ", "new": ""}
         }
       }]
     }
+  - NOTE: The system will auto-detect common phone number patterns (· , . , ·, .) if character is not specified
 
 **Grouping & Summaries:**
 - group_by_category: Group by category and aggregate (count, sum, average, max, min)
