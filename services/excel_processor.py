@@ -871,7 +871,27 @@ class ExcelProcessor:
                     if column_name:
                         break
             
-            # SECOND: If no direct name found, try to extract positional reference
+            # SECOND: If no direct name found, try to extract Excel column letters (A, B, C, etc.)
+            if not column_name:
+                # Match Excel column letters: A=0, B=1, C=2, ..., Z=25, AA=26, AB=27, etc.
+                excel_letter_pattern = r'\bcolumn\s+([A-Z]+)\b'
+                match = re.search(excel_letter_pattern, user_prompt, re.IGNORECASE)
+                if match:
+                    excel_letter = match.group(1).upper()
+                    try:
+                        # Convert Excel column letter to index (A=0, B=1, ..., Z=25, AA=26, etc.)
+                        col_idx = 0
+                        for char in excel_letter:
+                            col_idx = col_idx * 26 + (ord(char) - ord('A') + 1)
+                        col_idx = col_idx - 1  # Convert to 0-indexed
+                        
+                        if 0 <= col_idx < len(self.df.columns):
+                            column_name = self.df.columns[col_idx]
+                            self.summary.append(f"Identified '{column_name}' as column {excel_letter} (index {col_idx})")
+                    except:
+                        pass
+            
+            # THIRD: If still no column name, try to extract positional reference
             if not column_name:
                 # Match patterns like "1st", "2nd", "3rd", "first", "second", "third", "last"
                 position_patterns = [
