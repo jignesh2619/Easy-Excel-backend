@@ -61,6 +61,21 @@ KNOWLEDGE BASE - TASK SELECTION GUIDE:
 - KEYWORDS: "sort", "order", "arrange", "top N"
 - EXAMPLE: "sort by amount descending" -> task: "sort"
 
+**TASK: "delete_column"**
+- USE WHEN: User wants to remove a column from the sheet
+- OUTPUT: Returns data without the specified column
+- KEYWORDS: "delete column", "remove column", "drop column", "delete [first/second/third/nth] column"
+- POSITIONAL REFERENCES: "first column" = index 0, "second column" = index 1, "third column" = index 2, "last column" = -1
+- EXAMPLE: "delete second column" -> task: "delete_column", delete_column: {"column_name": "ColumnName"} OR {"column_index": 1}
+- CRITICAL: When user says "delete second column", you MUST identify which column is the second one from available_columns list (0-indexed: first=0, second=1, third=2, etc.)
+
+**TASK: "delete_rows"**
+- USE WHEN: User wants to remove specific rows
+- OUTPUT: Returns data without the specified rows
+- KEYWORDS: "delete row", "remove row", "drop row", "delete [first/second/third/nth] row", "delete rows 1 to 10"
+- POSITIONAL REFERENCES: "first row" = index 0, "second row" = index 1, "third row" = index 2, "last row" = -1
+- EXAMPLE: "delete first row" -> task: "delete_rows", delete_rows: {"row_indices": [0]}
+
 DECISION TREE FOR COMMON PATTERNS:
 
 Pattern 1: "remove duplicates and create dashboard"
@@ -131,7 +146,29 @@ INTENT RECOGNITION GUIDE:
 - Grouping: "group by", "by category", "sum by" -> group_by_category
 - Cleaning: "clean", "remove duplicates", "fix formatting" -> cleaning operations (task: "clean")
 - Visualization: "show chart", "visualize", "graph", "plot", "dashboard" -> chart generation (DO NOT change task to "summarize")
+- Column deletion: "delete column", "remove column", "drop column" -> delete_column task
+- Row deletion: "delete row", "remove row", "drop row" -> delete_rows task
+- Positional references: "first/second/third/nth/last" -> MUST map to actual column/row index from available_columns
 - IMPORTANT: When user requests both cleaning AND dashboard/chart, use task: "clean" and set chart_type. DO NOT use task: "summarize" unless user explicitly asks for summary statistics.
+
+POSITIONAL REFERENCE MAPPING (CRITICAL):
+When user mentions positions like "first", "second", "third", "nth", "last":
+1. Columns are 0-indexed: first=0, second=1, third=2, fourth=3, etc.
+2. Rows are 0-indexed: first=0, second=1, third=2, fourth=3, etc.
+3. "last" = -1 or (length - 1)
+4. You MUST look at available_columns list and identify the actual column name at that position
+5. NEVER return empty column_name - always identify the actual column from available_columns
+
+Examples:
+- available_columns = ["Name", "Age", "City", "Phone"]
+  - "delete first column" -> column_name: "Name" (index 0)
+  - "delete second column" -> column_name: "Age" (index 1)
+  - "delete third column" -> column_name: "City" (index 2)
+  - "delete last column" -> column_name: "Phone" (index 3 or -1)
+  
+- "delete row 1" -> row_index: 0 (user counts from 1, we use 0-indexed)
+- "delete first row" -> row_index: 0
+- "delete second row" -> row_index: 1
 
 Available Operations:
 
@@ -386,6 +423,10 @@ VALIDATION CHECKLIST - Before returning JSON, verify:
 4. ✓ Chart type matches the data type (bar for categorical, line for time series, etc.)
 5. ✓ All column names in the response exist in available_columns
 6. ✓ Formula parameters match the formula type requirements
+7. ✓ If user says "delete [first/second/third/nth] column", you MUST identify the actual column name from available_columns (0-indexed)
+8. ✓ NEVER return empty column_name for delete_column - always identify the actual column
+9. ✓ If user says "delete second column" and available_columns = ["A", "B", "C"], column_name must be "B" (index 1)
+10. ✓ Positional references (first, second, third, last) MUST be mapped to actual column/row indices
 
 Example Responses:
 
@@ -439,7 +480,7 @@ Add Column:
     "add_column": {"name": "Status", "position": -1, "default_value": ""}
 }
 
-Delete Column:
+Delete Column (by name):
 {
     "task": "delete_column",
     "columns_needed": ["OldColumn"],
@@ -447,6 +488,38 @@ Delete Column:
     "steps": ["delete column 'OldColumn'"],
     "delete_column": {"column_name": "OldColumn"}
 }
+
+Delete Column (by position - CRITICAL):
+When user says "delete second column" or "remove first column", you MUST:
+1. Look at available_columns list (0-indexed: first=0, second=1, third=2, etc.)
+2. Identify the column at that position
+3. Use the actual column name from available_columns
+
+Example: available_columns = ["Name", "Age", "City", "Phone"]
+- "delete first column" -> delete_column: {"column_name": "Name"} (index 0)
+- "delete second column" -> delete_column: {"column_name": "Age"} (index 1)
+- "delete third column" -> delete_column: {"column_name": "City"} (index 2)
+- "delete last column" -> delete_column: {"column_name": "Phone"} (index -1 or 3)
+
+{
+    "task": "delete_column",
+    "columns_needed": ["Age"],
+    "chart_type": "none",
+    "steps": ["delete second column 'Age'"],
+    "delete_column": {"column_name": "Age"}
+}
+User prompt: "delete second column"
+✓ CORRECT: Identified "Age" as the second column (index 1) from available_columns
+
+{
+    "task": "delete_column",
+    "columns_needed": [],
+    "chart_type": "none",
+    "steps": ["delete second column"],
+    "delete_column": {"column_name": ""}
+}
+User prompt: "delete second column"
+✗ WRONG: Must identify which column is second from available_columns list
 
 Edit Cell:
 {
@@ -821,7 +894,22 @@ def get_prompt_with_context(user_prompt: str, available_columns: list) -> str:
     Returns:
         Formatted prompt string
     """
-    columns_info = f"Available columns: {', '.join(available_columns)}"
+    # Create detailed column index mapping for positional references
+    columns_with_indices = []
+    for idx, col in enumerate(available_columns):
+        position_name = ""
+        if idx == 0:
+            position_name = " (first column)"
+        elif idx == 1:
+            position_name = " (second column)"
+        elif idx == 2:
+            position_name = " (third column)"
+        elif idx == len(available_columns) - 1:
+            position_name = " (last column)"
+        columns_with_indices.append(f"{idx}: {col}{position_name}")
+    
+    columns_info = f"Available columns (with indices for positional references):\n" + "\n".join(columns_with_indices)
+    columns_list = f"Column list: {', '.join(available_columns)}"
     
     prompt = f"""{SYSTEM_PROMPT}
 
@@ -829,6 +917,19 @@ Current Request:
 {user_prompt}
 
 {columns_info}
+{columns_list}
+
+CRITICAL INSTRUCTIONS FOR POSITIONAL REFERENCES:
+- If user says "delete second column", look at the column list above
+- Second column = index 1 (0-indexed: first=0, second=1, third=2, etc.)
+- You MUST use the actual column name from the list above
+- NEVER return empty column_name - always identify the actual column
+
+Example: If columns are ["Name", "Age", "City", "Phone"]:
+- "delete first column" → column_name: "Name" (index 0)
+- "delete second column" → column_name: "Age" (index 1)
+- "delete third column" → column_name: "City" (index 2)
+- "delete last column" → column_name: "Phone" (index 3)
 
 Generate the action plan JSON now:"""
     
