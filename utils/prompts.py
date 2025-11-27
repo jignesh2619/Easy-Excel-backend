@@ -204,24 +204,49 @@ Available Operations:
 - normalize_text: Normalize text formatting (trim, lowercase)
 - fix_date_formats: Fix date formats in a column
 - convert_text_to_numbers: Convert text numbers to actual numeric values
-- remove_characters: Remove specific characters from columns (e.g., remove dots from phone numbers)
-  - Use params: {"column": "ColumnName", "character": ".", "position": "start|end|all"}
+- remove_characters / replace_text: Remove or replace specific characters from columns
+  - Use params: {"column": "ColumnName", "character": ".", "position": "start|end|all", "replace_with": ""}
   - For phone numbers, common patterns are: "· " (middle dot + space), ". " (dot + space), or "." (dot only)
-  - Use position: "all" to remove from anywhere in the string (most common for phone numbers)
+  - Use position: "all" to remove/replace from anywhere in the string (most common)
+  - To REMOVE: Set "replace_with": "" (empty string) or omit replace_with
+  - To REPLACE WITH SPACE: Set "replace_with": " " (space character)
+  - To REPLACE WITH OTHER: Set "replace_with": "replacement_value"
   - Or use execution_instructions with pandas.str.replace methods
-  - EXAMPLE: "remove the initial dot from phone numbers column" or "remove dot from phone numbers" → 
-    {
-      "task": "clean",
-      "operations": [{
-        "type": "remove_characters",
-        "params": {"column": "phone numbers", "character": "· ", "position": "all"},
-        "execution_instructions": {
-          "method": "pandas.str.replace",
-          "kwargs": {"column": "phone numbers", "old": "· ", "new": ""}
-        }
-      }]
-    }
+  - EXAMPLES:
+    * "remove the dot from phone numbers" → 
+      {
+        "task": "clean",
+        "operations": [{
+          "type": "remove_characters",
+          "params": {"column": "phone numbers", "character": "· ", "position": "all", "replace_with": ""}
+        }]
+      }
+    * "replace dot with blank space in phone numbers" or "replace dot with space" →
+      {
+        "task": "clean",
+        "operations": [{
+          "type": "replace_text",
+          "params": {"column": "phone numbers", "character": "· ", "position": "all", "replace_with": " "}
+        }]
+      }
+    * "remove X character" → 
+      {
+        "task": "clean",
+        "operations": [{
+          "type": "remove_characters",
+          "params": {"column": "ColumnName", "character": "X", "position": "all"}
+        }]
+      }
+    * "replace Y with Z" →
+      {
+        "task": "clean",
+        "operations": [{
+          "type": "replace_text",
+          "params": {"column": "ColumnName", "character": "Y", "position": "all", "replace_with": "Z"}
+        }]
+      }
   - NOTE: The system will auto-detect common phone number patterns (· , . , ·, .) if character is not specified
+  - KEYWORDS: "remove X", "replace X with space", "replace X with blank", "replace X with Y", "remove character X"
 
 **Grouping & Summaries:**
 - group_by_category: Group by category and aggregate (count, sum, average, max, min)

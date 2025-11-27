@@ -228,8 +228,13 @@ class ExcelProcessor:
                         column = matching_column
                 
                 if column and column in self.df.columns:
-                    # Get the character/pattern to remove
-                    char_to_remove = params.get("character") or params.get("pattern") or params.get("value", "")
+                    # Get the character/pattern to remove or replace
+                    char_to_remove = params.get("character") or params.get("pattern") or params.get("value") or params.get("old") or ""
+                    # Get replacement value (empty string for "remove", space for "replace with space", or specified value)
+                    replace_with = params.get("replace_with") or params.get("new") or params.get("replacement") or ""
+                    # Check if user wants to replace with space/blank
+                    if replace_with == "" and (params.get("replace_with_space") or params.get("with_blank") or params.get("with_space")):
+                        replace_with = " "  # Replace with space
                     remove_from = params.get("position", "all")  # start, end, all
                     
                     # For phone numbers, try common patterns if not specified
@@ -252,30 +257,50 @@ class ExcelProcessor:
                     
                     if char_to_remove:
                         if remove_from == "start":
-                            # Remove from beginning (lstrip) - handles multi-char patterns
+                            # Remove/replace from beginning - handles multi-char patterns
                             if len(char_to_remove) > 1:
                                 # For multi-character patterns, use replace with count=1 and start check
                                 self.df[column] = self.df[column].astype(str).apply(
                                     lambda x: x[len(char_to_remove):] if x.startswith(char_to_remove) else x
+                                ) if replace_with == "" else self.df[column].astype(str).apply(
+                                    lambda x: replace_with + x[len(char_to_remove):] if x.startswith(char_to_remove) else x
                                 )
                             else:
-                                self.df[column] = self.df[column].astype(str).str.lstrip(char_to_remove)
-                            self.summary.append(f"Removed '{char_to_remove}' from start of '{column}' column")
+                                if replace_with == "":
+                                    self.df[column] = self.df[column].astype(str).str.lstrip(char_to_remove)
+                                else:
+                                    self.df[column] = self.df[column].astype(str).apply(
+                                        lambda x: replace_with + x.lstrip(char_to_remove) if x.startswith(char_to_remove) else x
+                                    )
+                            action = "Replaced" if replace_with != "" else "Removed"
+                            replacement_text = f" with '{replace_with}'" if replace_with != "" else ""
+                            self.summary.append(f"{action} '{char_to_remove}' from start of '{column}' column{replacement_text}")
                             operation_executed = True
                         elif remove_from == "end":
-                            # Remove from end (rstrip) - handles multi-char patterns
+                            # Remove/replace from end - handles multi-char patterns
                             if len(char_to_remove) > 1:
                                 self.df[column] = self.df[column].astype(str).apply(
                                     lambda x: x[:-len(char_to_remove)] if x.endswith(char_to_remove) else x
+                                ) if replace_with == "" else self.df[column].astype(str).apply(
+                                    lambda x: x[:-len(char_to_remove)] + replace_with if x.endswith(char_to_remove) else x
                                 )
                             else:
-                                self.df[column] = self.df[column].astype(str).str.rstrip(char_to_remove)
-                            self.summary.append(f"Removed '{char_to_remove}' from end of '{column}' column")
+                                if replace_with == "":
+                                    self.df[column] = self.df[column].astype(str).str.rstrip(char_to_remove)
+                                else:
+                                    self.df[column] = self.df[column].astype(str).apply(
+                                        lambda x: x.rstrip(char_to_remove) + replace_with if x.endswith(char_to_remove) else x
+                                    )
+                            action = "Replaced" if replace_with != "" else "Removed"
+                            replacement_text = f" with '{replace_with}'" if replace_with != "" else ""
+                            self.summary.append(f"{action} '{char_to_remove}' from end of '{column}' column{replacement_text}")
                             operation_executed = True
                         else:
-                            # Remove all occurrences (replace) - works for both single and multi-char patterns
-                            self.df[column] = self.df[column].astype(str).str.replace(char_to_remove, "", regex=False)
-                            self.summary.append(f"Removed all '{char_to_remove}' from '{column}' column")
+                            # Remove/replace all occurrences - works for both single and multi-char patterns
+                            self.df[column] = self.df[column].astype(str).str.replace(char_to_remove, replace_with, regex=False)
+                            action = "Replaced" if replace_with != "" else "Removed"
+                            replacement_text = f" with '{replace_with}'" if replace_with != "" else ""
+                            self.summary.append(f"{action} all '{char_to_remove}' from '{column}' column{replacement_text}")
                             operation_executed = True
                 else:
                     # Try to find column by partial name match
@@ -301,10 +326,17 @@ class ExcelProcessor:
                                 else:
                                     char_to_remove = "."
                             
+                            # Get replacement value
+                            replace_with = params.get("replace_with") or params.get("new") or params.get("replacement") or ""
+                            if replace_with == "" and (params.get("replace_with_space") or params.get("with_blank") or params.get("with_space")):
+                                replace_with = " "
+                            
                             if char_to_remove:
-                                # Remove all occurrences (most common for phone numbers)
-                                self.df[column] = self.df[column].astype(str).str.replace(char_to_remove, "", regex=False)
-                                self.summary.append(f"Removed all '{char_to_remove}' from '{column}' column")
+                                # Remove/replace all occurrences (most common for phone numbers)
+                                self.df[column] = self.df[column].astype(str).str.replace(char_to_remove, replace_with, regex=False)
+                                action = "Replaced" if replace_with != "" else "Removed"
+                                replacement_text = f" with '{replace_with}'" if replace_with != "" else ""
+                                self.summary.append(f"{action} all '{char_to_remove}' from '{column}' column{replacement_text}")
                                 operation_executed = True
             
             # Handle execution instructions for pandas operations
