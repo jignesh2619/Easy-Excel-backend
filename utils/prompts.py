@@ -4,6 +4,8 @@ LLM Prompt Templates
 Contains system prompts and templates for LLM interpretation
 """
 
+from typing import Optional
+
 SYSTEM_PROMPT = """You are an expert data analysis assistant for Excel/CSV files.
 Your role is to interpret user prompts and generate structured action plans with detailed execution instructions.
 
