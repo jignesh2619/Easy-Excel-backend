@@ -590,10 +590,10 @@ When user says "delete second column" or "remove first column", you MUST:
 3. Use the actual column name from available_columns
 
 Example: available_columns = ["Name", "Age", "City", "Phone"]
-- "delete first column" -> delete_column: {"column_name": "Name"} (index 0)
-- "delete second column" -> delete_column: {"column_name": "Age"} (index 1)
-- "delete third column" -> delete_column: {"column_name": "City"} (index 2)
-- "delete last column" -> delete_column: {"column_name": "Phone"} (index -1 or 3)
+- "delete first column" -> delete_column: {{"column_name": "Name"}} (index 0)
+- "delete second column" -> delete_column: {{"column_name": "Age"}} (index 1)
+- "delete third column" -> delete_column: {{"column_name": "City"}} (index 2)
+- "delete last column" -> delete_column: {{"column_name": "Phone"}} (index -1 or 3)
 
 {
     "task": "delete_column",
@@ -1087,7 +1087,9 @@ NEVER return positional references, indices, or vague descriptions in the JSON.
     else:
         sample_data_text = "\n⚠️ NOTE: No Excel data provided in this request.\n"
     
-    prompt = f"""{SYSTEM_PROMPT}
+    # Build prompt by concatenating SYSTEM_PROMPT (which has JSON examples) with f-string
+    # This prevents Python from interpreting curly braces in SYSTEM_PROMPT as format specifiers
+    prompt = SYSTEM_PROMPT + f"""
 
 ═══════════════════════════════════════════════════════════════════════════════
 📋 USER REQUEST:
@@ -1152,15 +1154,15 @@ INTELLIGENT INFERENCE:
 
 MANDATORY EXAMPLES - Follow these EXACTLY:
 If available_columns = ["Name", "Age", "City", "Phone Numbers"]:
-- User: "delete first column" → {"task": "delete_column", "delete_column": {"column_name": "Name"}}
-- User: "delete second column" → {"task": "delete_column", "delete_column": {"column_name": "Age"}}
-- User: "delete 2nd column" → {"task": "delete_column", "delete_column": {"column_name": "Age"}}
-- User: "delete 2 column" → {"task": "delete_column", "delete_column": {"column_name": "Age"}}
-- User: "delet second colum" (typo) → {"task": "delete_column", "delete_column": {"column_name": "Age"}}
-- User: "delete third column" → {"task": "delete_column", "delete_column": {"column_name": "City"}}
-- User: "delete 3rd column" → {"task": "delete_column", "delete_column": {"column_name": "City"}}
-- User: "delete last column" → {"task": "delete_column", "delete_column": {"column_name": "Phone Numbers"}}
-- User: "remove dot from phone" → {"task": "clean", "operations": [{"type": "remove_characters", "params": {"column": "Phone Numbers", ...}}]}
+- User: "delete first column" → {{"task": "delete_column", "delete_column": {{"column_name": "Name"}}}}
+- User: "delete second column" → {{"task": "delete_column", "delete_column": {{"column_name": "Age"}}}}
+- User: "delete 2nd column" → {{"task": "delete_column", "delete_column": {{"column_name": "Age"}}}}
+- User: "delete 2 column" → {{"task": "delete_column", "delete_column": {{"column_name": "Age"}}}}
+- User: "delet second colum" (typo) → {{"task": "delete_column", "delete_column": {{"column_name": "Age"}}}}
+- User: "delete third column" → {{"task": "delete_column", "delete_column": {{"column_name": "City"}}}}
+- User: "delete 3rd column" → {{"task": "delete_column", "delete_column": {{"column_name": "City"}}}}
+- User: "delete last column" → {{"task": "delete_column", "delete_column": {{"column_name": "Phone Numbers"}}}}
+- User: "remove dot from phone" → {{"task": "clean", "operations": [{{"type": "remove_characters", "params": {{"column": "Phone Numbers"}}}}]}}
 
 CRITICAL: In ALL cases above, you MUST return the actual column_name from available_columns. NEVER return empty column_name.
 
