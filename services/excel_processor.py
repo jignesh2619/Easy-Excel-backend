@@ -239,14 +239,28 @@ class ExcelProcessor:
         if self.df is None:
             raise ValueError("Data not loaded. Call load_data() first.")
         
+        # Check for conditional formatting FIRST (before filter fallback)
+        # Highlight/format requests should NOT trigger filtering
+        user_prompt = action_plan.get("user_prompt", "") or ""
+        is_highlight_request = self._prompt_implies_conditional_format(user_prompt)
+        
+        # Only apply filter fallback if NOT a highlight/format request
         fallback_filter = None
-        if action_plan.get("task") != "filter":
+        if action_plan.get("task") != "filter" and not is_highlight_request:
             fallback_filter = self._build_filter_fallback(action_plan)
             if fallback_filter:
                 action_plan["task"] = "filter"
                 action_plan["filters"] = fallback_filter
                 self.summary.append("Auto-applied filter to remove rows based on user intent.")
         
+        # Check for conditional formatting after filter check
+        if action_plan.get("task") != "conditional_format" and is_highlight_request:
+            fallback_cf = self._build_conditional_format_fallback(action_plan)
+            if fallback_cf:
+                action_plan["task"] = "conditional_format"
+                action_plan["conditional_format"] = fallback_cf
+                self.summary.append("Auto-applied conditional formatting based on user intent.")
+
         task = action_plan.get("task", "summarize")
         
         try:
