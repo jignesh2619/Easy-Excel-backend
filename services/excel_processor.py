@@ -91,6 +91,18 @@ class ExcelProcessor:
                 continue
         return None
 
+    def _prompt_implies_conditional_format(self, prompt: str) -> bool:
+        """Detect if user prompt asks for conditional formatting/highlighting."""
+        if not prompt:
+            return False
+        keywords = [
+            "highlight", "mark", "color", "colour", "flag", "shade",
+            "make it yellow", "bold cells", "format cells", "highlight cells", "highlight rows",
+            "paint", "background", "bg color", "background color"
+        ]
+        prompt_lower = prompt.lower()
+        return any(keyword in prompt_lower for keyword in keywords)
+
     def _build_conditional_format_fallback(self, action_plan: Dict) -> Optional[Dict[str, Any]]:
         """Construct conditional format configuration directly from the user prompt."""
         prompt = action_plan.get("user_prompt", "") or ""
