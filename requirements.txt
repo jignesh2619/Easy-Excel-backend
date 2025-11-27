@@ -16,4 +16,7 @@ supabase>=2.0.0
 postgrest>=0.13.0
 sentence-transformers>=2.2.2
 torch>=2.0.0
+# Optional: Enhanced Excel processing
+xlcalculator>=0.8.0  # Optional: for formula evaluation
+pyarrow>=14.0.0  # Optional: for better data handling
 

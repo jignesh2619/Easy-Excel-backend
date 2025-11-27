@@ -13,6 +13,13 @@ import re
 import xlsxwriter
 from datetime import datetime
 from services.formula_engine import FormulaEngine
+# New modular imports
+from services.excel_writer.write_xlsx import XlsxWriter
+from services.summarizer.excel_summary import ExcelSummarizer
+from services.cleaning.dates import DateCleaner
+from services.cleaning.currency import CurrencyCleaner
+from services.cleaning.text import TextCleaner
+from services.dflib import default_engine, DataFrameWrapper
 
 
 class ExcelProcessor:
@@ -31,6 +38,7 @@ class ExcelProcessor:
         self.summary: List[str] = []
         self.formatting_rules: List[Dict] = []  # Store formatting instructions
         self.formula_result: Optional[Any] = None  # Store formula computation result
+        self.file_summary: Optional[Dict] = None  # Store file summary from ExcelSummarizer
 
     def _extract_text_from_prompt(self, prompt: str) -> Optional[str]:
         """Extract quoted or keyword text from user prompt."""
@@ -260,6 +268,15 @@ class ExcelProcessor:
             # Keep original copy
             self.original_df = self.df.copy()
             self.summary.append(f"Loaded {len(self.df)} rows and {len(self.df.columns)} columns")
+            
+            # Generate summary using new summarizer module
+            try:
+                summarizer = ExcelSummarizer(self.df)
+                self.file_summary = summarizer.generate_summary()
+            except Exception as e:
+                # If summarizer fails, continue without it
+                self.file_summary = None
+            
             return True
             
         except pd.errors.EmptyDataError:
@@ -766,40 +783,20 @@ class ExcelProcessor:
             raise ValueError("No data to save")
         
         try:
-            # Ensure directory exists
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            # Use new modular XlsxWriter
+            writer = XlsxWriter(output_path)
             
-            # Save to Excel with formatting
-            with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-                self.df.to_excel(writer, sheet_name='Processed Data', index=False)
-                
-                # Get workbook and worksheet
-                workbook = writer.book
-                worksheet = writer.sheets['Processed Data']
-                
-                # Format header row
-                header_format = workbook.add_format({
-                    'bold': True,
-                    'bg_color': '#D7E4BC',
-                    'border': 1
-                })
-                
-                for col_num, value in enumerate(self.df.columns.values):
-                    worksheet.write(0, col_num, value, header_format)
-                
-                # Apply custom formatting rules
-                self._apply_formatting_rules(workbook, worksheet)
-                
-                # Apply conditional formatting
-                self._apply_conditional_formatting(workbook, worksheet)
-                
-                # Auto-adjust column widths
-                for i, col in enumerate(self.df.columns):
-                    max_length = max(
-                        self.df[col].astype(str).map(len).max(),
-                        len(str(col))
-                    )
-                    worksheet.set_column(i, i, min(max_length + 2, 50))
+            # Separate formatting and conditional formatting rules
+            formatting_rules = [r for r in self.formatting_rules if r.get("type") == "format"]
+            conditional_rules = [r for r in self.formatting_rules if r.get("type") == "conditional"]
+            
+            # Write with formatting
+            writer.write(
+                df=self.df,
+                sheet_name='Processed Data',
+                formatting_rules=formatting_rules if formatting_rules else None,
+                conditional_formatting=conditional_rules if conditional_rules else None
+            )
             
             return output_path
             
@@ -1735,14 +1732,17 @@ class ExcelProcessor:
             elif formula_type == "normalize_text":
                 if not column:
                     raise ValueError("Column required for normalize_text")
-                self.df = FormulaEngine.normalize_text(self.df, column)
+                # Use new TextCleaner module
+                self.df = TextCleaner.trim_whitespace(self.df, column)
+                self.df = TextCleaner.normalize_case(self.df, column, case='lower')
                 self.summary.append(f"Normalized text in {column}")
             
             elif formula_type == "fix_date_formats":
                 if not column:
                     raise ValueError("Column required for fix_date_formats")
                 target_format = params.get("target_format", "%Y-%m-%d")
-                self.df = FormulaEngine.fix_date_formats(self.df, column, target_format)
+                # Use new DateCleaner module
+                self.df = DateCleaner.normalize_dates(self.df, column, target_format)
                 self.summary.append(f"Fixed date formats in {column}")
             
             elif formula_type == "convert_text_to_numbers":
