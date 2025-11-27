@@ -207,6 +207,18 @@ Available Operations:
 - remove_characters: Remove specific characters from columns (e.g., remove dots from start of phone numbers)
   - Use params: {"column": "ColumnName", "character": ".", "position": "start|end|all"}
   - Or use execution_instructions with pandas.str.lstrip/rstrip/replace methods
+  - EXAMPLE: "remove the initial dot from phone numbers column" → 
+    {
+      "task": "clean",
+      "operations": [{
+        "type": "remove_characters",
+        "params": {"column": "phone numbers", "character": ".", "position": "start"},
+        "execution_instructions": {
+          "method": "pandas.str.lstrip",
+          "kwargs": {"column": "phone numbers", "char": "."}
+        }
+      }]
+    }
 
 **Grouping & Summaries:**
 - group_by_category: Group by category and aggregate (count, sum, average, max, min)
@@ -743,6 +755,30 @@ Example 4: "remove duplicates"
 {
     "task": "summarize",  // WRONG! Should be "clean"
     "chart_type": "none"
+}
+
+Example 5: "remove the initial dot from phone numbers column"
+✓ CORRECT:
+{
+    "task": "clean",
+    "columns_needed": ["phone numbers"],
+    "chart_type": "none",
+    "steps": ["remove initial dot from phone numbers column"],
+    "operations": [
+        {
+            "type": "remove_characters",
+            "description": "Remove initial dot from phone numbers",
+            "params": {
+                "column": "phone numbers",
+                "character": ".",
+                "position": "start"
+            },
+            "execution_instructions": {
+                "method": "pandas.str.lstrip",
+                "kwargs": {"char": "."}
+            }
+        }
+    ]
 }
 """
 

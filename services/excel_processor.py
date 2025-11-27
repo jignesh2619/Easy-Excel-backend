@@ -196,6 +196,15 @@ class ExcelProcessor:
             # Handle character removal/replacement operations
             if op_type in ["remove_characters", "replace_text", "clean_text"] or "remove" in op_type.lower() or "replace" in op_type.lower():
                 column = params.get("column") or exec_instructions.get("kwargs", {}).get("column")
+                # Try to find column with case-insensitive matching
+                if column:
+                    matching_column = None
+                    for col in self.df.columns:
+                        if col.lower() == column.lower() or column.lower() in col.lower() or col.lower() in column.lower():
+                            matching_column = col
+                            break
+                    if matching_column:
+                        column = matching_column
                 if column and column in self.df.columns:
                     # Get the character/pattern to remove
                     char_to_remove = params.get("character") or params.get("pattern") or params.get("value", "")
