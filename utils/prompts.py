@@ -1035,20 +1035,38 @@ Current Request:
 {columns_list}
 {sample_data_text}
 
-CRITICAL INSTRUCTIONS FOR POSITIONAL REFERENCES:
-- If user says "delete second column", look at the column list above AND the sample data
+CRITICAL INSTRUCTIONS FOR POSITIONAL REFERENCES & ERROR TOLERANCE:
+- If user says "delete second column" (or "delet second colum" with typos), look at the column list above AND the complete data
 - Second column = index 1 (0-indexed: first=0, second=1, third=2, etc.)
 - You MUST use the actual column name from the list above
 - NEVER return empty column_name - always identify the actual column
-- Use the sample data to verify which column is which (especially for positional references)
+- Use the complete data to verify which column is which (especially for positional references)
+- Handle typos: "colum" → "column", "delet" → "delete", "remvoe" → "remove", "spllit" → "split"
 
-Example: If columns are ["Name", "Age", "City", "Phone"]:
+FUZZY MATCHING FOR COLUMN NAMES:
+- If user mentions a column name that doesn't exactly match, find the closest match from available_columns
+- Use case-insensitive matching
+- Handle partial matches ("phone" matches "Phone Numbers", "phone_num", etc.)
+- Handle typos in column names by finding closest match
+
+INTELLIGENT INFERENCE:
+- If user says "clean this" without specifics → perform comprehensive cleaning (duplicates, formatting, missing values)
+- If user says "fix dates" → detect date columns and standardize formats
+- If user says "make graph" → create appropriate chart based on data type
+- If user says "remove dot" → auto-detect which column likely has dots (phone numbers, IDs, etc.)
+- If user says "sort from small to big" → sort ascending
+- If user says "do it properly" → infer what "it" refers to from context
+- If user uses Indian-English ("make this only", "do one thing") → interpret meaning, not exact words
+
+Example: If columns are ["Name", "Age", "City", "Phone Numbers"]:
 - "delete first column" → column_name: "Name" (index 0)
 - "delete second column" → column_name: "Age" (index 1)
+- "delet second colum" (typo) → column_name: "Age" (still identify correctly)
 - "delete third column" → column_name: "City" (index 2)
-- "delete last column" → column_name: "Phone" (index 3)
+- "delete last column" → column_name: "Phone Numbers" (index 3)
+- "remove dot from phone" → column_name: "Phone Numbers" (fuzzy match)
 
-Generate the action plan JSON now:"""
+Generate the action plan JSON now. Return ONLY valid JSON, no markdown, no code blocks, pure JSON."""
     
     return prompt
 
