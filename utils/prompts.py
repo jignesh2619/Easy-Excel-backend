@@ -1036,12 +1036,19 @@ Current Request:
 {sample_data_text}
 
 CRITICAL INSTRUCTIONS FOR POSITIONAL REFERENCES & ERROR TOLERANCE:
-- If user says "delete second column" (or "delet second colum" with typos), look at the column list above AND the complete data
-- Second column = index 1 (0-indexed: first=0, second=1, third=2, etc.)
-- You MUST use the actual column name from the list above
-- NEVER return empty column_name - always identify the actual column
+- If user says "delete second column" or "delete 2nd column" (or with typos), look at the column list above AND the complete data
+- Positional mapping: "1st"/"first" = index 0, "2nd"/"second" = index 1, "3rd"/"third" = index 2, "4th"/"fourth" = index 3, "last" = index (length-1)
+- You MUST use the actual column name from the list above - NEVER return empty column_name
+- ALWAYS identify the actual column name from available_columns based on position
 - Use the complete data to verify which column is which (especially for positional references)
 - Handle typos: "colum" → "column", "delet" → "delete", "remvoe" → "remove", "spllit" → "split"
+- Handle number formats: "2nd" = "second" = index 1, "3rd" = "third" = index 2, etc.
+
+MANDATORY: When user says "delete 2nd column" or "delete second column":
+1. Look at available_columns list (shown above with indices)
+2. Find column at index 1 (second column, 0-indexed)
+3. Return delete_column: {"column_name": "ActualColumnNameFromList"}
+4. NEVER return empty column_name or column_index only - ALWAYS provide column_name
 
 FUZZY MATCHING FOR COLUMN NAMES:
 - If user mentions a column name that doesn't exactly match, find the closest match from available_columns
@@ -1058,13 +1065,19 @@ INTELLIGENT INFERENCE:
 - If user says "do it properly" → infer what "it" refers to from context
 - If user uses Indian-English ("make this only", "do one thing") → interpret meaning, not exact words
 
-Example: If columns are ["Name", "Age", "City", "Phone Numbers"]:
-- "delete first column" → column_name: "Name" (index 0)
-- "delete second column" → column_name: "Age" (index 1)
-- "delet second colum" (typo) → column_name: "Age" (still identify correctly)
-- "delete third column" → column_name: "City" (index 2)
-- "delete last column" → column_name: "Phone Numbers" (index 3)
-- "remove dot from phone" → column_name: "Phone Numbers" (fuzzy match)
+MANDATORY EXAMPLES - Follow these EXACTLY:
+If available_columns = ["Name", "Age", "City", "Phone Numbers"]:
+- User: "delete first column" → {"task": "delete_column", "delete_column": {"column_name": "Name"}}
+- User: "delete second column" → {"task": "delete_column", "delete_column": {"column_name": "Age"}}
+- User: "delete 2nd column" → {"task": "delete_column", "delete_column": {"column_name": "Age"}}
+- User: "delete 2 column" → {"task": "delete_column", "delete_column": {"column_name": "Age"}}
+- User: "delet second colum" (typo) → {"task": "delete_column", "delete_column": {"column_name": "Age"}}
+- User: "delete third column" → {"task": "delete_column", "delete_column": {"column_name": "City"}}
+- User: "delete 3rd column" → {"task": "delete_column", "delete_column": {"column_name": "City"}}
+- User: "delete last column" → {"task": "delete_column", "delete_column": {"column_name": "Phone Numbers"}}
+- User: "remove dot from phone" → {"task": "clean", "operations": [{"type": "remove_characters", "params": {"column": "Phone Numbers", ...}}]}
+
+CRITICAL: In ALL cases above, you MUST return the actual column_name from available_columns. NEVER return empty column_name.
 
 Generate the action plan JSON now. Return ONLY valid JSON, no markdown, no code blocks, pure JSON."""
     

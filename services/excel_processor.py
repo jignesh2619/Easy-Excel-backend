@@ -837,13 +837,49 @@ class ExcelProcessor:
         self.summary.append(f"Total columns: {len(self.df.columns)}")
     
     def _execute_delete_column(self, action_plan: Dict):
-        """Execute delete column operation"""
+        """Execute delete column operation with positional reference fallback"""
         delete_column = action_plan.get("delete_column", {})
         
         column_name = delete_column.get("column_name")
+        column_index = delete_column.get("column_index")
+        
+        # If no column name but we have user prompt, try to extract positional reference
+        if not column_name:
+            user_prompt = action_plan.get("user_prompt", "").lower()
+            
+            # Try to extract positional reference from user prompt
+            import re
+            # Match patterns like "1st", "2nd", "3rd", "first", "second", "third", "last"
+            position_patterns = [
+                (r'\b(\d+)(?:st|nd|rd|th)\s+col', lambda m: int(m.group(1)) - 1),  # "2nd col", "3rd col"
+                (r'\b(\d+)\s+col', lambda m: int(m.group(1)) - 1),  # "2 col", "3 col"
+                (r'\bfirst\s+col', lambda m: 0),
+                (r'\bsecond\s+col', lambda m: 1),
+                (r'\bthird\s+col', lambda m: 2),
+                (r'\bfourth\s+col', lambda m: 3),
+                (r'\bfifth\s+col', lambda m: 4),
+                (r'\blast\s+col', lambda m: len(self.df.columns) - 1),
+            ]
+            
+            for pattern, index_func in position_patterns:
+                match = re.search(pattern, user_prompt)
+                if match:
+                    try:
+                        col_idx = index_func(match)
+                        if 0 <= col_idx < len(self.df.columns):
+                            column_name = self.df.columns[col_idx]
+                            self.summary.append(f"Identified '{column_name}' as the column to delete from positional reference")
+                            break
+                    except:
+                        continue
+        
+        # Fallback: use column_index if provided
+        if not column_name and column_index is not None:
+            if 0 <= column_index < len(self.df.columns):
+                column_name = self.df.columns[column_index]
         
         if not column_name:
-            self.summary.append("Delete column: No column name specified")
+            self.summary.append("Delete column: No column name specified. Please specify column name or position (e.g., 'delete second column', 'delete column Name').")
             return
         
         if column_name not in self.df.columns:
