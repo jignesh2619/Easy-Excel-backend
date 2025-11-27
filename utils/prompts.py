@@ -996,44 +996,80 @@ def get_prompt_with_context(user_prompt: str, available_columns: list, sample_da
     columns_info = f"Available columns (with indices for positional references):\n" + "\n".join(columns_with_indices)
     columns_list = f"Column list: {', '.join(available_columns)}"
     
-    # Add full Excel data if provided
+    # Add full Excel data if provided - MAKE IT VERY PROMINENT
     sample_data_text = ""
     if sample_data:
         total_rows = len(sample_data)
-        sample_data_text = f"\n\nCOMPLETE EXCEL DATA ({total_rows} rows):\n"
-        sample_data_text += "This is the FULL dataset - all rows and columns. Use this complete data to understand the entire structure.\n"
-        sample_data_text += "Analyze all rows to make accurate decisions about columns, data patterns, and operations.\n\n"
+        sample_data_text = f"""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    📊 COMPLETE EXCEL DATASET PROVIDED 📊                      ║
+║                                                                                ║
+║  YOU ARE RECEIVING THE FULL EXCEL FILE WITH ALL {total_rows} ROWS BELOW        ║
+║  This is NOT a sample - this is the COMPLETE dataset from the uploaded file   ║
+║  Use this data to make accurate decisions about columns, rows, and operations  ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+COMPLETE EXCEL DATA ({total_rows} rows, {len(available_columns)} columns):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+IMPORTANT: Below is the FULL Excel dataset. Every row and every column value is shown.
+Use this complete data to:
+✓ Identify which column is "first", "second", "third", etc. (for positional references)
+✓ Understand data types, formats, and patterns across ALL rows
+✓ Make accurate decisions based on actual data values, not assumptions
+✓ See all column names with their actual data to match user requests correctly
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"""
         
         # Format as a table-like structure - include ALL rows
         for row_idx, row in enumerate(sample_data, 1):
-            sample_data_text += f"Row {row_idx}:\n"
+            sample_data_text += f"━━━ ROW {row_idx} ━━━\n"
             for col in available_columns:
                 value = row.get(col, "")
                 # Truncate extremely long values to avoid token bloat (keep up to 300 chars)
                 if isinstance(value, str) and len(value) > 300:
                     value = value[:300] + "..."
-                sample_data_text += f"  {col}: {value}\n"
+                sample_data_text += f"  [{col}]: {value}\n"
             sample_data_text += "\n"
         
-        sample_data_text += f"\n=== COMPLETE DATASET SUMMARY ===\n"
-        sample_data_text += f"Total rows: {total_rows}\n"
-        sample_data_text += f"Total columns: {len(available_columns)}\n"
-        sample_data_text += "\nUse this COMPLETE dataset to:\n"
-        sample_data_text += "- Understand the FULL data structure with all rows and values\n"
-        sample_data_text += "- Identify column names and their complete data patterns\n"
-        sample_data_text += "- Determine data types and formats across ALL rows\n"
-        sample_data_text += "- Accurately identify which column is 'first', 'second', 'third', etc. when user uses positional references\n"
-        sample_data_text += "- Make informed decisions based on the COMPLETE dataset, not just samples\n"
-        sample_data_text += "- Understand data patterns, duplicates, and relationships across all rows\n"
+        sample_data_text += f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DATASET SUMMARY:
+  • Total Rows: {total_rows}
+  • Total Columns: {len(available_columns)}
+  • Column Names: {', '.join(available_columns)}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CRITICAL REMINDER: You have the COMPLETE Excel dataset above. 
+When user says "delete 2nd column", look at the column list and data above to identify:
+  - Column at index 0 = FIRST column = "{available_columns[0] if available_columns else 'N/A'}"
+  - Column at index 1 = SECOND column = "{available_columns[1] if len(available_columns) > 1 else 'N/A'}"
+  - Column at index 2 = THIRD column = "{available_columns[2] if len(available_columns) > 2 else 'N/A'}"
+  - Last column = "{available_columns[-1] if available_columns else 'N/A'}" (index {len(available_columns) - 1 if available_columns else 0})
+
+ALWAYS use the actual column names from the list above when responding.
+"""
+    else:
+        sample_data_text = "\n⚠️ NOTE: No Excel data provided in this request.\n"
     
     prompt = f"""{SYSTEM_PROMPT}
 
-Current Request:
+═══════════════════════════════════════════════════════════════════════════════
+📋 USER REQUEST:
+═══════════════════════════════════════════════════════════════════════════════
 {user_prompt}
 
+═══════════════════════════════════════════════════════════════════════════════
+📊 AVAILABLE COLUMNS (with positional indices):
+═══════════════════════════════════════════════════════════════════════════════
 {columns_info}
-{columns_list}
+
+Column List: {columns_list}
+
 {sample_data_text}
+═══════════════════════════════════════════════════════════════════════════════
 
 CRITICAL INSTRUCTIONS FOR POSITIONAL REFERENCES & ERROR TOLERANCE:
 - If user says "delete second column" or "delete 2nd column" (or with typos), look at the column list above AND the complete data
