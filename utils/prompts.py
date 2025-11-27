@@ -1134,6 +1134,14 @@ POSITIONAL REFERENCES (when user says "first", "second", "third", "last"):
 3. Return the ACTUAL column name at that position from available_columns
 4. Example: If available_columns = ["Name", "UY7F9", "Phone"], then "second column" = "UY7F9"
 
+EXCEL COLUMN LETTERS (when user says "column A", "column B", "column A to Z"):
+1. Excel uses letters: A=index 0, B=index 1, C=index 2, ..., Z=index 25, AA=index 26, etc.
+2. When user says "column A" → map to index 0, get actual column name from available_columns[0]
+3. When user says "column B" → map to index 1, get actual column name from available_columns[1]
+4. When user says "column A to Z" or "columns A through Z" → get all columns from index 0 to 25 (or last column)
+5. Always return the ACTUAL column name(s) from available_columns, not the letter
+6. Example: If available_columns = ["Name", "Age", "City"], then "column A" = "Name", "column B" = "Age", "column C" = "City"
+
 TEXT-BASED SEARCH (when user says "highlight cells with X" or "highlight column with X" or "cells containing X"):
 1. Search through ALL {total_rows} rows in the dataset above
 2. Find which column(s) contain the specified text/pattern (e.g., "Car detailing service")
@@ -1206,10 +1214,13 @@ SCENARIO 1: User provides specific column name
 - Rule: X is the actual column name - check available_columns, use it exactly
 - JSON: {{"task": "delete_column", "delete_column": {{"column_name": "X"}}}}
 
-SCENARIO 2: User uses positional reference
-- Pattern: "delete 2nd column", "remove first column", "delete last column"
-- Rule: Map position to index, get actual name from available_columns[index]
+SCENARIO 2: User uses positional reference OR Excel column letters
+- Pattern: "delete 2nd column", "remove first column", "delete last column", "delete column A", "remove column B", "column A to Z"
+- Rule: 
+  * For positional: Map position to index (first=0, second=1, etc.), get actual name from available_columns[index]
+  * For Excel letters: Map letter to index (A=0, B=1, C=2, ..., Z=25, AA=26, etc.), get actual name from available_columns[index]
 - JSON: {{"task": "delete_column", "delete_column": {{"column_name": "ActualNameFromIndex"}}}}
+- Example: "delete column A" → available_columns[0], "delete column B" → available_columns[1]
 
 SCENARIO 3: User describes content (highlighting cells)
 - Pattern: "highlight cells with X", "highlight column with X", "cells containing X", "highlight cells which have X"
