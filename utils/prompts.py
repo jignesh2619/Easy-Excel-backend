@@ -918,28 +918,31 @@ def get_prompt_with_context(user_prompt: str, available_columns: list, sample_da
     sample_data_text = ""
     if sample_data:
         total_rows = len(sample_data)
-        sample_data_text = f"\n\nFULL EXCEL DATA ({total_rows} rows total):\n"
-        sample_data_text += "This is the complete dataset to help you understand the full context and structure.\n"
-        sample_data_text += "Use this data to make accurate decisions about columns, rows, and operations.\n\n"
+        sample_data_text = f"\n\nCOMPLETE EXCEL DATA ({total_rows} rows):\n"
+        sample_data_text += "This is the FULL dataset - all rows and columns. Use this complete data to understand the entire structure.\n"
+        sample_data_text += "Analyze all rows to make accurate decisions about columns, data patterns, and operations.\n\n"
         
-        # Format as a table-like structure
+        # Format as a table-like structure - include ALL rows
         for row_idx, row in enumerate(sample_data, 1):
             sample_data_text += f"Row {row_idx}:\n"
             for col in available_columns:
                 value = row.get(col, "")
-                # Truncate very long values to avoid token bloat (but keep more than before)
-                if isinstance(value, str) and len(value) > 200:
-                    value = value[:200] + "..."
+                # Truncate extremely long values to avoid token bloat (keep up to 300 chars)
+                if isinstance(value, str) and len(value) > 300:
+                    value = value[:300] + "..."
                 sample_data_text += f"  {col}: {value}\n"
             sample_data_text += "\n"
         
-        sample_data_text += f"\nTotal rows in dataset: {total_rows}\n"
-        sample_data_text += "Use this full data to:\n"
-        sample_data_text += "- Understand complete data structure and all values\n"
-        sample_data_text += "- Identify column names and their actual data\n"
-        sample_data_text += "- Determine data types and formats across all rows\n"
+        sample_data_text += f"\n=== COMPLETE DATASET SUMMARY ===\n"
+        sample_data_text += f"Total rows: {total_rows}\n"
+        sample_data_text += f"Total columns: {len(available_columns)}\n"
+        sample_data_text += "\nUse this COMPLETE dataset to:\n"
+        sample_data_text += "- Understand the FULL data structure with all rows and values\n"
+        sample_data_text += "- Identify column names and their complete data patterns\n"
+        sample_data_text += "- Determine data types and formats across ALL rows\n"
         sample_data_text += "- Accurately identify which column is 'first', 'second', 'third', etc. when user uses positional references\n"
-        sample_data_text += "- Make informed decisions about operations based on actual data content\n"
+        sample_data_text += "- Make informed decisions based on the COMPLETE dataset, not just samples\n"
+        sample_data_text += "- Understand data patterns, duplicates, and relationships across all rows\n"
     
     prompt = f"""{SYSTEM_PROMPT}
 

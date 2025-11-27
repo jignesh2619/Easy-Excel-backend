@@ -232,13 +232,13 @@ async def process_file(
         user_id = user["user_id"] if user else None
         
         # Prepare full Excel data to help LLM understand data structure
-        # Send all rows if <= 500, otherwise send first 500 rows to avoid token limits
+        # Send all rows (up to 1000 for very large files to avoid token limits)
         sample_data = None
         if len(df) > 0:
-            # Convert all rows (or first 500 if too large) to list of dicts
-            max_rows = min(len(df), 500)  # Limit to 500 rows to avoid token limits
-            sample_rows = df.head(max_rows).to_dict('records')
-            sample_data = sample_rows
+            # Convert all rows to list of dicts (limit to 1000 for extremely large files)
+            max_rows = min(len(df), 1000)  # Safety limit for very large files
+            all_rows = df.head(max_rows).to_dict('records')
+            sample_data = all_rows
         
         llm_result = llm_agent.interpret_prompt(prompt, available_columns, user_id=user_id, sample_data=sample_data)
         action_plan = llm_result.get("action_plan", {})
