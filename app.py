@@ -231,11 +231,13 @@ async def process_file(
         # Get user_id for feedback tracking
         user_id = user["user_id"] if user else None
         
-        # Prepare sample data (first 5 rows) to help LLM understand data structure
+        # Prepare full Excel data to help LLM understand data structure
+        # Send all rows if <= 500, otherwise send first 500 rows to avoid token limits
         sample_data = None
         if len(df) > 0:
-            # Convert first 5 rows to list of dicts
-            sample_rows = df.head(5).to_dict('records')
+            # Convert all rows (or first 500 if too large) to list of dicts
+            max_rows = min(len(df), 500)  # Limit to 500 rows to avoid token limits
+            sample_rows = df.head(max_rows).to_dict('records')
             sample_data = sample_rows
         
         llm_result = llm_agent.interpret_prompt(prompt, available_columns, user_id=user_id, sample_data=sample_data)

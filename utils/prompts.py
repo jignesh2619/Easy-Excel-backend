@@ -914,28 +914,32 @@ def get_prompt_with_context(user_prompt: str, available_columns: list, sample_da
     columns_info = f"Available columns (with indices for positional references):\n" + "\n".join(columns_with_indices)
     columns_list = f"Column list: {', '.join(available_columns)}"
     
-    # Add sample data if provided (limit to first 5 rows to avoid token limits)
+    # Add full Excel data if provided
     sample_data_text = ""
     if sample_data:
-        sample_rows = sample_data[:5]  # Limit to first 5 rows
-        sample_data_text = f"\n\nSAMPLE DATA (first {len(sample_rows)} rows to understand data structure):\n"
-        sample_data_text += "This shows the actual data structure and values to help you understand the context.\n\n"
+        total_rows = len(sample_data)
+        sample_data_text = f"\n\nFULL EXCEL DATA ({total_rows} rows total):\n"
+        sample_data_text += "This is the complete dataset to help you understand the full context and structure.\n"
+        sample_data_text += "Use this data to make accurate decisions about columns, rows, and operations.\n\n"
         
         # Format as a table-like structure
-        for row_idx, row in enumerate(sample_rows, 1):
+        for row_idx, row in enumerate(sample_data, 1):
             sample_data_text += f"Row {row_idx}:\n"
             for col in available_columns:
                 value = row.get(col, "")
-                # Truncate long values to avoid token bloat
-                if isinstance(value, str) and len(value) > 100:
-                    value = value[:100] + "..."
+                # Truncate very long values to avoid token bloat (but keep more than before)
+                if isinstance(value, str) and len(value) > 200:
+                    value = value[:200] + "..."
                 sample_data_text += f"  {col}: {value}\n"
             sample_data_text += "\n"
         
-        sample_data_text += "Use this sample data to better understand:\n"
-        sample_data_text += "- Column names and their actual values\n"
-        sample_data_text += "- Data types and formats\n"
-        sample_data_text += "- Which column is 'first', 'second', 'third', etc. when user uses positional references\n"
+        sample_data_text += f"\nTotal rows in dataset: {total_rows}\n"
+        sample_data_text += "Use this full data to:\n"
+        sample_data_text += "- Understand complete data structure and all values\n"
+        sample_data_text += "- Identify column names and their actual data\n"
+        sample_data_text += "- Determine data types and formats across all rows\n"
+        sample_data_text += "- Accurately identify which column is 'first', 'second', 'third', etc. when user uses positional references\n"
+        sample_data_text += "- Make informed decisions about operations based on actual data content\n"
     
     prompt = f"""{SYSTEM_PROMPT}
 
