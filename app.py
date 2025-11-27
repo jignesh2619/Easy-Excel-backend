@@ -231,7 +231,14 @@ async def process_file(
         # Get user_id for feedback tracking
         user_id = user["user_id"] if user else None
         
-        llm_result = llm_agent.interpret_prompt(prompt, available_columns, user_id=user_id)
+        # Prepare sample data (first 5 rows) to help LLM understand data structure
+        sample_data = None
+        if len(df) > 0:
+            # Convert first 5 rows to list of dicts
+            sample_rows = df.head(5).to_dict('records')
+            sample_data = sample_rows
+        
+        llm_result = llm_agent.interpret_prompt(prompt, available_columns, user_id=user_id, sample_data=sample_data)
         action_plan = llm_result.get("action_plan", {})
         # Add user prompt to action plan so processors can check what user explicitly requested
         action_plan["user_prompt"] = prompt

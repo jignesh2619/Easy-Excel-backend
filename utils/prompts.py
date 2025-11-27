@@ -883,13 +883,14 @@ Example 5: "remove the initial dot from phone numbers column"
 }
 """
 
-def get_prompt_with_context(user_prompt: str, available_columns: list) -> str:
+def get_prompt_with_context(user_prompt: str, available_columns: list, sample_data: Optional[List[Dict]] = None) -> str:
     """
-    Generate prompt with context about available columns
+    Generate prompt with context about available columns and sample data
     
     Args:
         user_prompt: User's natural language request
         available_columns: List of available column names
+        sample_data: Optional list of sample rows (dicts) to help LLM understand data structure
         
     Returns:
         Formatted prompt string
@@ -911,6 +912,29 @@ def get_prompt_with_context(user_prompt: str, available_columns: list) -> str:
     columns_info = f"Available columns (with indices for positional references):\n" + "\n".join(columns_with_indices)
     columns_list = f"Column list: {', '.join(available_columns)}"
     
+    # Add sample data if provided (limit to first 5 rows to avoid token limits)
+    sample_data_text = ""
+    if sample_data:
+        sample_rows = sample_data[:5]  # Limit to first 5 rows
+        sample_data_text = f"\n\nSAMPLE DATA (first {len(sample_rows)} rows to understand data structure):\n"
+        sample_data_text += "This shows the actual data structure and values to help you understand the context.\n\n"
+        
+        # Format as a table-like structure
+        for row_idx, row in enumerate(sample_rows, 1):
+            sample_data_text += f"Row {row_idx}:\n"
+            for col in available_columns:
+                value = row.get(col, "")
+                # Truncate long values to avoid token bloat
+                if isinstance(value, str) and len(value) > 100:
+                    value = value[:100] + "..."
+                sample_data_text += f"  {col}: {value}\n"
+            sample_data_text += "\n"
+        
+        sample_data_text += "Use this sample data to better understand:\n"
+        sample_data_text += "- Column names and their actual values\n"
+        sample_data_text += "- Data types and formats\n"
+        sample_data_text += "- Which column is 'first', 'second', 'third', etc. when user uses positional references\n"
+    
     prompt = f"""{SYSTEM_PROMPT}
 
 Current Request:
@@ -918,12 +942,14 @@ Current Request:
 
 {columns_info}
 {columns_list}
+{sample_data_text}
 
 CRITICAL INSTRUCTIONS FOR POSITIONAL REFERENCES:
-- If user says "delete second column", look at the column list above
+- If user says "delete second column", look at the column list above AND the sample data
 - Second column = index 1 (0-indexed: first=0, second=1, third=2, etc.)
 - You MUST use the actual column name from the list above
 - NEVER return empty column_name - always identify the actual column
+- Use the sample data to verify which column is which (especially for positional references)
 
 Example: If columns are ["Name", "Age", "City", "Phone"]:
 - "delete first column" → column_name: "Name" (index 0)

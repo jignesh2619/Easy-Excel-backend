@@ -76,7 +76,8 @@ class LLMAgent:
         self, 
         user_prompt: str, 
         available_columns: List[str],
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        sample_data: Optional[List[Dict]] = None
     ) -> Dict:
         """
         Interpret user prompt and return structured action plan with token usage
@@ -85,6 +86,7 @@ class LLMAgent:
             user_prompt: Natural language user request
             available_columns: List of available column names in the data
             user_id: Optional user ID for feedback tracking
+            sample_data: Optional list of sample rows (dicts) to help LLM understand data structure
             
         Returns:
             Dictionary with:
@@ -97,7 +99,7 @@ class LLMAgent:
             - tokens_used: Actual token count from Gemini API (prompt + response)
         """
         try:
-            prompt = get_prompt_with_context(user_prompt, available_columns)
+            prompt = get_prompt_with_context(user_prompt, available_columns, sample_data)
             
             # Get knowledge base summary for enhanced context
             kb_summary = get_knowledge_base_summary()
