@@ -7,6 +7,7 @@ The LLM does NOT modify data directly - it only returns action plans.
 
 import json
 import os
+import logging
 from typing import Dict, List, Optional
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -20,6 +21,8 @@ from services.feedback_learner import FeedbackLearner
 from services.training_data_loader import TrainingDataLoader
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class LLMAgent:
@@ -203,8 +206,6 @@ Include "operations" array with "execution_instructions" for each operation."""
                     tokens_used = prompt_tokens + response_tokens
                     
                     # Log token breakdown for debugging
-                    import logging
-                    logger = logging.getLogger(__name__)
                     logger.info(f"Gemini API token usage: prompt={prompt_tokens}, response={response_tokens}, total={tokens_used}")
                 except Exception as e:
                     logger.warning(f"Error extracting token usage from Gemini API: {e}")
