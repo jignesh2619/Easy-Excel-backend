@@ -32,7 +32,7 @@ class SampleSelector:
         - Provide a short explanation of the chosen rows
     """
 
-    def __init__(self, max_rows: int = 60, min_rows: int = 30):
+    def __init__(self, max_rows: int = 20, min_rows: int = 10):
         self.max_rows = max_rows
         self.min_rows = min_rows
 
