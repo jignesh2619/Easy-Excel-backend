@@ -19,7 +19,6 @@ from utils.prompts import get_prompt_with_context
 from utils.knowledge_base import get_knowledge_base_summary, get_task_decision_guide
 from services.feedback_learner import FeedbackLearner
 from services.training_data_loader import TrainingDataLoader
-from services.conditional_format_interpreter import ConditionalFormattingInterpreter
 
 load_dotenv()
 
@@ -33,15 +32,15 @@ SYSTEM_MESSAGE = (
 
 
 class LLMAgent:
-    """Handles LLM interpretation of user prompts using OpenAI GPT-4.1"""
+    """Handles LLM interpretation of user prompts using OpenAI GPT-4"""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4-1"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
         """
-        Initialize LLM Agent with OpenAI GPT-4.1
+        Initialize LLM Agent with OpenAI GPT-4
         
         Args:
             api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
-            model: Model to use (default: gpt-4-1)
+            model: Model to use (default: gpt-4o)
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
@@ -65,45 +64,6 @@ class LLMAgent:
             self.training_data_loader = TrainingDataLoader()
         except Exception:
             self.training_data_loader = None
-        
-        self.conditional_schema = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "conditional_formatting_schema",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "conditional_formatting": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "apply_to": {"type": "string"},
-                                    "condition_type": {"type": "string", "enum": ["contains", "equals", "regex"]},
-                                    "condition_value": {"type": "string"},
-                                    "format": {
-                                        "type": "object",
-                                        "properties": {
-                                            "background_color": {"type": "string"},
-                                            "font_color": {"type": "string"},
-                                            "bold": {"type": "boolean"}
-                                        },
-                                        "required": ["background_color", "font_color", "bold"]
-                                    }
-                                },
-                                "required": ["apply_to", "condition_type", "condition_value", "format"]
-                            }
-                        }
-                    },
-                    "required": ["conditional_formatting"]
-                }
-            }
-        }
-        self.conditional_helper = ConditionalFormattingInterpreter(
-            client=self.client,
-            model=self.model,
-            schema=self.conditional_schema,
-        )
     
     def interpret_prompt(
         self, 
@@ -117,18 +77,7 @@ class LLMAgent:
         Interpret user prompt and return structured action plan with token usage
         """
         try:
-            # Dedicated path for conditional-formatting prompts
-            if self.conditional_helper.should_handle_prompt(user_prompt):
-                helper_payload, helper_tokens = self.conditional_helper.interpret(
-                    user_prompt, available_columns
-                )
-                helper_plan = self._convert_conditional_schema_to_action_plan(
-                    helper_payload, available_columns
-                )
-                helper_plan["user_prompt"] = user_prompt
-                return {"action_plan": helper_plan, "tokens_used": helper_tokens}
-
-            general_prompt = get_prompt_with_context(user_prompt, available_columns, sample_data)
+            prompt = get_prompt_with_context(user_prompt, available_columns, sample_data)
             
             # Get knowledge base summary for enhanced context
             kb_summary = get_knowledge_base_summary()
@@ -188,7 +137,7 @@ Confidence: {task_suggestions.get('confidence', 0)}
 {similar_examples_text}
 {sample_explanation_text}
 
-{general_prompt}
+{prompt}
 
 Return your response as a valid JSON object with no additional formatting.
 Include "operations" array with "execution_instructions" for each operation."""
@@ -304,9 +253,6 @@ Include "operations" array with "execution_instructions" for each operation."""
         if "conditional_format" in action_plan:
             normalized["conditional_format"] = action_plan["conditional_format"]
         
-        if "conditional_format_rules" in action_plan:
-            normalized["conditional_format_rules"] = action_plan["conditional_format_rules"]
-        
         # Add formula operation field if present
         if "formula" in action_plan:
             normalized["formula"] = action_plan["formula"]
@@ -328,68 +274,6 @@ Include "operations" array with "execution_instructions" for each operation."""
             normalized["chart_type"] = "none"
         
         return normalized
-
-    def _convert_conditional_schema_to_action_plan(
-        self, helper_payload: Dict, available_columns: List[str]
-    ) -> Dict:
-        """Map helper JSON back into the action plan structure ExcelProcessor expects."""
-        rules = []
-        requested_rules = helper_payload.get("conditional_formatting", [])
-        column_lookup = {col.lower(): col for col in available_columns}
-
-        for entry in requested_rules:
-            if not isinstance(entry, dict):
-                continue
-
-            apply_to = entry.get("apply_to", "all_columns") or "all_columns"
-            if apply_to.lower() != "all_columns":
-                normalized_col = column_lookup.get(apply_to.lower())
-                if normalized_col:
-                    apply_to = normalized_col
-                else:
-                    apply_to = "all_columns"
-
-            condition_type = entry.get("condition_type", "contains")
-            condition_value = entry.get("condition_value", "")
-            fmt = entry.get("format", {})
-
-            format_type_map = {
-                "contains": "contains_text",
-                "equals": "text_equals",
-                "regex": "regex_match",
-            }
-            format_type = format_type_map.get(condition_type, "contains_text")
-
-            rule = {
-                "type": "conditional",
-                "format_type": format_type,
-                "config": {
-                    "column": apply_to,
-                    "text": condition_value,
-                    "pattern": condition_value if format_type == "regex_match" else None,
-                    "bg_color": fmt.get("background_color", "#FFF3CD"),
-                    "text_color": fmt.get("font_color", "#000000"),
-                    "bold": fmt.get("bold", False),
-                    "condition_type": condition_type,
-                    "condition_value": condition_value,
-                },
-            }
-            # Remove None keys to keep config clean
-            rule["config"] = {k: v for k, v in rule["config"].items() if v is not None}
-            rules.append(rule)
-
-        action_plan = {
-            "task": "conditional_format",
-            "columns_needed": [],
-            "chart_type": "none",
-            "steps": [],
-            "conditional_format_rules": rules,
-        }
-
-        if rules:
-            action_plan["conditional_format"] = rules[0]
-
-        return action_plan
     
     def get_example_action_plan(self, task_type: str = "group_by") -> Dict:
         """
