@@ -291,6 +291,32 @@ INTENT RECOGNITION GUIDE:
 - Positional references: "first/second/third/nth/last" -> MUST map to actual column/row index from available_columns
 - IMPORTANT: When user requests both cleaning AND dashboard/chart, use task: "clean" and set chart_type. DO NOT use task: "summarize" unless user explicitly asks for summary statistics.
 
+═══════════════════════════════════════════════════════════════════════════════
+🟨 CONDITIONAL FORMATTING & FILTER RULES (MANDATORY)
+═══════════════════════════════════════════════════════════════════════════════
+
+- Highlight/Mark/Color/Flag requests (any language) → task: "conditional_format"
+  - ALWAYS fill `conditional_format.format_type` (usually "contains_text" unless exact match required)
+  - `conditional_format.config.column` MUST be the actual column name (map from column letters, positional references, or fuzzy matches to available_columns)
+  - `conditional_format.config.text` MUST be the exact phrase to search (preserve typos, accents, multilingual text)
+  - Include a `formatting` block (bg_color/text_color) so the UI can render the highlight
+  - Do NOT leave `conditional_format` empty. If the user only mentions the keyword, infer the most likely column by checking which column contains that text.
+
+- "Remove/delete/drop rows with keyword X" → task: "filter"
+  - Use `filters.condition = "not_contains"` when the user wants to remove/exclude rows
+  - Use `filters.condition = "contains"` when the user wants to keep ONLY rows containing X
+  - `filters.column` MUST be the actual column name (convert column letters like "column L", ordinal references like "second column", etc.)
+  - `filters.value` MUST be the literal keyword/phrase the user mentioned (even if misspelled or in another language)
+- Phrases like "delete cells containing 'X'", "remove entries mentioning 'Y'", "nuke rows with 'Z'" ALWAYS map to the same filter behavior above.
+
+- LANGUAGE & TYPOS:
+  - Treat "mark karo", "highlight karo", "rang karo", "flag karo", "remove rows jisme website ho" exactly like their English counterparts
+  - Handle typos ("car detaling", "webiste")—copy the text verbatim into `config.text` / `filters.value`
+
+- ALWAYS return `columns_needed` with every column you reference.
+- NEVER respond with "Conditional format: No configuration specified" or "Filter: No filter conditions specified."
+- When the user provides both the keyword and the column, respond with a complete JSON plan immediately (no follow-up questions).
+
 POSITIONAL REFERENCE MAPPING (CRITICAL):
 When user mentions positions like "first", "second", "third", "nth", "last":
 1. Columns are 0-indexed: first=0, second=1, third=2, fourth=3, etc.
@@ -1046,7 +1072,9 @@ def get_prompt_with_context(user_prompt: str, available_columns: list, sample_da
     """
     # Create detailed column index mapping for positional references
     columns_with_indices = []
+    columns_for_display = [str(col) for col in available_columns]
     for idx, col in enumerate(available_columns):
+        col_label = str(col)
         position_name = ""
         if idx == 0:
             position_name = " (first column)"
@@ -1056,10 +1084,10 @@ def get_prompt_with_context(user_prompt: str, available_columns: list, sample_da
             position_name = " (third column)"
         elif idx == len(available_columns) - 1:
             position_name = " (last column)"
-        columns_with_indices.append(f"{idx}: {col}{position_name}")
+        columns_with_indices.append(f"{idx}: {col_label}{position_name}")
     
     columns_info = f"Available columns (with indices for positional references):\n" + "\n".join(columns_with_indices)
-    columns_list = f"Column list: {', '.join(available_columns)}"
+    columns_list = f"Column list: {', '.join(columns_for_display)}"
     
     # Add full Excel data if provided - MAKE IT VERY PROMINENT
     sample_data_text = ""
@@ -1067,22 +1095,22 @@ def get_prompt_with_context(user_prompt: str, available_columns: list, sample_da
         total_rows = len(sample_data)
         sample_data_text = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║                    📊 COMPLETE EXCEL DATASET PROVIDED 📊                      ║
+║         📊 REPRESENTATIVE SAMPLE OF THE UPLOADED DATASET PROVIDED 📊          ║
 ║                                                                                ║
-║  YOU ARE RECEIVING THE FULL EXCEL FILE WITH ALL {total_rows} ROWS BELOW        ║
-║  This is NOT a sample - this is the COMPLETE dataset from the uploaded file   ║
-║  Use this data to make accurate decisions about columns, rows, and operations  ║
+║  You are receiving a curated sample of {total_rows} rows. ALL columns appear.  ║
+║  Rows were selected to capture numeric extremes, category coverage, dates,     ║
+║  missing-value edge cases, and overall diversity of the dataset.               ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-COMPLETE EXCEL DATA ({total_rows} rows, {len(available_columns)} columns):
+REPRESENTATIVE SAMPLE ({total_rows} rows shown, {len(available_columns)} columns):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-IMPORTANT: Below is the FULL Excel dataset. Every row and every column value is shown.
-Use this complete data to:
+IMPORTANT: Below is a representative subset. Every column is preserved exactly.
+Use this sample to:
 ✓ Identify which column is "first", "second", "third", etc. (for positional references)
-✓ Understand data types, formats, and patterns across ALL rows
-✓ Make accurate decisions based on actual data values, not assumptions
-✓ See all column names with their actual data to match user requests correctly
+✓ Understand data types, formats, outliers, and rare cases
+✓ Make accurate decisions based on actual values, not assumptions
+✓ See how all column names appear with real data
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1092,11 +1120,12 @@ Use this complete data to:
         for row_idx, row in enumerate(sample_data, 1):
             sample_data_text += f"━━━ ROW {row_idx} ━━━\n"
             for col in available_columns:
-                value = row.get(col, "")
+                col_label = str(col)
+                value = row.get(col, row.get(col_label, ""))
                 # Truncate extremely long values to avoid token bloat (keep up to 300 chars)
                 if isinstance(value, str) and len(value) > 300:
                     value = value[:300] + "..."
-                sample_data_text += f"  [{col}]: {value}\n"
+                sample_data_text += f"  [{col_label}]: {value}\n"
             sample_data_text += "\n"
         
         # Build positional reference helper safely

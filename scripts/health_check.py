@@ -90,7 +90,7 @@ def check_environment():
     load_dotenv()
     
     required = [
-        "GEMINI_API_KEY",
+        "OPENAI_API_KEY",
         "SUPABASE_URL",
         "SUPABASE_KEY"
     ]

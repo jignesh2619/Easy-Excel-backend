@@ -3,7 +3,7 @@
 Write-Host "=" -NoNewline -ForegroundColor Cyan
 Write-Host ("=" * 59) -ForegroundColor Cyan
 Write-Host ""
-Write-Host "EasyExcel Backend - Gemini API Key Setup" -ForegroundColor Green
+Write-Host "EasyExcel Backend - OpenAI API Key Setup" -ForegroundColor Green
 Write-Host ""
 Write-Host "=" -NoNewline -ForegroundColor Cyan
 Write-Host ("=" * 59) -ForegroundColor Cyan
@@ -23,9 +23,9 @@ if (-not (Test-Path $envFile)) {
     } else {
         # Create new .env file
         @"
-# Google Gemini API Configuration
-# Get your API key from: https://makersuite.google.com/app/apikey
-GEMINI_API_KEY=your_gemini_api_key_here
+# OpenAI API Configuration
+# Get your API key from: https://platform.openai.com/api-keys
+OPENAI_API_KEY=your_openai_api_key_here
 
 # Server Configuration
 PORT=8000
@@ -43,21 +43,21 @@ CLEANUP_DAYS=7
 
 Write-Host ""
 Write-Host "Instructions:" -ForegroundColor Yellow
-Write-Host "1. Get your Gemini API key from: " -NoNewline -ForegroundColor White
-Write-Host "https://makersuite.google.com/app/apikey" -ForegroundColor Cyan
+Write-Host "1. Get your OpenAI API key from: " -NoNewline -ForegroundColor White
+Write-Host "https://platform.openai.com/api-keys" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "2. Open the .env file:" -ForegroundColor White
 Write-Host "   $envFile" -ForegroundColor Gray
 Write-Host ""
-Write-Host "3. Replace 'your_gemini_api_key_here' with your actual API key" -ForegroundColor White
+Write-Host "3. Replace 'your_openai_api_key_here' with your actual API key" -ForegroundColor White
 Write-Host ""
 Write-Host "Example:" -ForegroundColor Yellow
-Write-Host "   GEMINI_API_KEY=AIzaSy...your-actual-key-here" -ForegroundColor Gray
+Write-Host "   OPENAI_API_KEY=sk-...your-actual-key-here" -ForegroundColor Gray
 Write-Host ""
 
 # Check if API key is already set
 $content = Get-Content $envFile -Raw
-if ($content -match "GEMINI_API_KEY=your_gemini_api_key_here" -or $content -match "GEMINI_API_KEY=$") {
+if ($content -match "OPENAI_API_KEY=your_openai_api_key_here" -or $content -match "OPENAI_API_KEY=$") {
     Write-Host "⚠️  API key not configured yet!" -ForegroundColor Red
     Write-Host ""
     

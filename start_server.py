@@ -10,28 +10,28 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 def check_api_key():
-    """Check if Gemini API key is configured"""
+    """Check if OpenAI API key is configured"""
     # Load .env file from the backend directory
     backend_dir = Path(__file__).parent
     env_path = backend_dir / ".env"
     load_dotenv(dotenv_path=env_path)
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
     
-    if not api_key or api_key == "your_gemini_api_key_here":
+    if not api_key or api_key == "your_openai_api_key_here":
         print("=" * 60)
-        print("⚠️  Gemini API Key Not Configured!")
+        print("⚠️  OpenAI API Key Not Configured!")
         print("=" * 60)
-        print("\nPlease set your GEMINI_API_KEY in the .env file.")
+        print("\nPlease set your OPENAI_API_KEY in the .env file.")
         print("\nSteps:")
-        print("1. Get your API key from: https://makersuite.google.com/app/apikey")
+        print("1. Get your API key from: https://platform.openai.com/api-keys")
         print("2. Open the .env file in the backend folder")
-        print("3. Replace 'your_gemini_api_key_here' with your actual key")
+        print("3. Replace 'your_openai_api_key_here' with your actual key")
         print("\nExample:")
-        print("   GEMINI_API_KEY=AIzaSy...your-actual-key-here")
+        print("   OPENAI_API_KEY=sk-...your-actual-key-here")
         print("=" * 60)
         return False
     
-    print("✅ Gemini API Key found!")
+    print("✅ OpenAI API Key found!")
     return True
 
 def start_server():

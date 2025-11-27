@@ -24,9 +24,9 @@ if not exist .env (
     if not exist .env (
         echo Creating new .env file...
         (
-            echo # Google Gemini API Configuration
-            echo # Get your API key from: https://makersuite.google.com/app/apikey
-            echo GEMINI_API_KEY=your_gemini_api_key_here
+            echo # OpenAI API Configuration
+            echo # Get your API key from: https://platform.openai.com/api-keys
+            echo OPENAI_API_KEY=your_openai_api_key_here
             echo.
             echo # Server Configuration
             echo PORT=8000
@@ -38,8 +38,8 @@ if not exist .env (
         ) > .env
     )
     echo.
-    echo WARNING: Please set your GEMINI_API_KEY in the .env file
-    echo Get your key from: https://makersuite.google.com/app/apikey
+    echo WARNING: Please set your OPENAI_API_KEY in the .env file
+    echo Get your key from: https://platform.openai.com/api-keys
     echo.
     pause
 )

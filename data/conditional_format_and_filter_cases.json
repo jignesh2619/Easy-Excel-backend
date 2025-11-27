@@ -1,0 +1,85 @@
+[
+  {
+    "prompt": "highlight the cells with \"Car detailing service\"",
+    "action_plan": {
+      "task": "conditional_format",
+      "columns_needed": ["Service Description"],
+      "chart_type": "none",
+      "conditional_format": {
+        "format_type": "contains_text",
+        "config": {
+          "column": "Service Description",
+          "text": "Car detailing service",
+          "formatting": {
+            "bg_color": "#FFF3CD",
+            "text_color": "#92400E"
+          }
+        }
+      },
+      "operations": [
+        {
+          "description": "Highlight rows where Service Description mentions 'Car detailing service'",
+          "execution_instructions": {
+            "method": "pandas.DataFrame.copy",
+            "args": [],
+            "kwargs": {},
+            "notes": "Formatting applied via conditional_format rules"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "prompt": "highlight all entries that mention website in column L",
+    "action_plan": {
+      "task": "conditional_format",
+      "columns_needed": ["Column L"],
+      "chart_type": "none",
+      "conditional_format": {
+        "format_type": "contains_text",
+        "config": {
+          "column": "Column L",
+          "text": "website",
+          "formatting": {
+            "bg_color": "#E0F2FE",
+            "text_color": "#075985"
+          }
+        }
+      },
+      "operations": []
+    }
+  },
+  {
+    "prompt": "remove rows which include keyword \"website\" in column L",
+    "action_plan": {
+      "task": "filter",
+      "columns_needed": ["Column L"],
+      "chart_type": "none",
+      "filters": {
+        "column": "Column L",
+        "condition": "not_contains",
+        "value": "website"
+      },
+      "steps": [
+        "Filter rows to exclude entries containing 'website' in Column L"
+      ]
+    }
+  },
+  {
+    "prompt": "please remove every entry that says spam in the description",
+    "action_plan": {
+      "task": "filter",
+      "columns_needed": ["Description"],
+      "chart_type": "none",
+      "filters": {
+        "column": "Description",
+        "condition": "not_contains",
+        "value": "spam"
+      },
+      "steps": [
+        "Keep rows where Description does NOT contain 'spam' (case-insensitive)"
+      ]
+    }
+  }
+]
+

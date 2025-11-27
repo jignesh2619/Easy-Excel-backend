@@ -1,7 +1,7 @@
 """
 LLM Agent Service
 
-Interprets user prompts and returns structured action plans using Google Gemini 2.5 Flash.
+Interprets user prompts and returns structured action plans using OpenAI GPT-4.1.
 The LLM does NOT modify data directly - it only returns action plans.
 """
 
@@ -9,7 +9,7 @@ import json
 import os
 import logging
 from typing import Dict, List, Optional
-import google.generativeai as genai
+from openai import OpenAI
 from dotenv import load_dotenv
 
 import sys
@@ -19,90 +19,116 @@ from utils.prompts import get_prompt_with_context
 from utils.knowledge_base import get_knowledge_base_summary, get_task_decision_guide
 from services.feedback_learner import FeedbackLearner
 from services.training_data_loader import TrainingDataLoader
+from services.conditional_format_interpreter import ConditionalFormattingInterpreter
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+SYSTEM_MESSAGE = (
+    "You are EasyExcel AI, an expert spreadsheet automation assistant. "
+    "Respond with ONLY valid JSON that our backend can execute directly. "
+    "Never include markdown, explanations, or extra text."
+)
+
 
 class LLMAgent:
-    """Handles LLM interpretation of user prompts using Google Gemini"""
+    """Handles LLM interpretation of user prompts using OpenAI GPT-4.1"""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.5-flash"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4-1"):
         """
-        Initialize LLM Agent with Google Gemini
+        Initialize LLM Agent with OpenAI GPT-4.1
         
         Args:
-            api_key: Google Gemini API key (defaults to GEMINI_API_KEY env var)
-            model: Model to use (default: gemini-2.5-flash - Gemini 2.5 Flash)
+            api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
+            model: Model to use (default: gpt-4-1)
         """
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
-            raise ValueError("Google Gemini API key not found. Set GEMINI_API_KEY environment variable.")
+            raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
         
-        # Get model from environment or use default
-        # Default: gemini-2.5-flash (Gemini 2.5 Flash - upgraded for better accuracy)
-        # Can override with GEMINI_MODEL environment variable
-        self.model = os.getenv("GEMINI_MODEL", model)
+        self.model = os.getenv("OPENAI_MODEL", model)
         
-        # Configure Gemini API
-        genai.configure(api_key=self.api_key)
-        
-        # Initialize the model
         try:
-            self.client = genai.GenerativeModel(
-                model_name=self.model,
-                generation_config={
-                    "temperature": 0.1,  # Low temperature for consistent outputs
-                    "top_p": 0.95,
-                    "top_k": 64,
-                }
-            )
+            self.client = OpenAI(api_key=self.api_key)
         except Exception as e:
-            raise ValueError(f"Failed to initialize Gemini model: {str(e)}")
+            raise ValueError(f"Failed to initialize OpenAI client: {str(e)}")
         
         # Initialize feedback learner for continuous improvement
         try:
             self.feedback_learner = FeedbackLearner()
-        except Exception as e:
-            # If feedback learner fails to initialize, continue without it
+        except Exception:
             self.feedback_learner = None
         
         # Initialize training data loader for few-shot learning
         try:
             self.training_data_loader = TrainingDataLoader()
-        except Exception as e:
-            # If training data loader fails, continue without it
+        except Exception:
             self.training_data_loader = None
+        
+        self.conditional_schema = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "conditional_formatting_schema",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "conditional_formatting": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "apply_to": {"type": "string"},
+                                    "condition_type": {"type": "string", "enum": ["contains", "equals", "regex"]},
+                                    "condition_value": {"type": "string"},
+                                    "format": {
+                                        "type": "object",
+                                        "properties": {
+                                            "background_color": {"type": "string"},
+                                            "font_color": {"type": "string"},
+                                            "bold": {"type": "boolean"}
+                                        },
+                                        "required": ["background_color", "font_color", "bold"]
+                                    }
+                                },
+                                "required": ["apply_to", "condition_type", "condition_value", "format"]
+                            }
+                        }
+                    },
+                    "required": ["conditional_formatting"]
+                }
+            }
+        }
+        self.conditional_helper = ConditionalFormattingInterpreter(
+            client=self.client,
+            model=self.model,
+            schema=self.conditional_schema,
+        )
     
     def interpret_prompt(
         self, 
         user_prompt: str, 
         available_columns: List[str],
         user_id: Optional[str] = None,
-        sample_data: Optional[List[Dict]] = None
+        sample_data: Optional[List[Dict]] = None,
+        sample_explanation: Optional[str] = None
     ) -> Dict:
         """
         Interpret user prompt and return structured action plan with token usage
-        
-        Args:
-            user_prompt: Natural language user request
-            available_columns: List of available column names in the data
-            user_id: Optional user ID for feedback tracking
-            sample_data: Optional list of sample rows (dicts) to help LLM understand data structure
-            
-        Returns:
-            Dictionary with:
-            - action_plan: Structured action plan dictionary with:
-              - task: Operation to perform
-              - columns_needed: Required columns
-              - chart_type: Type of chart if needed
-              - steps: List of steps to execute
-              - Additional fields based on operation type
-            - tokens_used: Actual token count from Gemini API (prompt + response)
         """
         try:
-            prompt = get_prompt_with_context(user_prompt, available_columns, sample_data)
+            # Dedicated path for conditional-formatting prompts
+            if self.conditional_helper.should_handle_prompt(user_prompt):
+                helper_payload, helper_tokens = self.conditional_helper.interpret(
+                    user_prompt, available_columns
+                )
+                helper_plan = self._convert_conditional_schema_to_action_plan(
+                    helper_payload, available_columns
+                )
+                helper_plan["user_prompt"] = user_prompt
+                return {"action_plan": helper_plan, "tokens_used": helper_tokens}
+
+            general_prompt = get_prompt_with_context(user_prompt, available_columns, sample_data)
             
             # Get knowledge base summary for enhanced context
             kb_summary = get_knowledge_base_summary()
@@ -114,38 +140,37 @@ class LLMAgent:
             similar_examples_text = ""
             all_examples = []
             
-            # 1. Get examples from training datasets (GPT-generated)
             if self.training_data_loader:
                 try:
                     training_examples = self.training_data_loader.get_examples_for_prompt(user_prompt, limit=3)
                     all_examples.extend(training_examples)
-                except Exception as e:
+                except Exception:
                     pass
             
-            # 2. Get similar successful examples from feedback (real user interactions)
             if self.feedback_learner:
                 try:
                     feedback_examples = self.feedback_learner.get_similar_successful_examples(user_prompt, limit=2)
-                    # Convert feedback format to match training format
                     for ex in feedback_examples:
                         all_examples.append({
                             "prompt": ex["prompt"],
                             "action_plan": ex["action_plan"]
                         })
-                except Exception as e:
+                except Exception:
                     pass
             
-            # Combine and format examples
             if all_examples:
                 similar_examples_text = "\n\nFEW-SHOT LEARNING EXAMPLES (from training data and past executions):\n"
-                for i, ex in enumerate(all_examples[:5], 1):  # Limit to 5 total examples
+                for i, ex in enumerate(all_examples[:5], 1):
                     similar_examples_text += f"\nExample {i}:\n"
                     similar_examples_text += f"User: {ex['prompt']}\n"
                     similar_examples_text += f"Response: {json.dumps(ex['action_plan'], indent=2)}\n"
                     if ex.get('execution_instructions'):
                         similar_examples_text += f"Execution: {ex['execution_instructions']}\n"
             
-            # Create full prompt with system instructions and knowledge base
+            sample_explanation_text = ""
+            if sample_explanation:
+                sample_explanation_text = f"\n\nDATA SAMPLE SUMMARY:\n{sample_explanation}\n"
+            
             full_prompt = f"""You are a data analysis assistant that returns ONLY valid JSON. 
 Do not include any markdown formatting, code blocks, or explanatory text. Return pure JSON only.
 
@@ -161,77 +186,43 @@ Based on the user prompt, the suggested task is: {task_suggestions.get('suggeste
 Reasoning: {', '.join(task_suggestions.get('reasoning', []))}
 Confidence: {task_suggestions.get('confidence', 0)}
 {similar_examples_text}
+{sample_explanation_text}
 
-{prompt}
+{general_prompt}
 
 Return your response as a valid JSON object with no additional formatting.
 Include "operations" array with "execution_instructions" for each operation."""
 
-            # Generate response using Gemini
-            response = self.client.generate_content(
-                full_prompt,
-                generation_config={
-                    "temperature": 0.1,
-                    "top_p": 0.95,
-                    "top_k": 64,
-                }
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_MESSAGE},
+                    {"role": "user", "content": full_prompt},
+                ],
+                temperature=0.1,
+                top_p=0.95,
             )
             
-            # Extract actual token usage from Gemini API response
-            tokens_used = 0
-            prompt_tokens = 0
-            response_tokens = 0
+            content = (response.choices[0].message.content or "").strip()
             
-            if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                # Gemini API provides usage_metadata with token counts
-                try:
-                    # Try to get prompt tokens
-                    if hasattr(response.usage_metadata, 'prompt_token_count'):
-                        prompt_tokens = response.usage_metadata.prompt_token_count or 0
-                    elif hasattr(response.usage_metadata, 'promptTokenCount'):
-                        prompt_tokens = response.usage_metadata.promptTokenCount or 0
-                    
-                    # Try to get response/candidate tokens
-                    if hasattr(response.usage_metadata, 'candidates_token_count'):
-                        response_tokens = response.usage_metadata.candidates_token_count or 0
-                    elif hasattr(response.usage_metadata, 'candidatesTokenCount'):
-                        response_tokens = response.usage_metadata.candidatesTokenCount or 0
-                    elif hasattr(response.usage_metadata, 'total_token_count'):
-                        total_tokens = response.usage_metadata.total_token_count or 0
-                        response_tokens = total_tokens - prompt_tokens if total_tokens > prompt_tokens else 0
-                    elif hasattr(response.usage_metadata, 'totalTokenCount'):
-                        total_tokens = response.usage_metadata.totalTokenCount or 0
-                        response_tokens = total_tokens - prompt_tokens if total_tokens > prompt_tokens else 0
-                    
-                    tokens_used = prompt_tokens + response_tokens
-                    
-                    # Log token breakdown for debugging
-                    logger.info(f"Gemini API token usage: prompt={prompt_tokens}, response={response_tokens}, total={tokens_used}")
-                except Exception as e:
-                    logger.warning(f"Error extracting token usage from Gemini API: {e}")
+            prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
+            tokens_used = prompt_tokens + completion_tokens
+            logger.info(
+                "OpenAI token usage: prompt=%s, completion=%s, total=%s",
+                prompt_tokens,
+                completion_tokens,
+                tokens_used,
+            )
             
-            # If usage_metadata is not available, estimate based on prompt length (fallback)
-            if tokens_used == 0:
-                # Rough estimate: ~4 characters per token, plus response tokens
-                prompt_tokens_estimate = len(full_prompt) // 4
-                response_tokens_estimate = len(response.text) // 4 if hasattr(response, 'text') and response.text else 0
-                tokens_used = prompt_tokens_estimate + response_tokens_estimate
-                logger.warning(f"Token usage metadata not available, using estimate: {tokens_used} tokens")
-            
-            # Extract text from response
-            content = response.text.strip()
-            
-            # Clean up content if it has markdown code blocks
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:
                 content = content.split("```")[1].split("```")[0].strip()
             
-            # Parse JSON response
             try:
                 action_plan = json.loads(content)
             except json.JSONDecodeError:
-                # Try to extract JSON from response if it's wrapped in text
                 import re
                 json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content)
                 if json_match:
@@ -239,10 +230,8 @@ Include "operations" array with "execution_instructions" for each operation."""
                 else:
                     raise ValueError(f"Could not parse JSON from response: {content[:200]}")
             
-            # Validate and normalize action plan
             normalized_plan = self._normalize_action_plan(action_plan)
             
-            # Return both action plan and token usage
             return {
                 "action_plan": normalized_plan,
                 "tokens_used": tokens_used
@@ -315,6 +304,9 @@ Include "operations" array with "execution_instructions" for each operation."""
         if "conditional_format" in action_plan:
             normalized["conditional_format"] = action_plan["conditional_format"]
         
+        if "conditional_format_rules" in action_plan:
+            normalized["conditional_format_rules"] = action_plan["conditional_format_rules"]
+        
         # Add formula operation field if present
         if "formula" in action_plan:
             normalized["formula"] = action_plan["formula"]
@@ -336,6 +328,68 @@ Include "operations" array with "execution_instructions" for each operation."""
             normalized["chart_type"] = "none"
         
         return normalized
+
+    def _convert_conditional_schema_to_action_plan(
+        self, helper_payload: Dict, available_columns: List[str]
+    ) -> Dict:
+        """Map helper JSON back into the action plan structure ExcelProcessor expects."""
+        rules = []
+        requested_rules = helper_payload.get("conditional_formatting", [])
+        column_lookup = {col.lower(): col for col in available_columns}
+
+        for entry in requested_rules:
+            if not isinstance(entry, dict):
+                continue
+
+            apply_to = entry.get("apply_to", "all_columns") or "all_columns"
+            if apply_to.lower() != "all_columns":
+                normalized_col = column_lookup.get(apply_to.lower())
+                if normalized_col:
+                    apply_to = normalized_col
+                else:
+                    apply_to = "all_columns"
+
+            condition_type = entry.get("condition_type", "contains")
+            condition_value = entry.get("condition_value", "")
+            fmt = entry.get("format", {})
+
+            format_type_map = {
+                "contains": "contains_text",
+                "equals": "text_equals",
+                "regex": "regex_match",
+            }
+            format_type = format_type_map.get(condition_type, "contains_text")
+
+            rule = {
+                "type": "conditional",
+                "format_type": format_type,
+                "config": {
+                    "column": apply_to,
+                    "text": condition_value,
+                    "pattern": condition_value if format_type == "regex_match" else None,
+                    "bg_color": fmt.get("background_color", "#FFF3CD"),
+                    "text_color": fmt.get("font_color", "#000000"),
+                    "bold": fmt.get("bold", False),
+                    "condition_type": condition_type,
+                    "condition_value": condition_value,
+                },
+            }
+            # Remove None keys to keep config clean
+            rule["config"] = {k: v for k, v in rule["config"].items() if v is not None}
+            rules.append(rule)
+
+        action_plan = {
+            "task": "conditional_format",
+            "columns_needed": [],
+            "chart_type": "none",
+            "steps": [],
+            "conditional_format_rules": rules,
+        }
+
+        if rules:
+            action_plan["conditional_format"] = rules[0]
+
+        return action_plan
     
     def get_example_action_plan(self, task_type: str = "group_by") -> Dict:
         """

@@ -28,6 +28,7 @@ from services.llm_agent import LLMAgent
 from services.paypal_service import PayPalService
 from services.user_service import UserService
 from utils.validator import DataValidator
+from services.sample_selector import SampleSelector
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -59,6 +60,7 @@ validator = DataValidator()
 chart_builder = ChartBuilder(output_dir=str(file_manager.charts_dir))
 paypal_service = PayPalService()
 user_service = UserService()
+sample_selector = SampleSelector()
 
 # Security
 security = HTTPBearer(auto_error=False)
@@ -97,7 +99,7 @@ def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depen
     
     raise HTTPException(status_code=401, detail="Invalid authentication token")
 
-# Initialize LLM agent with Google Gemini (will raise error if API key not set)
+# Initialize LLM agent with OpenAI GPT-4.1 (will raise error if API key not set)
 try:
     llm_agent = LLMAgent()
 except ValueError as e:
@@ -206,23 +208,25 @@ async def process_file(
                 # If Supabase auth fails, try API key (legacy support)
                 user = user_service.get_user_by_api_key(token)
         
-        # 6. Prepare full Excel data to help LLM understand data structure
-        # Send all rows (up to 1000 for very large files to avoid token limits)
+        # 6. Prepare representative sample data for LLM context
         sample_data = None
+        sample_explanation = ""
         data_size_estimate = 0
         if len(df) > 0:
-            # Convert all rows to list of dicts (limit to 1000 for extremely large files)
-            max_rows = min(len(df), 1000)  # Safety limit for very large files
-            all_rows = df.head(max_rows).to_dict('records')
-            sample_data = all_rows
+            sample_result = sample_selector.build_sample(df)
+            sample_df = sample_result.dataframe
+            sample_explanation = sample_result.explanation
+            sample_data = sample_df.to_dict("records")
             
-            # Estimate token count for the Excel data being sent
-            # Each row with all columns: ~50-200 tokens depending on data size
-            # More accurate: count actual characters in the data
             import json
-            data_json = json.dumps(all_rows)
-            data_size_estimate = len(data_json) // 4  # ~4 chars per token
-            logger.info(f"✅ Excel data prepared for LLM: {len(all_rows)} rows, {len(available_columns)} columns, ~{data_size_estimate} tokens")
+            data_json = json.dumps(sample_data)
+            data_size_estimate = len(data_json) // 4
+            logger.info(
+                "✅ Sample prepared for LLM: %s rows selected from %s total, explanation: %s",
+                len(sample_df),
+                len(df),
+                sample_explanation
+            )
         
         # 7. Check token limits before LLM call (account for full Excel data)
         # Estimate includes: user prompt + system prompt + Excel data + response
@@ -247,18 +251,24 @@ async def process_file(
         if llm_agent is None:
             raise HTTPException(
                 status_code=500, 
-                detail="LLM service not available. Please set GEMINI_API_KEY environment variable."
+                detail="LLM service not available. Please set OPENAI_API_KEY environment variable."
             )
         
         # Get user_id for feedback tracking
         user_id = user["user_id"] if user else None
         
-        llm_result = llm_agent.interpret_prompt(prompt, available_columns, user_id=user_id, sample_data=sample_data)
+        llm_result = llm_agent.interpret_prompt(
+            prompt,
+            available_columns,
+            user_id=user_id,
+            sample_data=sample_data,
+            sample_explanation=sample_explanation
+        )
         action_plan = llm_result.get("action_plan", {})
         # Add user prompt to action plan so processors can check what user explicitly requested
         action_plan["user_prompt"] = prompt
         
-        # Get actual token usage from Gemini API (includes prompt + data + response)
+        # Get actual token usage from OpenAI API (includes prompt + data + response)
         actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)
         
         # Log actual vs estimated for monitoring

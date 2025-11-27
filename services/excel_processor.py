@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
 from pathlib import Path
+import re
 import xlsxwriter
 from datetime import datetime
 from services.formula_engine import FormulaEngine
@@ -30,6 +31,197 @@ class ExcelProcessor:
         self.summary: List[str] = []
         self.formatting_rules: List[Dict] = []  # Store formatting instructions
         self.formula_result: Optional[Any] = None  # Store formula computation result
+
+    def _extract_text_from_prompt(self, prompt: str) -> Optional[str]:
+        """Extract quoted or keyword text from user prompt."""
+        if not prompt:
+            return None
+        match = re.search(r'"([^"]+)"', prompt)
+        if match:
+            return match.group(1).strip()
+        match = re.search(r"'([^']+)'", prompt)
+        if match:
+            return match.group(1).strip()
+        match = re.search(r'keyword\s+([A-Za-z0-9 \-\._]+)', prompt, re.IGNORECASE)
+        if match:
+            return match.group(1).strip().strip('"').strip("'")
+        match = re.search(r'contains(?:\s+the\s+word)?\s+([A-Za-z0-9\-\._ ]+)', prompt, re.IGNORECASE)
+        if match:
+            return match.group(1).strip().strip('"').strip("'")
+        match = re.search(r'with\s+([A-Za-z0-9\-\._ ]+)$', prompt.strip(), re.IGNORECASE)
+        if match:
+            return match.group(1).strip().strip('"').strip("'")
+        return None
+
+    def _infer_column_from_prompt(self, prompt: str) -> Optional[str]:
+        """Infer column name from user prompt via letters, ordinals, or direct mention."""
+        if not prompt or self.df is None:
+            return None
+        prompt_lower = prompt.lower()
+        
+        # Direct column name mention
+        for col in self.df.columns:
+            col_lower = str(col).lower()
+            if col_lower and col_lower in prompt_lower:
+                return col
+        
+        # Column letter (e.g., column L)
+        letter_match = re.search(r'column\s+([A-Z]{1,3})', prompt, re.IGNORECASE)
+        if letter_match:
+            letters = letter_match.group(1).upper()
+            col_idx = 0
+            for ch in letters:
+                col_idx = col_idx * 26 + (ord(ch) - ord('A') + 1)
+            col_idx -= 1
+            if 0 <= col_idx < len(self.df.columns):
+                return self.df.columns[col_idx]
+        
+        # Positional references (e.g., 2nd column)
+        ordinal_match = re.search(r'(\d+)(?:st|nd|rd|th)?\s+column', prompt_lower)
+        if ordinal_match:
+            idx = int(ordinal_match.group(1)) - 1
+            if 0 <= idx < len(self.df.columns):
+                return self.df.columns[idx]
+        
+        return None
+
+
+    def _extract_replace_instruction(self, prompt: str) -> Tuple[Optional[str], Optional[str]]:
+        """Extract target and replacement texts from prompt."""
+        if not prompt:
+            return None, None
+        
+        patterns = [
+            r'replace(?:\s+keyword)?\s+"([^"]+)"\s+with\s+"([^"]+)"',
+            r'replace(?:\s+keyword)?\s+"([^"]+)"\s+with\s+([A-Za-z0-9 \-\._]+)',
+            r"replace(?:\s+keyword)?\s+'([^']+)'\s+with\s+'([^']+)'",
+            r"replace(?:\s+keyword)?\s+'([^']+)'\s+with\s+([A-Za-z0-9 \-\._]+)",
+            r'replace(?:\s+keyword)?\s+([A-Za-z0-9 \-\._]+?)\s+with\s+"([^"]+)"',
+            r"replace(?:\s+keyword)?\s+([A-Za-z0-9 \-\._]+?)\s+with\s+'([^']+)'",
+            r'replace(?:\s+keyword)?\s+([A-Za-z0-9 \-\._]+?)\s+with\s+([A-Za-z0-9 \-\._]+)',
+            r'change\s+"([^"]+)"\s+to\s+"([^"]+)"',
+            r'change\s+"([^"]+)"\s+to\s+([A-Za-z0-9 \-\._]+)',
+            r"change\s+'([^']+)'\s+to\s+'([^']+)'",
+            r"change\s+'([^']+)'\s+to\s+([A-Za-z0-9 \-\._]+)",
+            r'change\s+([A-Za-z0-9 \-\._]+?)\s+to\s+"([^"]+)"',
+            r"change\s+([A-Za-z0-9 \-\._]+?)\s+to\s+'([^']+)'",
+            r'change\s+([A-Za-z0-9 \-\._]+?)\s+to\s+([A-Za-z0-9 \-\._]+)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, prompt, re.IGNORECASE)
+            if match and len(match.groups()) >= 2:
+                target = match.group(1).strip(' "\'')
+                replacement = match.group(2).strip(' "\'')
+                if target and replacement:
+                    return target, replacement
+        
+        return None, None
+
+    def _find_column_with_text(self, text: str) -> Optional[str]:
+        """Find first column that contains the given text in any cell."""
+        if not text or self.df is None:
+            return None
+        for col in self.df.columns:
+            try:
+                if self.df[col].astype(str).str.contains(str(text), case=False, na=False).any():
+                    return col
+            except Exception:
+                continue
+        return None
+
+    def _prompt_implies_replace(self, prompt: str) -> bool:
+        """Detect if user prompt asks for text replacement."""
+        if not prompt:
+            return False
+        prompt_lower = prompt.lower()
+        keywords = ["replace", "substitute", "change", "swap"]
+        return any(keyword in prompt_lower for keyword in keywords)
+
+    def _build_replace_fallback(self, action_plan: Dict) -> Optional[Dict[str, Any]]:
+        """Build replace configuration directly from prompt."""
+        prompt = action_plan.get("user_prompt", "") or ""
+        target, replacement = self._extract_replace_instruction(prompt)
+        if not target or replacement is None:
+            return None
+
+        column = self._infer_column_from_prompt(prompt)
+        if not column:
+            column = self._find_column_with_text(target)
+        if not column:
+            column = "all_columns"
+
+        return {
+            "column": column,
+            "target_text": target,
+            "replacement_text": replacement,
+            "match_case": False,
+            "match_whole_cell": False
+        }
+
+    def _build_conditional_format_fallback(self, action_plan: Dict) -> Optional[Dict[str, Any]]:
+        """Construct conditional format configuration directly from the user prompt."""
+        prompt = action_plan.get("user_prompt", "") or ""
+        target_text = self._extract_text_from_prompt(prompt)
+        if not target_text:
+            return None
+        
+        column = self._infer_column_from_prompt(prompt)
+        if not column:
+            column = self._find_column_with_text(target_text)
+        if not column:
+            return None
+        
+        config = {
+            "format_type": "contains_text",
+            "config": {
+                "column": column,
+                "text": target_text,
+                "formatting": {
+                    "bg_color": "#FFF3CD",
+                    "text_color": "#92400E"
+                }
+            }
+        }
+        return config
+
+    def _prompt_implies_conditional_format(self, prompt: str) -> bool:
+        if not prompt:
+            return False
+        keywords = [
+            "highlight", "mark", "color", "colour", "flag", "shade",
+            "make it yellow", "bold cells", "format cells", "highlight cells", "highlight rows"
+        ]
+        prompt_lower = prompt.lower()
+        return any(keyword in prompt_lower for keyword in keywords)
+
+    def _build_filter_fallback(self, action_plan: Dict) -> Optional[Dict[str, Any]]:
+        """Construct filter configuration directly from the user prompt."""
+        prompt = action_plan.get("user_prompt", "") or ""
+        if not prompt:
+            return None
+        prompt_lower = prompt.lower()
+        
+        value = self._extract_text_from_prompt(prompt)
+        if not value:
+            return None
+        
+        column = self._infer_column_from_prompt(prompt)
+        if not column:
+            column = self._find_column_with_text(value)
+        if not column:
+            return None
+        
+        if any(keyword in prompt_lower for keyword in ["remove", "delete", "exclude"]):
+            condition = "not_contains"
+        else:
+            condition = "contains"
+        
+        return {
+            "column": column,
+            "condition": condition,
+            "value": value
+        }
         
     def load_data(self, sheet_name: Optional[str] = None) -> bool:
         """
@@ -130,6 +322,32 @@ class ExcelProcessor:
         if self.df is None:
             raise ValueError("Data not loaded. Call load_data() first.")
         
+        fallback_filter = None
+        replace_config = None
+        replace_applied = False
+
+        if action_plan.get("task") != "replace_text" and self._prompt_implies_replace(action_plan.get("user_prompt", "")):
+            replace_config = self._build_replace_fallback(action_plan)
+            if replace_config:
+                action_plan["task"] = "replace_text"
+                action_plan["replace_text"] = replace_config
+                self.summary.append("Auto-applied text replace based on user intent.")
+                replace_applied = True
+        
+        if not replace_applied and action_plan.get("task") != "filter":
+            fallback_filter = self._build_filter_fallback(action_plan)
+            if fallback_filter:
+                action_plan["task"] = "filter"
+                action_plan["filters"] = fallback_filter
+                self.summary.append("Auto-applied filter to remove rows based on user intent.")
+
+        if action_plan.get("task") != "conditional_format" and self._prompt_implies_conditional_format(action_plan.get("user_prompt", "")):
+            fallback_cf = self._build_conditional_format_fallback(action_plan)
+            if fallback_cf:
+                action_plan["task"] = "conditional_format"
+                action_plan["conditional_format"] = fallback_cf
+                self.summary.append("Auto-applied conditional formatting based on user intent.")
+        
         task = action_plan.get("task", "summarize")
         
         try:
@@ -165,6 +383,8 @@ class ExcelProcessor:
                 self._execute_format(action_plan)
             elif task == "conditional_format":
                 self._execute_conditional_format(action_plan)
+            elif task == "replace_text":
+                self._execute_replace_text(action_plan)
             elif task == "formula":
                 self._execute_formula(action_plan)
             else:
@@ -494,8 +714,13 @@ class ExcelProcessor:
         filters = action_plan.get("filters", {})
         
         if not filters:
-            self.summary.append("Filter: No filter conditions specified")
-            return
+            fallback = self._build_filter_fallback(action_plan)
+            if fallback:
+                filters = fallback
+                self.summary.append("Filter: Applied fallback configuration from user prompt.")
+            else:
+                self.summary.append("Filter: No filter conditions specified")
+                return
         
         column = filters.get("column")
         condition = filters.get("condition", "==")
@@ -722,34 +947,88 @@ class ExcelProcessor:
             config = rule.get("config", {})
             
             if format_type == "duplicates":
-                column = config.get("column")
-                bg_color = config.get("bg_color", "#FFFF00")
-                if column in self.df.columns:
+                columns = self._resolve_columns_for_rule(config.get("column"))
+                if not columns:
+                    continue
+                cell_format = self._build_cell_format(workbook, config, default_bg="#FFFF00")
+                for column in columns:
                     col_idx = list(self.df.columns).index(column)
-                    # Find duplicate values
                     duplicates = self.df[column].duplicated(keep=False)
                     for row_idx in range(len(self.df)):
                         if duplicates.iloc[row_idx]:
                             excel_row = row_idx + 1
-                            dup_format = workbook.add_format({'bg_color': bg_color})
-                            worksheet.write(excel_row, col_idx, self.df.iloc[row_idx, col_idx], dup_format)
+                            worksheet.write(excel_row, col_idx, self.df.iloc[row_idx, col_idx], cell_format)
             
             elif format_type == "greater_than":
-                column = config.get("column")
+                columns = self._resolve_columns_for_rule(config.get("column"))
                 value = config.get("value")
-                bg_color = config.get("bg_color", "#FF0000")
-                if column in self.df.columns:
+                if not columns or value is None:
+                    continue
+                cell_format = self._build_cell_format(workbook, config, default_bg="#FF0000")
+                for column in columns:
                     col_idx = list(self.df.columns).index(column)
-                    # Convert to numeric if possible
                     try:
                         numeric_col = pd.to_numeric(self.df[column], errors='coerce')
-                        for row_idx in range(len(self.df)):
-                            if pd.notna(numeric_col.iloc[row_idx]) and numeric_col.iloc[row_idx] > value:
-                                excel_row = row_idx + 1
-                                gt_format = workbook.add_format({'bg_color': bg_color})
-                                worksheet.write(excel_row, col_idx, self.df.iloc[row_idx, col_idx], gt_format)
-                    except:
-                        pass  # Skip if can't convert to numeric
+                        mask = numeric_col > value
+                    except Exception:
+                        continue
+                    for row_idx, match in mask.items():
+                        if pd.notna(match) and match:
+                            excel_row = row_idx + 1
+                            worksheet.write(excel_row, col_idx, self.df.iloc[row_idx, col_idx], cell_format)
+
+            elif format_type in ["contains_text", "text_equals", "regex_match"]:
+                self._apply_text_based_conditional(workbook, worksheet, format_type, config)
+
+    def _resolve_columns_for_rule(self, column_spec: Optional[str]) -> List[str]:
+        """Return concrete columns for a conditional rule."""
+        if column_spec is None or str(column_spec).lower() == "all_columns":
+            return list(self.df.columns)
+        if column_spec in self.df.columns:
+            return [column_spec]
+        return []
+
+    def _build_cell_format(self, workbook, config: Dict[str, Any], default_bg: str = "#FFF3CD"):
+        """Create a reusable cell format from config settings."""
+        format_config = {}
+        bg_color = config.get("bg_color") or config.get("background_color") or default_bg
+        text_color = config.get("text_color") or config.get("font_color")
+        if bg_color:
+            format_config["bg_color"] = bg_color
+        if text_color:
+            format_config["font_color"] = text_color
+        if config.get("bold"):
+            format_config["bold"] = True
+        if not format_config:
+            format_config["bg_color"] = default_bg
+        return workbook.add_format(format_config)
+
+    def _apply_text_based_conditional(self, workbook, worksheet, format_type: str, config: Dict[str, Any]):
+        """Apply contains/equals/regex highlighting across one or multiple columns."""
+        target_text = config.get("text", "")
+        pattern = config.get("pattern", target_text)
+        columns = self._resolve_columns_for_rule(config.get("column"))
+        if not columns or not target_text:
+            return
+        cell_format = self._build_cell_format(workbook, config)
+        for column in columns:
+            if column not in self.df.columns:
+                continue
+            col_idx = list(self.df.columns).index(column)
+            series = self.df[column].astype(str)
+            try:
+                if format_type == "contains_text":
+                    matches = series.str.contains(str(target_text), case=False, na=False)
+                elif format_type == "text_equals":
+                    matches = series.str.lower() == str(target_text).lower()
+                else:  # regex_match
+                    matches = series.str.contains(pattern, na=False, regex=True)
+            except Exception:
+                continue
+            for row_idx, match in matches.items():
+                if match:
+                    excel_row = row_idx + 1
+                    worksheet.write(excel_row, col_idx, self.df.iloc[row_idx, col_idx], cell_format)
     
     def _execute_delete_rows(self, action_plan: Dict):
         """Execute delete rows operation"""
@@ -1136,52 +1415,126 @@ class ExcelProcessor:
             self.summary.append(f"Applied formatting ({', '.join(format_parts)}) to {range_desc}")
         else:
             self.summary.append(f"Formatting rule stored for {range_desc}")
+
+    def _execute_replace_text(self, action_plan: Dict):
+        """Execute text replacement operation."""
+        replace_config = action_plan.get("replace_text", {})
+        if not replace_config:
+            self.summary.append("Replace text: No configuration provided")
+            return
+
+        column = replace_config.get("column")
+        target_text = replace_config.get("target_text")
+        replacement = replace_config.get("replacement_text", "")
+        match_case = replace_config.get("match_case", False)
+        match_whole_cell = replace_config.get("match_whole_cell", False)
+
+        if not target_text:
+            self.summary.append("Replace text: No target text specified")
+            return
+
+        if column == "all_columns" or column is None:
+            columns = list(self.df.columns)
+        elif column in self.df.columns:
+            columns = [column]
+        else:
+            self.summary.append(f"Replace text: Column '{column}' not found")
+            return
+
+        replacements_made = 0
+        for col in columns:
+            series = self.df[col].astype(str)
+            if match_whole_cell:
+                if match_case:
+                    mask = series == target_text
+                else:
+                    mask = series.str.lower() == target_text.lower()
+                count = mask.sum()
+                if count > 0:
+                    self.df.loc[mask, col] = replacement
+                    replacements_made += count
+            else:
+                if match_case:
+                    new_series = series.str.replace(target_text, replacement, regex=False)
+                else:
+                    escaped = re.escape(target_text)
+                    new_series = series.str.replace(escaped, replacement, regex=True, flags=re.IGNORECASE)
+                diff_mask = new_series != series
+                count = diff_mask.sum()
+                if count > 0:
+                    self.df[col] = new_series
+                    replacements_made += count
+
+        if replacements_made > 0:
+            target_desc = f"'{target_text}'" if len(target_text) < 40 else "specified text"
+            self.summary.append(f"Replaced {replacements_made} occurrence(s) of {target_desc} with '{replacement}' in {len(columns)} column(s)")
+        else:
+            self.summary.append("Replace text: No matches found for replacement")
     
     def _execute_conditional_format(self, action_plan: Dict):
         """Execute conditional format operation - store conditional formatting rules"""
-        conditional_format = action_plan.get("conditional_format", {})
+        rules = action_plan.get("conditional_format_rules")
+        conditional_format = action_plan.get("conditional_format")
         
-        if not conditional_format:
-            self.summary.append("Conditional format: No configuration specified")
-            return
+        if not rules:
+            if not conditional_format:
+                fallback = self._build_conditional_format_fallback(action_plan)
+                if fallback:
+                    conditional_format = fallback
+                    self.summary.append("Conditional format: Applied fallback configuration from user prompt.")
+                else:
+                    self.summary.append("Conditional format: No configuration specified")
+                    return
+            rules = [conditional_format]
         
-        # Extract conditional formatting details
-        format_type = conditional_format.get("format_type", "")
-        config = conditional_format.get("config", {})
+        self._store_conditional_rules(rules)
+
+    def _store_conditional_rules(self, rules: List[Dict[str, Any]]):
+        """Persist conditional rules and log summaries."""
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            if rule.get("type") != "conditional":
+                rule = {
+                    "type": "conditional",
+                    "format_type": rule.get("format_type"),
+                    "config": rule.get("config", {})
+                }
+            if not rule.get("format_type"):
+                continue
+            if "config" not in rule:
+                rule["config"] = {}
+            self.formatting_rules.append(rule)
+            self._describe_conditional_rule(rule)
+
+    def _describe_conditional_rule(self, rule: Dict[str, Any]):
+        """Append human-readable description for summaries."""
+        format_type = rule.get("format_type", "unknown")
+        config = rule.get("config", {})
+        column = config.get("column", "all columns")
+        column_desc = "all columns" if str(column).lower() == "all_columns" else f"column '{column}'"
         
-        # Store conditional formatting rule to apply when saving
-        rule = {
-            "type": "conditional",
-            "format_type": format_type,
-            "config": config
-        }
-        self.formatting_rules.append(rule)
-        
-        # Build summary message
         if format_type == "duplicates":
-            column = config.get("column", "unknown")
-            self.summary.append(f"Conditional formatting: Highlight duplicates in column '{column}'")
+            self.summary.append(f"Conditional formatting: Highlight duplicates in {column_desc}")
         elif format_type == "greater_than":
-            column = config.get("column", "unknown")
             value = config.get("value", "unknown")
-            self.summary.append(f"Conditional formatting: Highlight values > {value} in column '{column}'")
+            self.summary.append(f"Conditional formatting: Highlight values > {value} in {column_desc}")
         elif format_type == "less_than":
-            column = config.get("column", "unknown")
             value = config.get("value", "unknown")
-            self.summary.append(f"Conditional formatting: Highlight values < {value} in column '{column}'")
+            self.summary.append(f"Conditional formatting: Highlight values < {value} in {column_desc}")
         elif format_type == "between":
-            column = config.get("column", "unknown")
             min_val = config.get("min_value", "unknown")
             max_val = config.get("max_value", "unknown")
-            self.summary.append(f"Conditional formatting: Highlight values between {min_val} and {max_val} in column '{column}'")
+            self.summary.append(f"Conditional formatting: Highlight values between {min_val} and {max_val} in {column_desc}")
         elif format_type == "contains_text":
-            column = config.get("column", "unknown")
             text = config.get("text", "unknown")
-            self.summary.append(f"Conditional formatting: Highlight cells containing '{text}' in column '{column}'")
+            self.summary.append(f"Conditional formatting: Highlight cells containing '{text}' in {column_desc}")
         elif format_type == "text_equals":
-            column = config.get("column", "unknown")
             text = config.get("text", "unknown")
-            self.summary.append(f"Conditional formatting: Highlight cells equal to '{text}' in column '{column}'")
+            self.summary.append(f"Conditional formatting: Highlight cells equal to '{text}' in {column_desc}")
+        elif format_type == "regex_match":
+            pattern = config.get("pattern", config.get("text", "pattern"))
+            self.summary.append(f"Conditional formatting: Highlight cells matching regex '{pattern}' in {column_desc}")
         else:
             self.summary.append(f"Conditional formatting rule stored: {format_type}")
     

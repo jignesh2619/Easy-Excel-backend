@@ -55,6 +55,17 @@ class TrainingDataLoader:
             except Exception as e:
                 logger.error(f"Failed to load {file_path.name}: {e}")
         
+        # Look for JSON files
+        json_files = list(self.data_dir.glob("*.json"))
+        for file_path in json_files:
+            try:
+                examples = self._load_json_dataset(file_path)
+                if examples:
+                    self.datasets.extend(examples)
+                    logger.info(f"Loaded {len(examples)} examples from {file_path.name}")
+            except Exception as e:
+                logger.error(f"Failed to load {file_path.name}: {e}")
+        
         logger.info(f"Total training examples loaded: {len(self.datasets)}")
     
     def _generate_embeddings(self):
@@ -189,6 +200,36 @@ class TrainingDataLoader:
                         logger.warning(f"Error parsing row {idx} in {file_path.name}: {e}")
                         continue
         
+        except Exception as e:
+            logger.error(f"Error loading {file_path.name}: {e}")
+        
+        return examples
+
+    def _load_json_dataset(self, file_path: Path) -> List[Dict]:
+        """Load examples from a JSON file"""
+        examples = []
+        try:
+            with file_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            if isinstance(data, dict):
+                data = [data]
+            
+            for item in data:
+                prompt = item.get("prompt")
+                action_plan = item.get("action_plan")
+                execution_instructions = item.get("execution_instructions")
+                
+                if not prompt or not action_plan:
+                    continue
+                
+                examples.append({
+                    "prompt": prompt,
+                    "action_plan": action_plan,
+                    "execution_instructions": execution_instructions,
+                    "source_file": file_path.name,
+                    "source_sheet": "json"
+                })
         except Exception as e:
             logger.error(f"Error loading {file_path.name}: {e}")
         
