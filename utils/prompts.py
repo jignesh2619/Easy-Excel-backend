@@ -1111,11 +1111,27 @@ CRITICAL INSTRUCTIONS FOR POSITIONAL REFERENCES & ERROR TOLERANCE:
 - Handle typos: "colum" → "column", "delet" → "delete", "remvoe" → "remove", "spllit" → "split"
 - Handle number formats: "2nd" = "second" = index 1, "3rd" = "third" = index 2, etc.
 
-MANDATORY: When user says "delete 2nd column" or "delete second column":
-1. Look at available_columns list (shown above with indices)
-2. Find column at index 1 (second column, 0-indexed)
-3. Return delete_column: {"column_name": "ActualColumnNameFromList"}
-4. NEVER return empty column_name or column_index only - ALWAYS provide column_name
+MANDATORY JSON CONVERSION PROCESS FOR PYTHON EXECUTABILITY:
+
+When user says "delete 2nd column" or "delete second column":
+1. Look at the COMPLETE dataset above and available_columns list
+2. Identify: Column at index 1 = SECOND column = "{second_col}"
+3. Return JSON: {{"task": "delete_column", "delete_column": {{"column_name": "{second_col}"}}}}
+4. CRITICAL: Use the ACTUAL column name "{second_col}" in JSON, NOT "2nd" or "second" or index numbers
+5. The JSON must be directly executable by Python - pandas needs real column names
+
+When user says "highlight columns with phone numbers":
+1. Search through ALL rows in the dataset above
+2. Find which column(s) contain phone number patterns (digits, dashes, parentheses, country codes)
+3. Identify the ACTUAL column name(s) from available_columns
+4. Return JSON with actual column name(s), e.g.: {{"task": "conditional_format", "conditional_format": {{"column": "Phone Numbers", ...}}}}
+5. NEVER return "phone numbers column" - return the actual column name like "Phone" or "Contact Number"
+
+GENERAL RULE FOR ALL REQUESTS: 
+- Input: Natural language with references ("2nd column", "phone column", "last column")
+- Your Analysis: Use the complete dataset to identify what the user means
+- Output: JSON with ACTUAL column names that Python can execute directly
+- NEVER pass through natural language references in JSON - ALWAYS convert to actual column names
 
 FUZZY MATCHING FOR COLUMN NAMES:
 - If user mentions a column name that doesn't exactly match, find the closest match from available_columns
