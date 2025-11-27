@@ -843,35 +843,59 @@ class ExcelProcessor:
         column_name = delete_column.get("column_name")
         column_index = delete_column.get("column_index")
         
-        # If no column name but we have user prompt, try to extract positional reference
+        # If no column name but we have user prompt, try to extract column name or positional reference
         if not column_name:
-            user_prompt = action_plan.get("user_prompt", "").lower()
+            user_prompt = action_plan.get("user_prompt", "")
+            user_prompt_lower = user_prompt.lower()
             
-            # Try to extract positional reference from user prompt
             import re
-            # Match patterns like "1st", "2nd", "3rd", "first", "second", "third", "last"
-            position_patterns = [
-                (r'\b(\d+)(?:st|nd|rd|th)\s+col', lambda m: int(m.group(1)) - 1),  # "2nd col", "3rd col"
-                (r'\b(\d+)\s+col', lambda m: int(m.group(1)) - 1),  # "2 col", "3 col"
-                (r'\bfirst\s+col', lambda m: 0),
-                (r'\bsecond\s+col', lambda m: 1),
-                (r'\bthird\s+col', lambda m: 2),
-                (r'\bfourth\s+col', lambda m: 3),
-                (r'\bfifth\s+col', lambda m: 4),
-                (r'\blast\s+col', lambda m: len(self.df.columns) - 1),
+            
+            # FIRST: Try to extract direct column name from patterns like:
+            # "remove column name UY7F9", "delete column UY7F9", "remove UY7F9 column", etc.
+            direct_name_patterns = [
+                r'(?:remove|delete|drop)\s+column\s+name\s+([A-Za-z0-9_\-\.\s]+?)(?:\s|$|column)',  # "remove column name UY7F9"
+                r'(?:remove|delete|drop)\s+column\s+([A-Za-z0-9_\-\.\s]+?)(?:\s|$|column)',  # "delete column UY7F9"
+                r'(?:remove|delete|drop)\s+([A-Za-z0-9_\-\.\s]+?)\s+column',  # "remove UY7F9 column"
             ]
             
-            for pattern, index_func in position_patterns:
-                match = re.search(pattern, user_prompt)
+            for pattern in direct_name_patterns:
+                match = re.search(pattern, user_prompt, re.IGNORECASE)
                 if match:
-                    try:
-                        col_idx = index_func(match)
-                        if 0 <= col_idx < len(self.df.columns):
-                            column_name = self.df.columns[col_idx]
-                            self.summary.append(f"Identified '{column_name}' as the column to delete from positional reference")
+                    potential_name = match.group(1).strip()
+                    # Check if this matches any column name (case-insensitive)
+                    for col in self.df.columns:
+                        if col.lower() == potential_name.lower():
+                            column_name = col  # Use exact case from DataFrame
+                            self.summary.append(f"Extracted column name '{column_name}' from user prompt")
                             break
-                    except:
-                        continue
+                    if column_name:
+                        break
+            
+            # SECOND: If no direct name found, try to extract positional reference
+            if not column_name:
+                # Match patterns like "1st", "2nd", "3rd", "first", "second", "third", "last"
+                position_patterns = [
+                    (r'\b(\d+)(?:st|nd|rd|th)\s+col', lambda m: int(m.group(1)) - 1),  # "2nd col", "3rd col"
+                    (r'\b(\d+)\s+col', lambda m: int(m.group(1)) - 1),  # "2 col", "3 col"
+                    (r'\bfirst\s+col', lambda m: 0),
+                    (r'\bsecond\s+col', lambda m: 1),
+                    (r'\bthird\s+col', lambda m: 2),
+                    (r'\bfourth\s+col', lambda m: 3),
+                    (r'\bfifth\s+col', lambda m: 4),
+                    (r'\blast\s+col', lambda m: len(self.df.columns) - 1),
+                ]
+                
+                for pattern, index_func in position_patterns:
+                    match = re.search(pattern, user_prompt_lower)
+                    if match:
+                        try:
+                            col_idx = index_func(match)
+                            if 0 <= col_idx < len(self.df.columns):
+                                column_name = self.df.columns[col_idx]
+                                self.summary.append(f"Identified '{column_name}' as the column to delete from positional reference")
+                                break
+                        except:
+                            continue
         
         # Fallback: use column_index if provided
         if not column_name and column_index is not None:
