@@ -103,6 +103,31 @@ class ExcelProcessor:
         prompt_lower = prompt.lower()
         return any(keyword in prompt_lower for keyword in keywords)
 
+    def _extract_color_from_prompt(self, prompt: str) -> Optional[str]:
+        """Extract color name from prompt and convert to hex code."""
+        if not prompt:
+            return None
+        prompt_lower = prompt.lower()
+        
+        color_map = {
+            "green": "#90EE90",  # Light green
+            "yellow": "#FFFF00",
+            "red": "#FF0000",
+            "blue": "#0000FF",
+            "orange": "#FFA500",
+            "pink": "#FFC0CB",
+            "purple": "#800080",
+            "cyan": "#00FFFF",
+            "grey": "#808080",
+            "gray": "#808080",
+        }
+        
+        for color_name, hex_code in color_map.items():
+            if color_name in prompt_lower:
+                return hex_code
+        
+        return None
+
     def _build_conditional_format_fallback(self, action_plan: Dict) -> Optional[Dict[str, Any]]:
         """Construct conditional format configuration directly from the user prompt."""
         prompt = action_plan.get("user_prompt", "") or ""
@@ -116,11 +141,17 @@ class ExcelProcessor:
         if not column:
             return None
         
+        # Extract color from prompt
+        bg_color = self._extract_color_from_prompt(prompt) or "#FFF3CD"  # Default yellow
+        
         return {
             "format_type": "contains_text",
             "config": {
                 "column": column,
-                "text": target_text
+                "text": target_text,
+                "bg_color": bg_color,
+                "text_color": "#000000",
+                "bold": False
             }
         }
 
@@ -862,12 +893,20 @@ class ExcelProcessor:
     
     def _apply_conditional_formatting(self, workbook, worksheet):
         """Apply conditional formatting rules"""
+        if not self.formatting_rules:
+            return
+        
         for rule in self.formatting_rules:
             if rule.get("type") != "conditional":
                 continue
             
             format_type = rule.get("format_type")
             config = rule.get("config", {})
+            
+            # Debug: Log what we're trying to apply
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Applying conditional formatting: type={format_type}, config={config}")
             
             if format_type == "duplicates":
                 column = config.get("column")
@@ -927,6 +966,7 @@ class ExcelProcessor:
                 cell_format = workbook.add_format(format_config)
                 
                 # Apply formatting to matching cells
+                # We need to write cells AFTER to_excel() has written them, so we overwrite with format
                 for column in columns:
                     if column not in self.df.columns:
                         continue
@@ -941,12 +981,35 @@ class ExcelProcessor:
                         else:  # regex_match
                             matches = series.str.contains(pattern, na=False, regex=True)
                         
-                        for row_idx, match in matches.items():
+                        match_count = 0
+                        for row_idx, match in enumerate(matches):
                             if match:
-                                excel_row = row_idx + 1
-                                worksheet.write(excel_row, col_idx, self.df.iloc[row_idx, col_idx], cell_format)
+                                excel_row = row_idx + 1  # +1 for header row
+                                cell_value = self.df.iloc[row_idx, col_idx]
+                                
+                                # Determine value type and write accordingly
+                                if pd.isna(cell_value):
+                                    worksheet.write_blank(excel_row, col_idx, cell_format)
+                                elif isinstance(cell_value, (int, float)):
+                                    worksheet.write_number(excel_row, col_idx, cell_value, cell_format)
+                                elif isinstance(cell_value, bool):
+                                    worksheet.write_boolean(excel_row, col_idx, cell_value, cell_format)
+                                else:
+                                    worksheet.write_string(excel_row, col_idx, str(cell_value), cell_format)
+                                
+                                match_count += 1
+                        
+                        # Log how many cells were formatted
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.info(f"Formatted {match_count} cells in column '{column}' with text '{target_text}'")
                     except Exception as e:
-                        # Skip if matching fails
+                        # Log error but continue
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.error(f"Error applying conditional formatting to column '{column}': {str(e)}")
+                        import traceback
+                        logger.error(traceback.format_exc())
                         continue
     
     def _execute_delete_rows(self, action_plan: Dict):
