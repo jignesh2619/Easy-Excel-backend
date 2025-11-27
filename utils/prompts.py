@@ -1065,8 +1065,9 @@ YOUR TASK: Convert natural language to Python-executable JSON with ACTUAL column
 
 When user says "delete 2nd column" or "delete second column":
   STEP 1: Look at the column list above - Column at index 1 = SECOND column = {second_col}
-  STEP 2: Return JSON with ACTUAL column name: {{"task": "delete_column", "delete_column": {{"column_name": "{second_col}"}}}}
-  STEP 3: NEVER return "2nd" or "second" or index numbers - ALWAYS use the actual column name "{second_col}"
+  STEP 2: Return JSON with ACTUAL column name: {{"task": "delete_column", "delete_column": {{"column_name": "{0}"}}}}
+  STEP 3: NEVER return "2nd" or "second" or index numbers - ALWAYS use the actual column name {0}
+""".format(second_col, second_col)
 
 When user says "highlight columns with phone numbers":
   STEP 1: Search through ALL rows in the dataset above to find which column contains phone numbers
@@ -1115,9 +1116,9 @@ MANDATORY JSON CONVERSION PROCESS FOR PYTHON EXECUTABILITY:
 
 When user says "delete 2nd column" or "delete second column":
 1. Look at the COMPLETE dataset above and available_columns list
-2. Identify: Column at index 1 = SECOND column = "{second_col}"
-3. Return JSON: {{"task": "delete_column", "delete_column": {{"column_name": "{second_col}"}}}}
-4. CRITICAL: Use the ACTUAL column name "{second_col}" in JSON, NOT "2nd" or "second" or index numbers
+2. Identify: Column at index 1 = SECOND column (find the actual column name from available_columns list above)
+3. Return JSON: {{"task": "delete_column", "delete_column": {{"column_name": "ActualColumnNameFromList"}}}}
+4. CRITICAL: Use the ACTUAL column name from available_columns in JSON, NOT "2nd" or "second" or index numbers
 5. The JSON must be directly executable by Python - pandas needs real column names
 
 When user says "highlight columns with phone numbers":
