@@ -1034,6 +1034,13 @@ Use this complete data to:
                 sample_data_text += f"  [{col}]: {value}\n"
             sample_data_text += "\n"
         
+        # Build positional reference helper safely
+        first_col = available_columns[0] if available_columns else 'N/A'
+        second_col = available_columns[1] if len(available_columns) > 1 else 'N/A'
+        third_col = available_columns[2] if len(available_columns) > 2 else 'N/A'
+        last_col = available_columns[-1] if available_columns else 'N/A'
+        last_idx = len(available_columns) - 1 if available_columns else 0
+        
         sample_data_text += f"""
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DATASET SUMMARY:
@@ -1043,11 +1050,11 @@ DATASET SUMMARY:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 CRITICAL REMINDER: You have the COMPLETE Excel dataset above. 
-When user says "delete 2nd column", look at the column list and data above to identify:
-  - Column at index 0 = FIRST column = "{available_columns[0] if available_columns else 'N/A'}"
-  - Column at index 1 = SECOND column = "{available_columns[1] if len(available_columns) > 1 else 'N/A'}"
-  - Column at index 2 = THIRD column = "{available_columns[2] if len(available_columns) > 2 else 'N/A'}"
-  - Last column = "{available_columns[-1] if available_columns else 'N/A'}" (index {len(available_columns) - 1 if available_columns else 0})
+When user says "delete 2nd column" or "delete second column", look at the column list and data above to identify:
+  - Column at index 0 = FIRST column = {first_col}
+  - Column at index 1 = SECOND column = {second_col}
+  - Column at index 2 = THIRD column = {third_col}
+  - Last column = {last_col} (index {last_idx})
 
 ALWAYS use the actual column names from the list above when responding.
 """
