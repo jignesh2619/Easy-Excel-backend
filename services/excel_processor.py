@@ -183,11 +183,21 @@ class ExcelProcessor:
             raise RuntimeError(f"Failed to execute action plan: {str(e)}")
     
     def _execute_clean(self, action_plan: Dict):
-        """Execute cleaning operations"""
+        """Execute cleaning operations - ONLY what user requests"""
         initial_rows = len(self.df)
         
-        # Process operations array if provided (for specific cleaning tasks)
+        # Check if user explicitly requested general cleaning
+        # If operations array is empty or only contains specific operations, don't run default cleaning
         operations = action_plan.get("operations", [])
+        user_requested_general_cleaning = False
+        
+        # Check if user explicitly asked for general cleaning keywords
+        user_prompt_lower = action_plan.get("user_prompt", "").lower() if action_plan.get("user_prompt") else ""
+        if any(keyword in user_prompt_lower for keyword in ["clean", "cleaning", "clean the data", "clean data", "remove duplicates", "fix formatting", "handle missing"]):
+            user_requested_general_cleaning = True
+        
+        # Process operations array if provided (for specific cleaning tasks)
+        operation_executed = False
         for op in operations:
             op_type = op.get("type", "")
             params = op.get("params", {})
@@ -196,83 +206,138 @@ class ExcelProcessor:
             # Handle character removal/replacement operations
             if op_type in ["remove_characters", "replace_text", "clean_text"] or "remove" in op_type.lower() or "replace" in op_type.lower():
                 column = params.get("column") or exec_instructions.get("kwargs", {}).get("column")
-                # Try to find column with case-insensitive matching
+                # Try to find column with case-insensitive matching - improved matching for phone numbers
                 if column:
                     matching_column = None
+                    column_lower = column.lower().strip()
                     for col in self.df.columns:
-                        if col.lower() == column.lower() or column.lower() in col.lower() or col.lower() in column.lower():
+                        col_lower = col.lower().strip()
+                        # Exact match
+                        if col_lower == column_lower:
+                            matching_column = col
+                            break
+                        # Partial match (e.g., "phone number" matches "phone numbers")
+                        if column_lower in col_lower or col_lower in column_lower:
+                            matching_column = col
+                            break
+                        # Check for common variations (phone, phone number, phone numbers, etc.)
+                        if "phone" in column_lower and "phone" in col_lower:
                             matching_column = col
                             break
                     if matching_column:
                         column = matching_column
+                
                 if column and column in self.df.columns:
                     # Get the character/pattern to remove
                     char_to_remove = params.get("character") or params.get("pattern") or params.get("value", "")
+                    # Default to "." if no character specified and operation is remove_characters
+                    if not char_to_remove and op_type == "remove_characters":
+                        char_to_remove = "."
                     remove_from = params.get("position", "start")  # start, end, all
                     
                     if char_to_remove:
                         if remove_from == "start":
                             # Remove from beginning (lstrip)
                             self.df[column] = self.df[column].astype(str).str.lstrip(char_to_remove)
-                            self.summary.append(f"Removed '{char_to_remove}' from start of {column}")
+                            self.summary.append(f"Removed '{char_to_remove}' from start of '{column}' column")
+                            operation_executed = True
                         elif remove_from == "end":
                             # Remove from end (rstrip)
                             self.df[column] = self.df[column].astype(str).str.rstrip(char_to_remove)
-                            self.summary.append(f"Removed '{char_to_remove}' from end of {column}")
+                            self.summary.append(f"Removed '{char_to_remove}' from end of '{column}' column")
+                            operation_executed = True
                         else:
                             # Remove all occurrences (replace)
                             self.df[column] = self.df[column].astype(str).str.replace(char_to_remove, "", regex=False)
-                            self.summary.append(f"Removed all '{char_to_remove}' from {column}")
+                            self.summary.append(f"Removed all '{char_to_remove}' from '{column}' column")
+                            operation_executed = True
+                else:
+                    # Try to find column by partial name match
+                    if column:
+                        possible_columns = [col for col in self.df.columns if "phone" in col.lower() or "number" in col.lower()]
+                        if possible_columns:
+                            # Use first matching column
+                            column = possible_columns[0]
+                            char_to_remove = params.get("character") or params.get("pattern") or params.get("value", ".") or "."
+                            remove_from = params.get("position", "start")
+                            if remove_from == "start":
+                                self.df[column] = self.df[column].astype(str).str.lstrip(char_to_remove)
+                                self.summary.append(f"Removed '{char_to_remove}' from start of '{column}' column")
+                                operation_executed = True
             
             # Handle execution instructions for pandas operations
             if exec_instructions.get("method"):
                 method_path = exec_instructions.get("method", "")
                 if "pandas" in method_path or "str" in method_path:
                     column = exec_instructions.get("kwargs", {}).get("column") or params.get("column")
+                    # Improved column matching
+                    if column:
+                        matching_column = None
+                        column_lower = column.lower().strip()
+                        for col in self.df.columns:
+                            col_lower = col.lower().strip()
+                            if col_lower == column_lower or column_lower in col_lower or col_lower in column_lower:
+                                matching_column = col
+                                break
+                            if "phone" in column_lower and "phone" in col_lower:
+                                matching_column = col
+                                break
+                        if matching_column:
+                            column = matching_column
+                    
                     if column and column in self.df.columns:
                         # Handle string operations
                         if "lstrip" in method_path or "remove_start" in method_path.lower():
                             char = exec_instructions.get("kwargs", {}).get("char", ".")
                             self.df[column] = self.df[column].astype(str).str.lstrip(char)
-                            self.summary.append(f"Removed '{char}' from start of {column}")
+                            self.summary.append(f"Removed '{char}' from start of '{column}' column")
+                            operation_executed = True
                         elif "rstrip" in method_path or "remove_end" in method_path.lower():
                             char = exec_instructions.get("kwargs", {}).get("char", ".")
                             self.df[column] = self.df[column].astype(str).str.rstrip(char)
-                            self.summary.append(f"Removed '{char}' from end of {column}")
+                            self.summary.append(f"Removed '{char}' from end of '{column}' column")
+                            operation_executed = True
                         elif "replace" in method_path:
                             old = exec_instructions.get("kwargs", {}).get("old", ".")
                             new = exec_instructions.get("kwargs", {}).get("new", "")
                             self.df[column] = self.df[column].astype(str).str.replace(old, new, regex=False)
-                            self.summary.append(f"Replaced '{old}' with '{new}' in {column}")
+                            self.summary.append(f"Replaced '{old}' with '{new}' in '{column}' column")
+                            operation_executed = True
         
-        # Remove duplicates
-        self.df = self.df.drop_duplicates()
-        duplicates_removed = initial_rows - len(self.df)
-        if duplicates_removed > 0:
-            self.summary.append(f"Removed {duplicates_removed} duplicate rows")
+        # Only run default cleaning steps if:
+        # 1. User explicitly requested general cleaning, OR
+        # 2. No specific operations were executed
+        if user_requested_general_cleaning or (not operation_executed and len(operations) == 0):
+            # Remove duplicates
+            rows_before_dup = len(self.df)
+            self.df = self.df.drop_duplicates()
+            duplicates_removed = rows_before_dup - len(self.df)
+            if duplicates_removed > 0:
+                self.summary.append(f"Removed {duplicates_removed} duplicate rows")
+            
+            # Fix formatting - trim whitespace from string columns
+            string_columns = self.df.select_dtypes(include=['object']).columns
+            for col in string_columns:
+                self.df[col] = self.df[col].astype(str).str.strip()
+                self.df[col] = self.df[col].replace('nan', np.nan)
+            
+            if len(string_columns) > 0:
+                self.summary.append(f"Fixed formatting in {len(string_columns)} text columns")
+            
+            # Handle missing values - fill with appropriate defaults
+            missing_counts = self.df.isnull().sum()
+            for col in missing_counts[missing_counts > 0].index:
+                if self.df[col].dtype in ['int64', 'float64']:
+                    self.df[col] = self.df[col].fillna(0)
+                else:
+                    self.df[col] = self.df[col].fillna('')
+            
+            total_missing = missing_counts.sum()
+            if total_missing > 0:
+                self.summary.append(f"Handled {total_missing} missing values")
         
-        # Fix formatting - trim whitespace from string columns
-        string_columns = self.df.select_dtypes(include=['object']).columns
-        for col in string_columns:
-            self.df[col] = self.df[col].astype(str).str.strip()
-            self.df[col] = self.df[col].replace('nan', np.nan)
-        
-        if len(string_columns) > 0:
-            self.summary.append(f"Fixed formatting in {len(string_columns)} text columns")
-        
-        # Handle missing values - fill with appropriate defaults
-        missing_counts = self.df.isnull().sum()
-        for col in missing_counts[missing_counts > 0].index:
-            if self.df[col].dtype in ['int64', 'float64']:
-                self.df[col] = self.df[col].fillna(0)
-            else:
-                self.df[col] = self.df[col].fillna('')
-        
-        total_missing = missing_counts.sum()
-        if total_missing > 0:
-            self.summary.append(f"Handled {total_missing} missing values")
-        
-        self.summary.append(f"Cleaned data: {len(self.df)} rows remaining")
+        # Always show final row count
+        self.summary.append(f"Final data: {len(self.df)} rows, {len(self.df.columns)} columns")
     
     def _execute_group_by(self, action_plan: Dict):
         """Execute group by operations"""

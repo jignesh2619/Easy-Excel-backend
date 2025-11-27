@@ -233,6 +233,8 @@ async def process_file(
         
         llm_result = llm_agent.interpret_prompt(prompt, available_columns, user_id=user_id)
         action_plan = llm_result.get("action_plan", {})
+        # Add user prompt to action plan so processors can check what user explicitly requested
+        action_plan["user_prompt"] = prompt
         actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)  # Use actual tokens from API
         
         # 8. Validate required columns exist
