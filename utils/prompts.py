@@ -478,9 +478,16 @@ Return JSON format (ENHANCED with execution instructions):
         "align": "left|center|right"
     },
     "conditional_format": {
-        "type": "duplicates|greater_than",
-        "column": "ColumnName",
-        "value": 100,
+        "format_type": "duplicates|greater_than|less_than|between|contains_text|text_equals",
+        "config": {
+            "column": "ColumnName",
+            "value": 100,  // For numeric comparisons
+            "text": "search text",  // For text-based highlighting
+            "min_value": 10,  // For between
+            "max_value": 100,  // For between
+            "bg_color": "#FFFF00",  // Background color (optional)
+            "text_color": "#000000"  // Text color (optional)
+        }
         "bg_color": "#FFFF00"
     },
     "formula": {
@@ -1124,12 +1131,15 @@ When user says "delete 2nd column" or "delete second column":
 4. CRITICAL: Use the ACTUAL column name from available_columns in JSON, NOT "2nd" or "second" or index numbers
 5. The JSON must be directly executable by Python - pandas needs real column names
 
-When user says "highlight columns with phone numbers":
+When user says "highlight columns with phone numbers" or "highlight column which includes [text]":
 1. Search through ALL rows in the dataset above
-2. Find which column(s) contain phone number patterns (digits, dashes, parentheses, country codes)
-3. Identify the ACTUAL column name(s) from available_columns
-4. Return JSON with actual column name(s), e.g.: {{"task": "conditional_format", "conditional_format": {{"column": "Phone Numbers", ...}}}}
-5. NEVER return "phone numbers column" - return the actual column name like "Phone" or "Contact Number"
+2. Find which column(s) contain the specified text/pattern (phone numbers, specific text, etc.)
+3. Identify the ACTUAL column name(s) from available_columns by examining the data
+4. Return JSON with actual column name(s), e.g.:
+   {{"task": "conditional_format", "conditional_format": {{"format_type": "contains_text", "config": {{"column": "ActualColumnName", "text": "search text", "bg_color": "#FFFF00"}}}}}}
+5. NEVER return "phone numbers column" or vague descriptions - return the actual column name like "Phone" or "Service Description"
+6. For text-based highlighting, use format_type: "contains_text" and include the search text in config.text
+7. For exact text match, use format_type: "text_equals"
 
 GENERAL RULE FOR ALL REQUESTS: 
 - Input: Natural language with references ("2nd column", "phone column", "last column")

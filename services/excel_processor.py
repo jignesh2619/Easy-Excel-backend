@@ -1124,6 +1124,14 @@ class ExcelProcessor:
             min_val = config.get("min_value", "unknown")
             max_val = config.get("max_value", "unknown")
             self.summary.append(f"Conditional formatting: Highlight values between {min_val} and {max_val} in column '{column}'")
+        elif format_type == "contains_text":
+            column = config.get("column", "unknown")
+            text = config.get("text", "unknown")
+            self.summary.append(f"Conditional formatting: Highlight cells containing '{text}' in column '{column}'")
+        elif format_type == "text_equals":
+            column = config.get("column", "unknown")
+            text = config.get("text", "unknown")
+            self.summary.append(f"Conditional formatting: Highlight cells equal to '{text}' in column '{column}'")
         else:
             self.summary.append(f"Conditional formatting rule stored: {format_type}")
     
