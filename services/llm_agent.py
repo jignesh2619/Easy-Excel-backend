@@ -176,23 +176,38 @@ Include "operations" array with "execution_instructions" for each operation."""
             
             # Extract actual token usage from Gemini API response
             tokens_used = 0
+            prompt_tokens = 0
+            response_tokens = 0
+            
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 # Gemini API provides usage_metadata with token counts
-                if hasattr(response.usage_metadata, 'prompt_token_count'):
-                    prompt_tokens = response.usage_metadata.prompt_token_count or 0
-                else:
-                    prompt_tokens = 0
-                
-                if hasattr(response.usage_metadata, 'candidates_token_count'):
-                    response_tokens = response.usage_metadata.candidates_token_count or 0
-                elif hasattr(response.usage_metadata, 'total_token_count'):
-                    # Some versions use total_token_count
-                    total_tokens = response.usage_metadata.total_token_count or 0
-                    response_tokens = total_tokens - prompt_tokens if total_tokens > prompt_tokens else 0
-                else:
-                    response_tokens = 0
-                
-                tokens_used = prompt_tokens + response_tokens
+                try:
+                    # Try to get prompt tokens
+                    if hasattr(response.usage_metadata, 'prompt_token_count'):
+                        prompt_tokens = response.usage_metadata.prompt_token_count or 0
+                    elif hasattr(response.usage_metadata, 'promptTokenCount'):
+                        prompt_tokens = response.usage_metadata.promptTokenCount or 0
+                    
+                    # Try to get response/candidate tokens
+                    if hasattr(response.usage_metadata, 'candidates_token_count'):
+                        response_tokens = response.usage_metadata.candidates_token_count or 0
+                    elif hasattr(response.usage_metadata, 'candidatesTokenCount'):
+                        response_tokens = response.usage_metadata.candidatesTokenCount or 0
+                    elif hasattr(response.usage_metadata, 'total_token_count'):
+                        total_tokens = response.usage_metadata.total_token_count or 0
+                        response_tokens = total_tokens - prompt_tokens if total_tokens > prompt_tokens else 0
+                    elif hasattr(response.usage_metadata, 'totalTokenCount'):
+                        total_tokens = response.usage_metadata.totalTokenCount or 0
+                        response_tokens = total_tokens - prompt_tokens if total_tokens > prompt_tokens else 0
+                    
+                    tokens_used = prompt_tokens + response_tokens
+                    
+                    # Log token breakdown for debugging
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.info(f"Gemini API token usage: prompt={prompt_tokens}, response={response_tokens}, total={tokens_used}")
+                except Exception as e:
+                    logger.warning(f"Error extracting token usage from Gemini API: {e}")
             
             # If usage_metadata is not available, estimate based on prompt length (fallback)
             if tokens_used == 0:
@@ -200,6 +215,7 @@ Include "operations" array with "execution_instructions" for each operation."""
                 prompt_tokens_estimate = len(full_prompt) // 4
                 response_tokens_estimate = len(response.text) // 4 if hasattr(response, 'text') and response.text else 0
                 tokens_used = prompt_tokens_estimate + response_tokens_estimate
+                logger.warning(f"Token usage metadata not available, using estimate: {tokens_used} tokens")
             
             # Extract text from response
             content = response.text.strip()

@@ -206,11 +206,32 @@ async def process_file(
                 # If Supabase auth fails, try API key (legacy support)
                 user = user_service.get_user_by_api_key(token)
         
-        # 6. Check token limits before LLM call (use conservative estimate)
-        # Estimate: prompt tokens (~4 chars per token) + response tokens (estimate 500 for JSON response)
-        # This is much more accurate than the old 100 tokens per row estimate
+        # 6. Prepare full Excel data to help LLM understand data structure
+        # Send all rows (up to 1000 for very large files to avoid token limits)
+        sample_data = None
+        data_size_estimate = 0
+        if len(df) > 0:
+            # Convert all rows to list of dicts (limit to 1000 for extremely large files)
+            max_rows = min(len(df), 1000)  # Safety limit for very large files
+            all_rows = df.head(max_rows).to_dict('records')
+            sample_data = all_rows
+            
+            # Estimate token count for the Excel data being sent
+            # Each row with all columns: ~50-200 tokens depending on data size
+            # More accurate: count actual characters in the data
+            import json
+            data_json = json.dumps(all_rows)
+            data_size_estimate = len(data_json) // 4  # ~4 chars per token
+        
+        # 7. Check token limits before LLM call (account for full Excel data)
+        # Estimate includes: user prompt + system prompt + Excel data + response
         prompt_tokens_estimate = len(prompt) // 4
-        estimated_tokens = prompt_tokens_estimate + 500  # Conservative estimate for LLM response
+        system_prompt_estimate = 2000  # System prompt is large with all instructions
+        excel_data_tokens = data_size_estimate
+        response_tokens_estimate = 500  # Conservative estimate for JSON response
+        estimated_tokens = prompt_tokens_estimate + system_prompt_estimate + excel_data_tokens + response_tokens_estimate
+        
+        logger.info(f"Token estimate breakdown: prompt={prompt_tokens_estimate}, system={system_prompt_estimate}, data={excel_data_tokens}, response={response_tokens_estimate}, total={estimated_tokens}")
         
         if user:
             token_check = user_service.check_token_limit(user["user_id"], estimated_tokens)
@@ -221,7 +242,7 @@ async def process_file(
                     detail=token_check.get("error", "Insufficient tokens. Please upgrade your plan.")
                 )
         
-        # 7. Interpret prompt with LLM
+        # 8. Interpret prompt with LLM
         if llm_agent is None:
             raise HTTPException(
                 status_code=500, 
@@ -231,20 +252,19 @@ async def process_file(
         # Get user_id for feedback tracking
         user_id = user["user_id"] if user else None
         
-        # Prepare full Excel data to help LLM understand data structure
-        # Send all rows (up to 1000 for very large files to avoid token limits)
-        sample_data = None
-        if len(df) > 0:
-            # Convert all rows to list of dicts (limit to 1000 for extremely large files)
-            max_rows = min(len(df), 1000)  # Safety limit for very large files
-            all_rows = df.head(max_rows).to_dict('records')
-            sample_data = all_rows
-        
         llm_result = llm_agent.interpret_prompt(prompt, available_columns, user_id=user_id, sample_data=sample_data)
         action_plan = llm_result.get("action_plan", {})
         # Add user prompt to action plan so processors can check what user explicitly requested
         action_plan["user_prompt"] = prompt
-        actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)  # Use actual tokens from API
+        
+        # Get actual token usage from Gemini API (includes prompt + data + response)
+        actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)
+        
+        # Log actual vs estimated for monitoring
+        if actual_tokens_used != estimated_tokens:
+            logger.info(f"Token usage: estimated={estimated_tokens}, actual={actual_tokens_used}, difference={actual_tokens_used - estimated_tokens}")
+        else:
+            logger.info(f"Token usage: {actual_tokens_used} tokens (used estimate as fallback)")
         
         # 8. Validate required columns exist
         columns_needed = action_plan.get("columns_needed", [])
