@@ -1,7 +1,7 @@
 """
 LLM Agent Service
 
-Interprets user prompts and returns structured action plans using Google Gemini 2.5 Flash Lite.
+Interprets user prompts and returns structured action plans using Google Gemini 2.5 Flash.
 The LLM does NOT modify data directly - it only returns action plans.
 """
 
@@ -28,20 +28,20 @@ logger = logging.getLogger(__name__)
 class LLMAgent:
     """Handles LLM interpretation of user prompts using Google Gemini"""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.5-flash-lite"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.5-flash"):
         """
         Initialize LLM Agent with Google Gemini
         
         Args:
             api_key: Google Gemini API key (defaults to GEMINI_API_KEY env var)
-            model: Model to use (default: gemini-2.5-flash-lite - Gemini 2.5 Flash-Lite)
+            model: Model to use (default: gemini-2.5-flash - Gemini 2.5 Flash)
         """
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self.api_key:
             raise ValueError("Google Gemini API key not found. Set GEMINI_API_KEY environment variable.")
         
         # Get model from environment or use default
-        # Default: gemini-2.5-flash-lite (Gemini 2.5 Flash-Lite)
+        # Default: gemini-2.5-flash (Gemini 2.5 Flash - upgraded for better accuracy)
         # Can override with GEMINI_MODEL environment variable
         self.model = os.getenv("GEMINI_MODEL", model)
         
