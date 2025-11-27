@@ -19,6 +19,8 @@ from utils.prompts import get_prompt_with_context
 from utils.knowledge_base import get_knowledge_base_summary, get_task_decision_guide
 from services.feedback_learner import FeedbackLearner
 from services.training_data_loader import TrainingDataLoader
+from services.action_plan_bot import ActionPlanBot
+from services.chart_bot import ChartBot
 
 load_dotenv()
 
@@ -116,6 +118,30 @@ class LLMAgent:
             self.training_data_loader = TrainingDataLoader()
         except Exception:
             self.training_data_loader = None
+        
+        # Initialize specialized bots
+        self.action_plan_bot = ActionPlanBot(api_key=self.api_key, model=self.model)
+        self.chart_bot = ChartBot(api_key=self.api_key, model=self.model)
+    
+    def _is_chart_request(self, prompt: str) -> bool:
+        """
+        Detect if request is for chart generation
+        
+        Args:
+            prompt: User prompt
+        
+        Returns:
+            True if chart request, False otherwise
+        """
+        prompt_lower = prompt.lower()
+        chart_keywords = [
+            "chart", "graph", "plot", "visualize", "visualization",
+            "bar chart", "line chart", "pie chart", "histogram",
+            "scatter plot", "scatter", "dashboard", "show chart",
+            "create chart", "generate chart", "make chart",
+            "draw chart", "display chart"
+        ]
+        return any(keyword in prompt_lower for keyword in chart_keywords)
     
     def interpret_prompt(
         self, 
@@ -126,7 +152,51 @@ class LLMAgent:
         sample_explanation: Optional[str] = None
     ) -> Dict:
         """
-        Interpret user prompt and return structured action plan with token usage
+        Interpret user prompt and route to appropriate bot
+        
+        Routes to:
+        - ChartBot: If chart/visualization request
+        - ActionPlanBot: For all data operations
+        """
+        # Check if chart request
+        is_chart = self._is_chart_request(user_prompt)
+        
+        if is_chart:
+            # Route to ChartBot
+            logger.info("Routing to ChartBot for chart generation")
+            result = self.chart_bot.generate_chart_plan(
+                user_prompt=user_prompt,
+                available_columns=available_columns,
+                sample_data=sample_data
+            )
+            # Return in format compatible with ExcelProcessor
+            return {
+                "action_plan": {
+                    "task": "chart",
+                    "chart_config": result["chart_config"]
+                },
+                "tokens_used": result.get("tokens_used", 0)
+            }
+        else:
+            # Route to ActionPlanBot
+            logger.info("Routing to ActionPlanBot")
+            return self.action_plan_bot.generate_action_plan(
+                user_prompt=user_prompt,
+                available_columns=available_columns,
+                sample_data=sample_data,
+                sample_explanation=sample_explanation
+            )
+    
+    def _legacy_interpret_prompt(
+        self, 
+        user_prompt: str, 
+        available_columns: List[str],
+        user_id: Optional[str] = None,
+        sample_data: Optional[List[Dict]] = None,
+        sample_explanation: Optional[str] = None
+    ) -> Dict:
+        """
+        Legacy method - kept for backward compatibility
         """
         try:
             prompt = get_prompt_with_context(user_prompt, available_columns, sample_data)

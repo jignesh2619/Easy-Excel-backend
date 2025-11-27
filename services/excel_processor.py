@@ -20,6 +20,8 @@ from services.cleaning.dates import DateCleaner
 from services.cleaning.currency import CurrencyCleaner
 from services.cleaning.text import TextCleaner
 from services.dflib import default_engine, DataFrameWrapper
+from services.python_executor import PythonExecutor
+from services.chart_executor import ChartExecutor
 
 
 class ExcelProcessor:
@@ -288,7 +290,7 @@ class ExcelProcessor:
     
     def execute_action_plan(self, action_plan: Dict) -> Dict:
         """
-        Execute action plan on loaded data
+        Execute action plan - unified execution using PythonExecutor and ChartExecutor
         
         Args:
             action_plan: Structured action plan from LLM
@@ -299,73 +301,49 @@ class ExcelProcessor:
         if self.df is None:
             raise ValueError("Data not loaded. Call load_data() first.")
         
-        # Check for conditional formatting FIRST (before filter fallback)
-        # Highlight/format requests should NOT trigger filtering
-        user_prompt = action_plan.get("user_prompt", "") or ""
-        is_highlight_request = self._prompt_implies_conditional_format(user_prompt)
-        
-        # Only apply filter fallback if NOT a highlight/format request
-        fallback_filter = None
-        if action_plan.get("task") != "filter" and not is_highlight_request:
-            fallback_filter = self._build_filter_fallback(action_plan)
-            if fallback_filter:
-                action_plan["task"] = "filter"
-                action_plan["filters"] = fallback_filter
-                self.summary.append("Auto-applied filter to remove rows based on user intent.")
-        
-        # Check for conditional formatting after filter check
-        if action_plan.get("task") != "conditional_format" and is_highlight_request:
-            fallback_cf = self._build_conditional_format_fallback(action_plan)
-            if fallback_cf:
-                action_plan["task"] = "conditional_format"
-                action_plan["conditional_format"] = fallback_cf
-                self.summary.append("Auto-applied conditional formatting based on user intent.")
-
-        task = action_plan.get("task", "summarize")
+        task = action_plan.get("task", "execute")
+        chart_path = None
         
         try:
-            if task == "clean":
-                self._execute_clean(action_plan)
-            elif task == "group_by":
-                self._execute_group_by(action_plan)
-            elif task == "summarize":
-                self._execute_summarize(action_plan)
-            elif task == "filter":
-                self._execute_filter(action_plan)
-            elif task == "find_missing":
-                self._execute_find_missing(action_plan)
-            elif task == "transform":
-                self._execute_transform(action_plan)
-            elif task == "delete_rows":
-                self._execute_delete_rows(action_plan)
-            elif task == "add_row":
-                self._execute_add_row(action_plan)
-            elif task == "add_column":
-                self._execute_add_column(action_plan)
-            elif task == "delete_column":
-                self._execute_delete_column(action_plan)
-            elif task == "edit_cell":
-                self._execute_edit_cell(action_plan)
-            elif task == "clear_cell":
-                self._execute_clear_cell(action_plan)
-            elif task == "auto_fill":
-                self._execute_auto_fill(action_plan)
-            elif task == "sort":
-                self._execute_sort(action_plan)
-            elif task == "format":
-                self._execute_format(action_plan)
-            elif task == "conditional_format":
+            # Handle chart requests
+            if task == "chart" or "chart_config" in action_plan:
+                chart_config = action_plan.get("chart_config", {})
+                if chart_config:
+                    chart_executor = ChartExecutor(self.df)
+                    chart_path = chart_executor.execute(chart_config)
+                    self.summary.extend(chart_executor.get_execution_log())
+                    chart_type = chart_config.get("chart_type", "chart")
+                    self.summary.append(f"Generated {chart_type} chart")
+            
+            # Handle data operations (Python code execution)
+            operations = action_plan.get("operations", [])
+            if operations:
+                python_executor = PythonExecutor(self.df)
+                execution_result = python_executor.execute_multiple(operations)
+                self.df = python_executor.get_dataframe()
+                self.summary.extend(python_executor.get_execution_log())
+                
+                # Store formula result if present
+                if execution_result.get("results"):
+                    for result in execution_result["results"]:
+                        if result.get("result") is not None:
+                            self.formula_result = result["result"]
+                            break
+            
+            # Handle conditional formatting (still needs special handling)
+            if "conditional_format" in action_plan:
                 self._execute_conditional_format(action_plan)
-            elif task == "formula":
-                self._execute_formula(action_plan)
-            else:
-                self._execute_summarize(action_plan)  # Default
+            
+            # Handle formatting (still needs special handling)
+            if "format" in action_plan:
+                self._execute_format(action_plan)
             
             return {
                 "df": self.df,
                 "summary": self.summary,
-                "chart_needed": action_plan.get("chart_type", "none") != "none",
-                "chart_type": action_plan.get("chart_type", "none"),
+                "chart_path": chart_path,
+                "chart_needed": chart_path is not None,
+                "chart_type": action_plan.get("chart_config", {}).get("chart_type", "none") if chart_path else "none",
                 "formula_result": self.formula_result,
                 "task": task
             }

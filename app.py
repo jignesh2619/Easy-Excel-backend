@@ -328,8 +328,9 @@ async def process_file(
         
         processed_df = result["df"]
         summary = result["summary"]
-        chart_needed = result["chart_needed"]
-        chart_type = result["chart_type"]
+        chart_path = result.get("chart_path")  # Chart path from ChartExecutor
+        chart_needed = result.get("chart_needed", False)
+        chart_type = result.get("chart_type", "none")
         formula_result = result.get("formula_result")
         task = result.get("task", "summarize")
         
@@ -337,39 +338,6 @@ async def process_file(
         output_filename = f"processed_{Path(file.filename).stem}.xlsx"
         output_path = file_manager.output_dir / output_filename
         processed_file_path = processor.save_processed_file(str(output_path))
-        
-        # 9. Generate chart if needed
-        # Check if user requested visualization even if LLM didn't set it
-        visualization_keywords = ['visualize', 'dashboard', 'chart', 'graph', 'plot', 'show me']
-        prompt_lower = prompt.lower()
-        user_wants_chart = any(keyword in prompt_lower for keyword in visualization_keywords)
-        
-        # Initialize chart variables
-        chart_path = None
-        x_col = None
-        y_col = None
-        
-        # Generate chart if: LLM requested it OR user mentioned visualization
-        if (chart_needed and chart_type != "none") or (user_wants_chart and chart_type == "none"):
-            # If user wants chart but LLM didn't set type, default to bar chart
-            if chart_type == "none" and user_wants_chart:
-                chart_type = "bar"
-                summary.append("Detected visualization request - generating chart")
-            
-            try:
-                # Auto-detect columns for chart
-                x_col, y_col = chart_builder._auto_detect_columns(processed_df, chart_type)
-                chart_path = chart_builder.create_chart(
-                    processed_df, 
-                    chart_type,
-                    x_column=x_col,
-                    y_column=y_col,
-                    title=f"{prompt[:50]}..."
-                )
-                summary.append(f"Generated {chart_type} chart: {Path(chart_path).name}")
-            except Exception as e:
-                summary.append(f"Chart generation failed: {str(e)}")
-                chart_path = None
         
         # 10. Clean up temp file
         file_manager.delete_file(temp_file_path)
