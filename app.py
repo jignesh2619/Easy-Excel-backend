@@ -222,6 +222,7 @@ async def process_file(
             import json
             data_json = json.dumps(all_rows)
             data_size_estimate = len(data_json) // 4  # ~4 chars per token
+            logger.info(f"✅ Excel data prepared for LLM: {len(all_rows)} rows, {len(available_columns)} columns, ~{data_size_estimate} tokens")
         
         # 7. Check token limits before LLM call (account for full Excel data)
         # Estimate includes: user prompt + system prompt + Excel data + response
