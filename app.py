@@ -416,6 +416,20 @@ async def process_file(
         elif chart_path:
             response_type = "chart"
             operation = "visualize" if operation == "formula" else operation
+            
+            # Extract chart columns from action_plan
+            x_col = None
+            y_col = None
+            chart_config = action_plan.get("chart_config")
+            if chart_config:
+                x_col = chart_config.get("x_column")
+                y_col = chart_config.get("y_column")
+            elif "chart_configs" in action_plan and action_plan["chart_configs"]:
+                # Multiple charts - use first one
+                first_chart = action_plan["chart_configs"][0]
+                x_col = first_chart.get("x_column")
+                y_col = first_chart.get("y_column")
+            
             result_value = {
                 "chart_type": chart_type,
                 "chart_url": chart_url,
