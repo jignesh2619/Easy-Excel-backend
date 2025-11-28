@@ -67,6 +67,7 @@ class ChartExecutor:
                 raise ValueError(f"Column '{y_column}' not found. Available: {list(self.df.columns)}")
             
             # Generate chart using ChartBuilder
+            logger.info(f"Calling ChartBuilder.create_chart with type={chart_type}, x={x_column}, y={y_column}")
             chart_path = self.chart_builder.create_chart(
                 df=self.df,
                 chart_type=chart_type,
@@ -75,6 +76,7 @@ class ChartExecutor:
                 title=title
             )
             
+            logger.info(f"ChartBuilder returned path: {chart_path}")
             self.chart_paths.append(chart_path)
             self.execution_log.append(f"✓ Generated {chart_type} chart: {description}")
             logger.info(f"Generated chart: {description} -> {chart_path}")

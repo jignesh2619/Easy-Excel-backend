@@ -149,7 +149,11 @@ class ChartBuilder:
                 raise ValueError(f"Unsupported chart type: {chart_type}")
             
             # Save chart
-            plt.tight_layout()
+            try:
+                plt.tight_layout()
+            except Exception:
+                # If tight_layout fails, continue anyway (just a warning)
+                pass
             plt.savefig(filepath, dpi=300, bbox_inches='tight')
             plt.close()
             
