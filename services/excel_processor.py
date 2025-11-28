@@ -307,26 +307,42 @@ class ExcelProcessor:
         try:
             # Handle chart requests (single or multiple)
             if task == "chart" or "chart_config" in action_plan or "chart_configs" in action_plan:
+                import logging
+                logger = logging.getLogger(__name__)
+                
                 chart_executor = ChartExecutor(self.df)
                 
                 # Check for multiple charts (generic requests like "create dashboard")
                 if "chart_configs" in action_plan:
                     chart_configs = action_plan.get("chart_configs", [])
+                    logger.info(f"Processing {len(chart_configs)} charts for dashboard")
                     if chart_configs:
-                        chart_paths = chart_executor.execute_multiple(chart_configs)
-                        self.summary.extend(chart_executor.get_execution_log())
-                        self.summary.append(f"Generated {len(chart_paths)} charts for dashboard")
-                        # Use first chart path for compatibility (or could return array)
-                        chart_path = chart_paths[0] if chart_paths else None
+                        try:
+                            chart_paths = chart_executor.execute_multiple(chart_configs)
+                            self.summary.extend(chart_executor.get_execution_log())
+                            self.summary.append(f"Generated {len(chart_paths)} charts for dashboard")
+                            # Use first chart path for compatibility (or could return array)
+                            chart_path = chart_paths[0] if chart_paths else None
+                        except Exception as e:
+                            logger.error(f"Failed to generate multiple charts: {str(e)}", exc_info=True)
+                            raise RuntimeError(f"Chart generation failed: {str(e)}")
+                    else:
+                        logger.warning("chart_configs is empty")
+                        chart_path = None
                 else:
                     # Single chart
                     chart_config = action_plan.get("chart_config", {})
                     if chart_config:
-                        chart_path = chart_executor.execute(chart_config)
-                        self.summary.extend(chart_executor.get_execution_log())
-                        chart_type = chart_config.get("chart_type", "chart")
-                        self.summary.append(f"Generated {chart_type} chart")
+                        try:
+                            chart_path = chart_executor.execute(chart_config)
+                            self.summary.extend(chart_executor.get_execution_log())
+                            chart_type = chart_config.get("chart_type", "chart")
+                            self.summary.append(f"Generated {chart_type} chart")
+                        except Exception as e:
+                            logger.error(f"Failed to generate single chart: {str(e)}", exc_info=True)
+                            raise RuntimeError(f"Chart generation failed: {str(e)}")
                     else:
+                        logger.warning("chart_config is empty")
                         chart_path = None
             
             # Handle data operations (Python code execution)
