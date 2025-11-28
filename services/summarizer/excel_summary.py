@@ -77,7 +77,7 @@ class ExcelSummarizer:
                 'type_category': type_category,
                 'unique_count': int(unique_count),
                 'null_count': int(null_count),
-                'null_percentage': float(null_count / len(self.df) * 100)) if len(self.df) > 0 else 0.0,
+                'null_percentage': float(null_count / len(self.df) * 100) if len(self.df) > 0 else 0.0,
                 'sample_values': [str(v) for v in sample_values[:5]]
             }
             
