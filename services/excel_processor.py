@@ -1504,10 +1504,31 @@ class ExcelProcessor:
                     if column and column in df.columns:
                         # Find matching rows
                         series = df[column].astype(str)
-                        matches = series.str.contains(str(text), case=False, na=False)
+                        
+                        # Debug: Show sample values from the column
+                        sample_values = series[series.notna()].head(10).tolist()
+                        logger.info(f"🔍 Sample values from column '{column}': {sample_values}")
+                        
+                        # Try the search
+                        search_text = str(text)
+                        matches = series.str.contains(search_text, case=False, na=False)
                         match_count = matches.sum()
                         
+                        logger.info(f"🔍 Searching for '{search_text}' (case-insensitive)")
                         logger.info(f"🔍 Found {match_count} matches for text '{text}' in column '{column}'")
+                        
+                        # If no matches, try to find similar values
+                        if match_count == 0:
+                            # Try to find values that contain any word from the search text
+                            search_words = search_text.lower().split()
+                            logger.info(f"🔍 Search words: {search_words}")
+                            for word in search_words:
+                                word_matches = series.str.contains(word, case=False, na=False)
+                                word_count = word_matches.sum()
+                                if word_count > 0:
+                                    logger.info(f"🔍 Found {word_count} cells containing word '{word}'")
+                                    sample_matches = series[word_matches].head(5).tolist()
+                                    logger.info(f"🔍 Sample matches for '{word}': {sample_matches}")
                         
                         # Build cell format map: "row_col" -> format info
                         for row_idx, match in enumerate(matches):
