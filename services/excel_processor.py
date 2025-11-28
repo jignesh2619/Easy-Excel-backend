@@ -761,12 +761,20 @@ class ExcelProcessor:
             raise ValueError("No data to save")
         
         try:
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            logger.info(f"💾 Saving processed file to: {output_path}")
+            logger.info(f"💾 Formatting rules: {len(self.formatting_rules)} total")
+            
             # Use new modular XlsxWriter
             writer = XlsxWriter(output_path)
             
             # Separate formatting and conditional formatting rules
             formatting_rules = [r for r in self.formatting_rules if r.get("type") == "format"]
             conditional_rules = [r for r in self.formatting_rules if r.get("type") == "conditional"]
+            
+            logger.info(f"💾 Static formatting rules: {len(formatting_rules)}, Conditional rules: {len(conditional_rules)}")
             
             # Write with formatting
             writer.write(
@@ -776,9 +784,13 @@ class ExcelProcessor:
                 conditional_formatting=conditional_rules if conditional_rules else None
             )
             
+            logger.info(f"✅ File saved successfully: {output_path}")
             return output_path
             
         except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"❌ Failed to save processed file: {str(e)}", exc_info=True)
             raise RuntimeError(f"Failed to save processed file: {str(e)}")
     
     def get_dataframe(self) -> pd.DataFrame:
@@ -1460,25 +1472,42 @@ class ExcelProcessor:
     
     def get_formatting_metadata(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Extract formatting metadata for preview display"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         formatting_metadata = {
             "conditional_formatting": [],
             "cell_formats": {}
         }
         
-        for rule in self.formatting_rules:
-            if rule.get("type") == "conditional":
+        logger.info(f"🔍 get_formatting_metadata called with {len(self.formatting_rules)} formatting rules")
+        logger.info(f"🔍 DataFrame has {len(df)} rows and columns: {list(df.columns)}")
+        
+        for rule_idx, rule in enumerate(self.formatting_rules):
+            rule_type = rule.get("type")
+            logger.info(f"🔍 Rule {rule_idx}: type={rule_type}")
+            
+            if rule_type == "conditional":
                 format_type = rule.get("format_type")
                 config = rule.get("config", {})
+                
+                logger.info(f"🔍 Conditional rule: format_type={format_type}, config={config}")
                 
                 if format_type == "contains_text":
                     column = config.get("column")
                     text = config.get("text", "")
                     bg_color = config.get("bg_color") or config.get("background_color", "#FFF3CD")
                     
+                    logger.info(f"🔍 contains_text: column='{column}', text='{text}', bg_color='{bg_color}'")
+                    logger.info(f"🔍 Column in df.columns? {column in df.columns if column else False}")
+                    
                     if column and column in df.columns:
                         # Find matching rows
                         series = df[column].astype(str)
                         matches = series.str.contains(str(text), case=False, na=False)
+                        match_count = matches.sum()
+                        
+                        logger.info(f"🔍 Found {match_count} matches for text '{text}' in column '{column}'")
                         
                         # Build cell format map: "row_col" -> format info
                         for row_idx, match in enumerate(matches):
@@ -1497,14 +1526,22 @@ class ExcelProcessor:
                             "text": text,
                             "bg_color": bg_color
                         })
+                    else:
+                        logger.warning(f"⚠️ Column '{column}' not found in DataFrame columns: {list(df.columns)}")
+                        
                 elif format_type == "text_equals":
                     column = config.get("column")
                     text = config.get("text", "")
                     bg_color = config.get("bg_color") or config.get("background_color", "#FFF3CD")
                     
+                    logger.info(f"🔍 text_equals: column='{column}', text='{text}', bg_color='{bg_color}'")
+                    
                     if column and column in df.columns:
                         series = df[column].astype(str)
                         matches = series.str.lower() == str(text).lower()
+                        match_count = matches.sum()
+                        
+                        logger.info(f"🔍 Found {match_count} exact matches for text '{text}' in column '{column}'")
                         
                         for row_idx, match in enumerate(matches):
                             if match:
@@ -1515,6 +1552,11 @@ class ExcelProcessor:
                                     "bold": config.get("bold", False),
                                     "italic": config.get("italic", False)
                                 }
+                    else:
+                        logger.warning(f"⚠️ Column '{column}' not found in DataFrame columns: {list(df.columns)}")
+        
+        total_cells = len(formatting_metadata["cell_formats"])
+        logger.info(f"✅ Formatting metadata generated: {total_cells} cells with formatting")
         
         return formatting_metadata
     
