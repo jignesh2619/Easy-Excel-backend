@@ -305,15 +305,29 @@ class ExcelProcessor:
         chart_path = None
         
         try:
-            # Handle chart requests
-            if task == "chart" or "chart_config" in action_plan:
-                chart_config = action_plan.get("chart_config", {})
-                if chart_config:
-                    chart_executor = ChartExecutor(self.df)
-                    chart_path = chart_executor.execute(chart_config)
-                    self.summary.extend(chart_executor.get_execution_log())
-                    chart_type = chart_config.get("chart_type", "chart")
-                    self.summary.append(f"Generated {chart_type} chart")
+            # Handle chart requests (single or multiple)
+            if task == "chart" or "chart_config" in action_plan or "chart_configs" in action_plan:
+                chart_executor = ChartExecutor(self.df)
+                
+                # Check for multiple charts (generic requests like "create dashboard")
+                if "chart_configs" in action_plan:
+                    chart_configs = action_plan.get("chart_configs", [])
+                    if chart_configs:
+                        chart_paths = chart_executor.execute_multiple(chart_configs)
+                        self.summary.extend(chart_executor.get_execution_log())
+                        self.summary.append(f"Generated {len(chart_paths)} charts for dashboard")
+                        # Use first chart path for compatibility (or could return array)
+                        chart_path = chart_paths[0] if chart_paths else None
+                else:
+                    # Single chart
+                    chart_config = action_plan.get("chart_config", {})
+                    if chart_config:
+                        chart_path = chart_executor.execute(chart_config)
+                        self.summary.extend(chart_executor.get_execution_log())
+                        chart_type = chart_config.get("chart_type", "chart")
+                        self.summary.append(f"Generated {chart_type} chart")
+                    else:
+                        chart_path = None
             
             # Handle data operations (Python code execution)
             operations = action_plan.get("operations", [])

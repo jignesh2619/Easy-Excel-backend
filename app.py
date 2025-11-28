@@ -272,7 +272,8 @@ async def process_file(
             available_columns,
             user_id=user_id,
             sample_data=sample_data,
-            sample_explanation=sample_explanation
+            sample_explanation=sample_explanation,
+            df=df  # Pass DataFrame for chart analysis
         )
         action_plan = llm_result.get("action_plan", {})
         # Add user prompt to action plan so processors can check what user explicitly requested

@@ -87,6 +87,26 @@ class ChartExecutor:
             logger.error(f"Chart error: {error_msg}")
             raise RuntimeError(error_msg)
     
+    def execute_multiple(self, chart_configs: List[Dict]) -> List[str]:
+        """
+        Execute multiple chart generations
+        
+        Args:
+            chart_configs: List of chart configurations
+            
+        Returns:
+            List of chart file paths
+        """
+        chart_paths = []
+        for config in chart_configs:
+            try:
+                path = self.execute(config)
+                chart_paths.append(path)
+            except Exception as e:
+                logger.error(f"Failed to generate chart: {str(e)}")
+                self.execution_log.append(f"✗ Failed to generate chart: {str(e)}")
+        return chart_paths
+    
     def get_chart_paths(self) -> List[str]:
         """Get all generated chart paths"""
         return self.chart_paths.copy()

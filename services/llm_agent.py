@@ -11,6 +11,7 @@ import logging
 from typing import Dict, List, Optional
 from openai import OpenAI
 from dotenv import load_dotenv
+import pandas as pd
 
 import sys
 from pathlib import Path
@@ -149,7 +150,8 @@ class LLMAgent:
         available_columns: List[str],
         user_id: Optional[str] = None,
         sample_data: Optional[List[Dict]] = None,
-        sample_explanation: Optional[str] = None
+        sample_explanation: Optional[str] = None,
+        df: Optional[pd.DataFrame] = None
     ) -> Dict:
         """
         Interpret user prompt and route to appropriate bot
@@ -167,16 +169,29 @@ class LLMAgent:
             result = self.chart_bot.generate_chart_plan(
                 user_prompt=user_prompt,
                 available_columns=available_columns,
-                sample_data=sample_data
+                sample_data=sample_data,
+                df=df  # Pass DataFrame for data analysis
             )
-            # Return in format compatible with ExcelProcessor
-            return {
-                "action_plan": {
-                    "task": "chart",
-                    "chart_config": result["chart_config"]
-                },
-                "tokens_used": result.get("tokens_used", 0)
-            }
+            # Handle multiple charts (generic requests) or single chart
+            chart_config = result["chart_config"]
+            if "charts" in chart_config:
+                # Multiple charts - return array
+                return {
+                    "action_plan": {
+                        "task": "chart",
+                        "chart_configs": chart_config["charts"]  # Array of charts
+                    },
+                    "tokens_used": result.get("tokens_used", 0)
+                }
+            else:
+                # Single chart - return single config
+                return {
+                    "action_plan": {
+                        "task": "chart",
+                        "chart_config": chart_config  # Single chart
+                    },
+                    "tokens_used": result.get("tokens_used", 0)
+                }
         else:
             # Route to ActionPlanBot
             logger.info("🔄 Routing to ActionPlanBot for data operations")

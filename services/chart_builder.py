@@ -213,28 +213,26 @@ class ChartBuilder:
         # Prepare data
         if y_column == "Count":
             data = df.groupby(x_column).size().reset_index(name=y_column)
-            x_data = data[x_column]
+            x_data = data[x_column].astype(str)  # Convert to string for labels
             y_data = data[y_column]
         else:
-            x_data = df[x_column]
+            x_data = df[x_column].astype(str)  # Convert to string for labels
             # Extract numeric values from formatted strings for y_column
             y_data = df[y_column].apply(_extract_numeric_from_string)
             # Remove rows where y_data extraction failed
             valid_mask = pd.Series([y is not None for y in y_data])
-            x_data = x_data[valid_mask]
+            x_data = x_data[valid_mask].astype(str)  # Ensure string type
             y_data = pd.Series([y for y, valid in zip(y_data, valid_mask) if valid])
         
         # Create bar chart
-        bars = ax.bar(x_data, y_data, color='#00A878', edgecolor='#008c67', linewidth=1.5)
+        bars = ax.bar(range(len(x_data)), y_data, color='#00A878', edgecolor='#008c67', linewidth=1.5)
+        ax.set_xticks(range(len(x_data)))
+        ax.set_xticklabels(x_data, rotation=45 if len(x_data) > 10 else 0, ha='right' if len(x_data) > 10 else 'center')
         
         # Customize
         ax.set_xlabel(x_column, fontsize=12, fontweight='bold')
         ax.set_ylabel(y_column, fontsize=12, fontweight='bold')
         ax.set_title(title or f"{y_column} by {x_column}", fontsize=14, fontweight='bold', pad=20)
-        
-        # Rotate x-axis labels if needed
-        if len(x_data) > 10:
-            plt.xticks(rotation=45, ha='right')
         
         # Add value labels on bars
         for bar in bars:

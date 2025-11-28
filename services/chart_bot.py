@@ -11,6 +11,7 @@ import logging
 from typing import Dict, List, Optional
 from openai import OpenAI
 from dotenv import load_dotenv
+import pandas as pd
 
 import sys
 from pathlib import Path
@@ -32,7 +33,36 @@ Your ONLY job: Generate chart configurations for visualization requests.
 📊 CHART GENERATION RULES
 ═══════════════════════════════════════════════════════════════════════════════
 
-**OUTPUT FORMAT (STRICT JSON - NO MARKDOWN):**
+**HANDLING GENERIC REQUESTS:**
+When user says "create graphs", "create dashboard", "visualize data", "show charts", etc.:
+1. Analyze the provided data analysis summary
+2. Select the BEST chart configurations from suggested_charts
+3. For dashboards: Generate MULTIPLE chart configurations (2-4 charts)
+4. Choose charts that provide different insights (bar, line, pie, histogram, scatter)
+5. Prioritize charts that make sense for the data structure
+
+**OUTPUT FORMAT FOR GENERIC REQUESTS (MULTIPLE CHARTS):**
+
+{
+  "charts": [
+    {
+      "chart_type": "bar",
+      "x_column": "ColumnName",
+      "y_column": "ColumnName",
+      "title": "Chart Title",
+      "description": "Chart description"
+    },
+    {
+      "chart_type": "line",
+      "x_column": "ColumnName",
+      "y_column": "ColumnName",
+      "title": "Chart Title",
+      "description": "Chart description"
+    }
+  ]
+}
+
+**OUTPUT FORMAT FOR SPECIFIC REQUESTS (SINGLE CHART):**
 
 {
   "chart_type": "bar|line|pie|histogram|scatter",
@@ -51,11 +81,13 @@ Your ONLY job: Generate chart configurations for visualization requests.
 
 **COLUMN IDENTIFICATION:**
 1. Analyze the dataset provided
-2. Identify X and Y columns based on user request
-3. Use ACTUAL column names from available_columns
-4. For pie charts: X = categories, Y = values
-5. For scatter: X and Y = both numeric columns
-6. For histogram: X = numeric column (Y is auto-generated)
+2. Use the data analysis summary to understand column types
+3. For generic requests: Use suggested_charts from analysis
+4. For specific requests: Identify X and Y columns based on user request
+5. Use ACTUAL column names from available_columns
+6. For pie charts: X = categories, Y = values
+7. For scatter: X and Y = both numeric columns
+8. For histogram: X = numeric column (Y is auto-generated)
 
 **EXAMPLES:**
 
@@ -119,12 +151,14 @@ When user mentions "column C", "column A", etc.:
    - Return: "x_column": "ActualColumnName"  # NOT "C"
 
 **CRITICAL RULES:**
-1. ALWAYS use actual column names from dataset (not Excel letters)
-2. Analyze dataset to identify appropriate columns
-3. Choose chart type based on data and user request
-4. Provide clear, descriptive title
-5. Return ONLY valid JSON (no markdown, no explanations)
-6. If columns not clear, make best inference from dataset
+1. For generic requests: Return MULTIPLE charts in "charts" array
+2. For specific requests: Return SINGLE chart configuration
+3. ALWAYS use actual column names from dataset (not Excel letters)
+4. Analyze dataset to identify appropriate columns
+5. Choose chart type based on data and user request
+6. Provide clear, descriptive titles
+7. Return ONLY valid JSON (no markdown, no explanations)
+8. If columns not clear, make best inference from dataset
 """
 
 
@@ -162,7 +196,8 @@ class ChartBot:
         self,
         user_prompt: str,
         available_columns: List[str],
-        sample_data: Optional[List[Dict]] = None
+        sample_data: Optional[List[Dict]] = None,
+        df: Optional[pd.DataFrame] = None
     ) -> Dict:
         """
         Generate chart configuration
@@ -171,11 +206,21 @@ class ChartBot:
             user_prompt: User's chart request
             available_columns: Available column names
             sample_data: Sample data rows
+            df: DataFrame for data analysis (optional, needed for generic requests)
         
         Returns:
-            Chart configuration dict
+            Chart configuration dict (single chart) or dict with "charts" array (multiple charts)
         """
         try:
+            # Detect if request is generic
+            generic_keywords = ["dashboard", "graphs", "visualizations", "charts", "visualize", 
+                              "show data", "create graphs", "create charts", "make graphs"]
+            is_generic = any(keyword in user_prompt.lower() for keyword in generic_keywords)
+            
+            # Analyze data if generic request and DataFrame provided
+            data_analysis = None
+            if is_generic and df is not None:
+                data_analysis = self.analyze_data_for_charts(df, available_columns, sample_data)
             # Get chart-specific knowledge base summary
             kb_summary = get_chart_knowledge_base_summary()
             
@@ -213,7 +258,16 @@ class ChartBot:
             column_mapping = get_column_mapping_info(available_columns)
             
             # Build prompt with context
-            prompt = self._build_chart_prompt(user_prompt, available_columns, sample_data, kb_summary, similar_examples_text, column_mapping)
+            prompt = self._build_chart_prompt(
+                user_prompt, 
+                available_columns, 
+                sample_data, 
+                kb_summary, 
+                similar_examples_text, 
+                column_mapping,
+                data_analysis=data_analysis,
+                is_generic=is_generic
+            )
             
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -244,8 +298,17 @@ class ChartBot:
                 else:
                     raise ValueError(f"Could not parse JSON from response: {content[:200]}")
             
-            # Validate chart config
-            chart_config = self._validate_chart_config(chart_config, available_columns)
+            # Handle multiple charts (generic requests) or single chart
+            if "charts" in chart_config and isinstance(chart_config["charts"], list):
+                # Multiple charts - validate each
+                validated_charts = []
+                for chart in chart_config["charts"]:
+                    validated = self._validate_chart_config(chart, available_columns)
+                    validated_charts.append(validated)
+                chart_config = {"charts": validated_charts}
+            else:
+                # Single chart - validate normally
+                chart_config = self._validate_chart_config(chart_config, available_columns)
             
             prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
             completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
@@ -263,7 +326,8 @@ class ChartBot:
             raise RuntimeError(f"Chart configuration generation failed: {str(e)}")
     
     def _build_chart_prompt(self, user_prompt: str, columns: List[str], sample_data: Optional[List[Dict]], 
-                           kb_summary: str = "", similar_examples: str = "", column_mapping: str = "") -> str:
+                           kb_summary: str = "", similar_examples: str = "", column_mapping: str = "",
+                           data_analysis: Optional[Dict] = None, is_generic: bool = False) -> str:
         """Build prompt for chart generation"""
         columns_info = f"Available columns: {', '.join(columns)}"
         
@@ -272,6 +336,33 @@ class ChartBot:
             sample_text = "\n\nSample data (first 5 rows):\n"
             for i, row in enumerate(sample_data[:5], 1):
                 sample_text += f"Row {i}: {row}\n"
+        
+        # Add data analysis for generic requests
+        analysis_text = ""
+        if is_generic and data_analysis:
+            analysis_text = f"""
+
+═══════════════════════════════════════════════════════════════════════════════
+📊 DATA ANALYSIS FOR CHART SUGGESTIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+Column Types:
+- Numeric columns: {', '.join(data_analysis.get('numeric_columns', [])) if data_analysis.get('numeric_columns') else 'None'}
+- Categorical columns: {', '.join(data_analysis.get('categorical_columns', [])) if data_analysis.get('categorical_columns') else 'None'}
+- Datetime columns: {', '.join(data_analysis.get('datetime_columns', [])) if data_analysis.get('datetime_columns') else 'None'}
+
+Suggested Chart Configurations:
+"""
+            for i, chart in enumerate(data_analysis.get('suggested_charts', [])[:5], 1):
+                analysis_text += f"""
+Chart {i}:
+- Type: {chart['chart_type']}
+- X-axis: {chart['x_column']}
+- Y-axis: {chart.get('y_column', 'N/A')}
+- Title: {chart['title']}
+- Description: {chart['description']}
+"""
+            analysis_text += "\nUse these suggestions to create a comprehensive dashboard with 2-4 charts.\n"
         
         kb_context = ""
         if kb_summary:
@@ -283,7 +374,7 @@ class ChartBot:
         
         return f"""You are a chart generation assistant. Return ONLY valid JSON.
 
-{kb_context}{examples_context}
+{analysis_text}{kb_context}{examples_context}
 {column_mapping}
 
 User Request: {user_prompt}
@@ -292,9 +383,10 @@ User Request: {user_prompt}
 {sample_text}
 
 Analyze the request and generate chart configuration.
+{"For generic requests, return MULTIPLE charts in a 'charts' array. " if is_generic else ""}
 Identify the appropriate chart type and columns from the dataset.
 Use actual column names from the available columns list (not Excel letters).
-Return ONLY valid JSON with chart_type, x_column, y_column, title, and description.
+Return ONLY valid JSON.
 """
     
     def _validate_chart_config(self, chart_config: Dict, available_columns: List[str]) -> Dict:
@@ -354,4 +446,115 @@ Return ONLY valid JSON with chart_type, x_column, y_column, title, and descripti
             "title": chart_config.get("title", "Chart"),
             "description": chart_config.get("description", f"{chart_type} chart")
         }
+    
+    def analyze_data_for_charts(
+        self,
+        df: pd.DataFrame,
+        available_columns: List[str],
+        sample_data: Optional[List[Dict]] = None
+    ) -> Dict:
+        """
+        Analyze data and suggest chart configurations
+        
+        Args:
+            df: DataFrame to analyze
+            available_columns: Available column names
+            sample_data: Sample data rows
+            
+        Returns:
+            Dictionary with analysis and suggested chart configurations
+        """
+        import pandas as pd
+        import numpy as np
+        
+        analysis = {
+            "numeric_columns": [],
+            "categorical_columns": [],
+            "datetime_columns": [],
+            "suggested_charts": []
+        }
+        
+        # Analyze column types
+        for col in available_columns:
+            if col not in df.columns:
+                continue
+                
+            col_data = df[col]
+            
+            # Check if numeric
+            if pd.api.types.is_numeric_dtype(col_data):
+                analysis["numeric_columns"].append(col)
+            # Check if datetime
+            elif pd.api.types.is_datetime64_any_dtype(col_data):
+                analysis["datetime_columns"].append(col)
+            # Check if categorical (low unique count or object type)
+            elif col_data.nunique() < len(df) * 0.5 or col_data.dtype == 'object':
+                analysis["categorical_columns"].append(col)
+        
+        # Suggest chart configurations based on data
+        numeric_cols = analysis["numeric_columns"]
+        categorical_cols = analysis["categorical_columns"]
+        datetime_cols = analysis["datetime_columns"]
+        
+        # 1. Bar chart: categorical x numeric
+        if categorical_cols and numeric_cols:
+            for cat_col in categorical_cols[:2]:  # Top 2 categorical
+                for num_col in numeric_cols[:2]:  # Top 2 numeric
+                    analysis["suggested_charts"].append({
+                        "chart_type": "bar",
+                        "x_column": cat_col,
+                        "y_column": num_col,
+                        "title": f"{num_col} by {cat_col}",
+                        "description": f"Bar chart comparing {num_col} across {cat_col} categories"
+                    })
+        
+        # 2. Line chart: datetime x numeric
+        if datetime_cols and numeric_cols:
+            for dt_col in datetime_cols[:1]:  # First datetime
+                for num_col in numeric_cols[:2]:  # Top 2 numeric
+                    analysis["suggested_charts"].append({
+                        "chart_type": "line",
+                        "x_column": dt_col,
+                        "y_column": num_col,
+                        "title": f"{num_col} Over Time",
+                        "description": f"Line chart showing {num_col} trends over {dt_col}"
+                    })
+        
+        # 3. Pie chart: categorical x numeric (count or sum)
+        if categorical_cols and numeric_cols:
+            for cat_col in categorical_cols[:1]:  # First categorical
+                for num_col in numeric_cols[:1]:  # First numeric
+                    analysis["suggested_charts"].append({
+                        "chart_type": "pie",
+                        "x_column": cat_col,
+                        "y_column": num_col,
+                        "title": f"Distribution of {num_col} by {cat_col}",
+                        "description": f"Pie chart showing {num_col} distribution"
+                    })
+        
+        # 4. Histogram: numeric column distribution
+        if numeric_cols:
+            for num_col in numeric_cols[:2]:  # Top 2 numeric
+                analysis["suggested_charts"].append({
+                    "chart_type": "histogram",
+                    "x_column": num_col,
+                    "y_column": None,
+                    "title": f"Distribution of {num_col}",
+                    "description": f"Histogram showing {num_col} distribution"
+                })
+        
+        # 5. Scatter plot: numeric x numeric
+        if len(numeric_cols) >= 2:
+            analysis["suggested_charts"].append({
+                "chart_type": "scatter",
+                "x_column": numeric_cols[0],
+                "y_column": numeric_cols[1],
+                "title": f"{numeric_cols[1]} vs {numeric_cols[0]}",
+                "description": f"Scatter plot showing relationship between {numeric_cols[0]} and {numeric_cols[1]}"
+            })
+        
+        # Limit to top 5 suggestions
+        analysis["suggested_charts"] = analysis["suggested_charts"][:5]
+        
+        return analysis
 
