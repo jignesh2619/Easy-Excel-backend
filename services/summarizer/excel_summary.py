@@ -101,8 +101,11 @@ class ExcelSummarizer:
         if numeric_count == len(series) and numeric_count > 0:
             return 'numeric'
         
-        # Check datetime
-        datetime_count = pd.to_datetime(series, errors='coerce').notna().sum()
+        # Check datetime (suppress format inference warnings)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', category=UserWarning, message='.*infer format.*')
+            datetime_count = pd.to_datetime(series, errors='coerce', format='mixed').notna().sum()
         if datetime_count > len(series) * 0.8 and datetime_count > 0:
             return 'datetime'
         
