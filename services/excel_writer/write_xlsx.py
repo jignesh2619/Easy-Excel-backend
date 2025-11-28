@@ -6,7 +6,7 @@ Uses xlsxwriter for writing Excel files with formatting support.
 
 import pandas as pd
 import xlsxwriter
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 import logging
 
@@ -39,13 +39,22 @@ class XlsxWriter:
         Returns:
             Path to written file
         """
+        logger = logging.getLogger(__name__)
+        
         with pd.ExcelWriter(self.output_path, engine='xlsxwriter') as writer:
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-            
             workbook = writer.book
-            worksheet = writer.sheets[sheet_name]
+            worksheet = workbook.add_worksheet(sheet_name)
             
-            # Format header row
+            # Build conditional format lookup for fast access
+            conditional_formats = {}
+            if conditional_formatting:
+                logger.info(f"Building conditional format lookup from {len(conditional_formatting)} rules")
+                conditional_formats = self._build_conditional_format_lookup(
+                    workbook, df, conditional_formatting
+                )
+                logger.info(f"Conditional format lookup built: {len(conditional_formats)} cells to format")
+            
+            # Write header row
             header_format = workbook.add_format({
                 'bold': True,
                 'bg_color': '#D7E4BC',
@@ -55,13 +64,31 @@ class XlsxWriter:
             for col_num, value in enumerate(df.columns.values):
                 worksheet.write(0, col_num, value, header_format)
             
-            # Apply formatting rules
+            # Write data row by row with conditional formatting applied
+            logger.info(f"Writing {len(df)} rows with conditional formatting")
+            for row_idx in range(len(df)):
+                for col_idx, col_name in enumerate(df.columns):
+                    cell_value = df.iloc[row_idx, col_idx]
+                    
+                    # Check if this cell should have conditional formatting
+                    cell_format = None
+                    if (row_idx, col_name) in conditional_formats:
+                        cell_format = conditional_formats[(row_idx, col_name)]
+                    
+                    # Write cell with format
+                    excel_row = row_idx + 1  # +1 for header row
+                    if pd.isna(cell_value):
+                        worksheet.write_blank(excel_row, col_idx, cell_format)
+                    elif isinstance(cell_value, (int, float)):
+                        worksheet.write_number(excel_row, col_idx, cell_value, cell_format)
+                    elif isinstance(cell_value, bool):
+                        worksheet.write_boolean(excel_row, col_idx, cell_value, cell_format)
+                    else:
+                        worksheet.write_string(excel_row, col_idx, str(cell_value), cell_format)
+            
+            # Apply static formatting rules (non-conditional)
             if formatting_rules:
                 self._apply_formatting_rules(workbook, worksheet, df, formatting_rules)
-            
-            # Apply conditional formatting
-            if conditional_formatting:
-                self._apply_conditional_formatting(workbook, worksheet, df, conditional_formatting)
             
             # Auto-adjust column widths
             for i, col in enumerate(df.columns):
@@ -201,4 +228,84 @@ class XlsxWriter:
                         continue
                 
                 logger.info(f"Applied conditional formatting: {matched_count} cells formatted in column(s) {columns}")
+    
+    def _build_conditional_format_lookup(self, workbook, df: pd.DataFrame, rules: List[Dict]) -> Dict[Tuple[int, str], Any]:
+        """Build a lookup dict: (row_idx, column_name) -> format object"""
+        logger = logging.getLogger(__name__)
+        format_lookup = {}
+        
+        for rule in rules:
+            if rule.get("type") != "conditional":
+                continue
+            
+            format_type = rule.get("format_type")
+            config = rule.get("config", {})
+            
+            # Build cell format
+            bg_color = config.get("bg_color") or config.get("background_color", "#FFF3CD")
+            text_color = config.get("text_color") or config.get("font_color", "#000000")
+            format_config = {"bg_color": bg_color}
+            if text_color:
+                format_config["font_color"] = text_color
+            if config.get("bold"):
+                format_config["bold"] = True
+            if config.get("italic"):
+                format_config["italic"] = True
+            if config.get("font_size"):
+                format_config["font_size"] = config.get("font_size")
+            cell_format = workbook.add_format(format_config)
+            
+            # Handle text-based conditional formatting
+            if format_type in ["contains_text", "text_equals", "regex_match"]:
+                target_text = config.get("text", "")
+                column_spec = config.get("column")
+                
+                # Resolve columns with case-insensitive matching
+                if column_spec is None or str(column_spec).lower() == "all_columns":
+                    columns = list(df.columns)
+                elif column_spec in df.columns:
+                    columns = [column_spec]
+                else:
+                    matching_cols = [col for col in df.columns if str(col).lower() == str(column_spec).lower()]
+                    if matching_cols:
+                        columns = matching_cols
+                        logger.info(f"Matched column '{column_spec}' to '{matching_cols[0]}' (case-insensitive)")
+                    else:
+                        columns = []
+                        logger.warning(f"Column '{column_spec}' not found. Available: {list(df.columns)[:10]}")
+                
+                if not columns or not target_text:
+                    logger.warning(f"Skipping conditional format: columns={columns}, target_text='{target_text}'")
+                    continue
+                
+                # Find matching cells and add to lookup
+                matched_count = 0
+                for column in columns:
+                    if column not in df.columns:
+                        continue
+                    series = df[column].astype(str)
+                    
+                    try:
+                        if format_type == "contains_text":
+                            matches = series.str.contains(str(target_text), case=False, na=False)
+                        elif format_type == "text_equals":
+                            matches = series.str.lower() == str(target_text).lower()
+                        else:  # regex_match
+                            pattern = config.get("pattern", target_text)
+                            matches = series.str.contains(pattern, na=False, regex=True)
+                        
+                        match_count = matches.sum()
+                        logger.info(f"Found {match_count} matches for '{target_text}' in column '{column}'")
+                        
+                        for row_idx, match in enumerate(matches):
+                            if match:
+                                format_lookup[(row_idx, column)] = cell_format
+                                matched_count += 1
+                    except Exception as e:
+                        logger.error(f"Error building conditional format lookup for column '{column}': {e}", exc_info=True)
+                        continue
+                
+                logger.info(f"Built conditional format lookup: {matched_count} cells will be formatted in column(s) {columns}")
+        
+        return format_lookup
 
