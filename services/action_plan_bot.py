@@ -298,12 +298,31 @@ Include "operations" array with "python_code" for each operation.
             # Parse JSON
             try:
                 action_plan = json.loads(content)
+                logger.info(f"✅ Successfully parsed action plan JSON")
+                logger.info(f"Action plan keys: {list(action_plan.keys())}")
+                
+                # Log conditional_format if present
+                if "conditional_format" in action_plan:
+                    logger.info(f"✅ Conditional format found in action plan!")
+                    logger.info(f"Conditional format structure: {json.dumps(action_plan['conditional_format'], indent=2)}")
+                else:
+                    logger.warning(f"⚠️ No 'conditional_format' field in action plan!")
+                    logger.info(f"Full action plan structure: {json.dumps({k: type(v).__name__ for k, v in action_plan.items()}, indent=2)}")
             except json.JSONDecodeError:
                 import re
                 json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content, re.DOTALL)
                 if json_match:
                     action_plan = json.loads(json_match.group())
+                    logger.info(f"✅ Successfully parsed action plan JSON from regex extraction")
+                    logger.info(f"Action plan keys: {list(action_plan.keys())}")
+                    
+                    if "conditional_format" in action_plan:
+                        logger.info(f"✅ Conditional format found in action plan!")
+                        logger.info(f"Conditional format structure: {json.dumps(action_plan['conditional_format'], indent=2)}")
+                    else:
+                        logger.warning(f"⚠️ No 'conditional_format' field in action plan!")
                 else:
+                    logger.error(f"❌ Could not parse JSON from response: {content[:200]}")
                     raise ValueError(f"Could not parse JSON from response: {content[:200]}")
             
             # Normalize action plan
