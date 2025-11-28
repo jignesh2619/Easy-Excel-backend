@@ -288,6 +288,7 @@ Include "operations" array with "python_code" for each operation.
             )
             
             content = response.choices[0].message.content.strip()
+            logger.info(f"📥 Raw LLM response (first 500 chars): {content[:500]}")
             
             # Extract JSON
             if "```json" in content:
