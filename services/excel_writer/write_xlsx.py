@@ -164,7 +164,10 @@ class XlsxWriter:
             # Build cell format
             bg_color = config.get("bg_color") or config.get("background_color", "#FFF3CD")
             text_color = config.get("text_color") or config.get("font_color", "#000000")
-            format_config = {"bg_color": bg_color}
+            format_config = {
+                "bg_color": bg_color,
+                "pattern": 1  # Solid pattern - REQUIRED for bg_color to be visible in Excel!
+            }
             if text_color:
                 format_config["font_color"] = text_color
             if config.get("bold"):
@@ -258,7 +261,10 @@ class XlsxWriter:
             # Build cell format
             bg_color = config.get("bg_color") or config.get("background_color", "#FFF3CD")
             text_color = config.get("text_color") or config.get("font_color", "#000000")
-            format_config = {"bg_color": bg_color}
+            format_config = {
+                "bg_color": bg_color,
+                "pattern": 1  # Solid pattern - REQUIRED for bg_color to be visible in Excel!
+            }
             if text_color:
                 format_config["font_color"] = text_color
             if config.get("bold"):
