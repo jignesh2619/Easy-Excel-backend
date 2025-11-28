@@ -179,13 +179,18 @@ class LLMAgent:
             }
         else:
             # Route to ActionPlanBot
-            logger.info("Routing to ActionPlanBot")
-            return self.action_plan_bot.generate_action_plan(
+            logger.info("🔄 Routing to ActionPlanBot for data operations")
+            logger.info(f"📝 User prompt: {user_prompt}")
+            result = self.action_plan_bot.generate_action_plan(
                 user_prompt=user_prompt,
                 available_columns=available_columns,
                 sample_data=sample_data,
                 sample_explanation=sample_explanation
             )
+            logger.info(f"📤 ActionPlanBot returned action plan with keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+            if isinstance(result, dict) and "conditional_format" in result:
+                logger.info(f"✅ Conditional format in result: {result['conditional_format']}")
+            return result
     
     def _legacy_interpret_prompt(
         self, 
