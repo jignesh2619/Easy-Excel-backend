@@ -98,13 +98,27 @@ class ChartExecutor:
             List of chart file paths
         """
         chart_paths = []
-        for config in chart_configs:
+        if not chart_configs:
+            logger.warning("No chart configurations provided to execute_multiple")
+            return chart_paths
+        
+        logger.info(f"Generating {len(chart_configs)} charts for dashboard")
+        
+        for i, config in enumerate(chart_configs, 1):
             try:
+                logger.info(f"Generating chart {i}/{len(chart_configs)}: {config.get('chart_type', 'unknown')} - {config.get('title', 'Untitled')}")
                 path = self.execute(config)
                 chart_paths.append(path)
+                logger.info(f"✓ Chart {i} generated successfully: {path}")
             except Exception as e:
-                logger.error(f"Failed to generate chart: {str(e)}")
-                self.execution_log.append(f"✗ Failed to generate chart: {str(e)}")
+                logger.error(f"✗ Failed to generate chart {i}: {str(e)}", exc_info=True)
+                self.execution_log.append(f"✗ Failed to generate chart {i} ({config.get('chart_type', 'unknown')}): {str(e)}")
+                # Continue with other charts even if one fails
+        
+        if not chart_paths:
+            raise RuntimeError(f"Failed to generate any charts. All {len(chart_configs)} chart generations failed.")
+        
+        logger.info(f"Successfully generated {len(chart_paths)}/{len(chart_configs)} charts")
         return chart_paths
     
     def get_chart_paths(self) -> List[str]:
