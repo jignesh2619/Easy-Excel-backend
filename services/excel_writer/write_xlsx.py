@@ -78,11 +78,13 @@ class XlsxWriter:
                     
                     # Check if this cell should have conditional formatting
                     cell_format = None
-                    if (row_idx, col_name) in conditional_formats:
-                        cell_format = conditional_formats[(row_idx, col_name)]
+                    lookup_key = (row_idx, col_name)
+                    if lookup_key in conditional_formats:
+                        cell_format = conditional_formats[lookup_key]
                         formatted_cell_count += 1
-                        if formatted_cell_count <= 5:  # Log first 5 for debugging
-                            logger.debug(f"Applying format to cell ({row_idx}, {col_name}) = '{cell_value}'")
+                        if formatted_cell_count <= 10:  # Log first 10 for debugging
+                            logger.info(f"✅ Applying format to cell ({row_idx}, {col_name}) = '{cell_value}' (Excel row {row_idx + 1})")
+                            logger.info(f"   Format type: {type(cell_format).__name__}, Format object: {cell_format}")
                     
                     # Write cell with format
                     excel_row = row_idx + 1  # +1 for header row
