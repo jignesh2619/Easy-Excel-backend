@@ -53,6 +53,11 @@ class XlsxWriter:
                     workbook, df, conditional_formatting
                 )
                 logger.info(f"Conditional format lookup built: {len(conditional_formats)} cells to format")
+                if conditional_formats:
+                    # Log sample keys for debugging
+                    sample_keys = list(conditional_formats.keys())[:5]
+                    logger.info(f"Sample lookup keys: {sample_keys}")
+                    logger.info(f"Sample lookup values: {[type(v).__name__ for v in [conditional_formats[k] for k in sample_keys]]}")
             
             # Write header row
             header_format = workbook.add_format({
