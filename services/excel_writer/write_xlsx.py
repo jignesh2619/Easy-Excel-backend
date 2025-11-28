@@ -117,17 +117,17 @@ class XlsxWriter:
             if conditional_formats:
                 logger.info(f"Applied conditional formatting to {formatted_cell_count} cells during write")
             
-            # Apply static formatting rules (non-conditional)
-            if formatting_rules:
-                self._apply_formatting_rules(workbook, worksheet, df, formatting_rules)
-            
-            # Auto-adjust column widths
+            # Auto-adjust column widths (do this BEFORE applying static formatting to avoid conflicts)
             for i, col in enumerate(df.columns):
                 max_length = max(
                     df[col].astype(str).map(len).max(),
                     len(str(col))
                 )
                 worksheet.set_column(i, i, min(max_length + 2, 50))
+            
+            # Apply static formatting rules (non-conditional) - do this last
+            if formatting_rules:
+                self._apply_formatting_rules(workbook, worksheet, df, formatting_rules)
         
         return str(self.output_path)
     
