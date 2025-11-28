@@ -105,6 +105,12 @@ class ChartBuilder:
         if df.empty:
             raise ValueError("Cannot create chart from empty dataframe")
         
+        # Limit data size for charts to prevent OOM (use sample for large datasets)
+        # For 512MB servers, limit to 1000 rows max
+        MAX_ROWS_FOR_CHART = 1000
+        if len(df) > MAX_ROWS_FOR_CHART:
+            df = df.head(MAX_ROWS_FOR_CHART).copy()
+        
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"chart_{timestamp}.png"
