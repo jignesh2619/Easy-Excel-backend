@@ -132,8 +132,8 @@ class ChartBuilder:
                 plt.style.use('seaborn-darkgrid')
             except:
                 plt.style.use('default')
-        # Use smaller figure size for dashboards to reduce memory usage
-        fig, ax = plt.subplots(figsize=(10, 6))
+        # Use smaller figure size to reduce memory usage (critical for 512MB servers)
+        fig, ax = plt.subplots(figsize=(8, 5))
         
         try:
             if chart_type == "bar":
@@ -155,8 +155,8 @@ class ChartBuilder:
             except Exception:
                 # If tight_layout fails, continue anyway (just a warning)
                 pass
-            # Reduce DPI for dashboards to save memory (300 -> 150)
-            plt.savefig(filepath, dpi=150, bbox_inches='tight')
+            # Reduce DPI significantly to save memory (300 -> 100 for 512MB servers)
+            plt.savefig(filepath, dpi=100, bbox_inches='tight')
             plt.close()
             
             # Force garbage collection to free memory

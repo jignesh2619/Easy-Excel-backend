@@ -553,9 +553,10 @@ Return ONLY valid JSON.
                 "description": f"Scatter plot showing relationship between {numeric_cols[0]} and {numeric_cols[1]}"
             })
         
-        # Limit to top 3 suggestions (to avoid OOM on low-memory servers)
-        # For 512MB servers, generating 4+ charts causes OOM kills
-        analysis["suggested_charts"] = analysis["suggested_charts"][:3]
+        # Limit to top 2 suggestions (to avoid OOM on low-memory servers)
+        # For 512MB servers, generating 3+ charts causes OOM kills
+        # 2 charts is the safe limit for 512MB RAM
+        analysis["suggested_charts"] = analysis["suggested_charts"][:2]
         
         return analysis
 

@@ -30,7 +30,16 @@ class ChartExecutor:
             df: DataFrame to create chart from
             output_dir: Directory to save charts
         """
-        self.df = df
+        # Limit DataFrame size to prevent OOM on low-memory servers
+        # For 512MB servers, use sample of data for charts
+        MAX_ROWS_FOR_CHART = 1000
+        if len(df) > MAX_ROWS_FOR_CHART:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Limiting DataFrame to {MAX_ROWS_FOR_CHART} rows for chart generation (original: {len(df)} rows)")
+            self.df = df.head(MAX_ROWS_FOR_CHART).copy()
+        else:
+            self.df = df
         self.chart_builder = ChartBuilder(output_dir=output_dir)
         self.chart_paths: List[str] = []
         self.execution_log: List[str] = []
