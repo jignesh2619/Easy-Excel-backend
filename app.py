@@ -368,6 +368,17 @@ async def process_file(
         
         # 12a. Get formatting metadata for preview display
         formatting_metadata = processor.get_formatting_metadata(preview_df)
+        logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
+        
+        # 12b. Add formatting info directly to each cell in processed_data for easier frontend rendering
+        if formatting_metadata.get("cell_formats"):
+            for row_idx, row_data in enumerate(processed_data):
+                for col_name in columns:
+                    cell_key = f"{row_idx}_{col_name}"
+                    if cell_key in formatting_metadata["cell_formats"]:
+                        cell_format = formatting_metadata["cell_formats"][cell_key]
+                        # Add _format suffix to avoid conflicts with actual data
+                        row_data[f"{col_name}_format"] = cell_format
         
         # 13. Determine response type and format for formula engine
         response_type = "table"  # Default
