@@ -66,6 +66,7 @@ class XlsxWriter:
             
             # Write data row by row with conditional formatting applied
             logger.info(f"Writing {len(df)} rows with conditional formatting")
+            formatted_cell_count = 0
             for row_idx in range(len(df)):
                 for col_idx, col_name in enumerate(df.columns):
                     cell_value = df.iloc[row_idx, col_idx]
@@ -74,6 +75,9 @@ class XlsxWriter:
                     cell_format = None
                     if (row_idx, col_name) in conditional_formats:
                         cell_format = conditional_formats[(row_idx, col_name)]
+                        formatted_cell_count += 1
+                        if formatted_cell_count <= 5:  # Log first 5 for debugging
+                            logger.debug(f"Applying format to cell ({row_idx}, {col_name}) = '{cell_value}'")
                     
                     # Write cell with format
                     excel_row = row_idx + 1  # +1 for header row
@@ -85,6 +89,9 @@ class XlsxWriter:
                         worksheet.write_boolean(excel_row, col_idx, cell_value, cell_format)
                     else:
                         worksheet.write_string(excel_row, col_idx, str(cell_value), cell_format)
+            
+            if conditional_formats:
+                logger.info(f"Applied conditional formatting to {formatted_cell_count} cells during write")
             
             # Apply static formatting rules (non-conditional)
             if formatting_rules:
