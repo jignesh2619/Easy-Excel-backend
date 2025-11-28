@@ -88,14 +88,31 @@ class XlsxWriter:
                     
                     # Write cell with format
                     excel_row = row_idx + 1  # +1 for header row
-                    if pd.isna(cell_value):
-                        worksheet.write_blank(excel_row, col_idx, cell_format)
-                    elif isinstance(cell_value, (int, float)):
-                        worksheet.write_number(excel_row, col_idx, cell_value, cell_format)
-                    elif isinstance(cell_value, bool):
-                        worksheet.write_boolean(excel_row, col_idx, cell_value, cell_format)
-                    else:
-                        worksheet.write_string(excel_row, col_idx, str(cell_value), cell_format)
+                    try:
+                        if pd.isna(cell_value):
+                            if cell_format:
+                                worksheet.write_blank(excel_row, col_idx, cell_format)
+                            else:
+                                worksheet.write_blank(excel_row, col_idx)
+                        elif isinstance(cell_value, (int, float)):
+                            if cell_format:
+                                worksheet.write_number(excel_row, col_idx, cell_value, cell_format)
+                            else:
+                                worksheet.write_number(excel_row, col_idx, cell_value)
+                        elif isinstance(cell_value, bool):
+                            if cell_format:
+                                worksheet.write_boolean(excel_row, col_idx, cell_value, cell_format)
+                            else:
+                                worksheet.write_boolean(excel_row, col_idx, cell_value)
+                        else:
+                            if cell_format:
+                                worksheet.write_string(excel_row, col_idx, str(cell_value), cell_format)
+                            else:
+                                worksheet.write_string(excel_row, col_idx, str(cell_value))
+                    except Exception as e:
+                        logger.error(f"Error writing cell ({excel_row}, {col_idx}): {e}")
+                        # Fallback: write without format
+                        worksheet.write_string(excel_row, col_idx, str(cell_value) if not pd.isna(cell_value) else "")
             
             if conditional_formats:
                 logger.info(f"Applied conditional formatting to {formatted_cell_count} cells during write")
