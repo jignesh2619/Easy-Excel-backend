@@ -44,19 +44,19 @@ def start_server():
     if not check_api_key():
         return
     
-    print("\n" + "=" * 60)
-    print("Starting EasyExcel Backend Server...")
-    print("=" * 60)
-    print("\nServer will be available at: http://localhost:8000")
-    print("API Documentation: http://localhost:8000/docs")
-    print("\nPress CTRL+C to stop the server\n")
-    print("=" * 60 + "\n")
-    
     try:
         import uvicorn
         # Get PORT from environment (DigitalOcean/Railway/Render sets this automatically)
         # For local development, use 8000
         port = int(os.getenv("PORT", "8000"))
+        
+        print("\n" + "=" * 60)
+        print("Starting EasyExcel Backend Server...")
+        print("=" * 60)
+        print(f"\nServer will be available at: http://localhost:{port}")
+        print(f"API Documentation: http://localhost:{port}/docs")
+        print("\nPress CTRL+C to stop the server\n")
+        print("=" * 60 + "\n")
         uvicorn.run(
             "app:app",
             host="0.0.0.0",
