@@ -10,9 +10,58 @@ matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Tuple
+
+
+def _extract_numeric_from_string(value):
+    """
+    Extract numeric value from formatted strings like "4.4 (65)" -> 4.4
+    Handles:
+    - "4.4 (65)" -> 4.4
+    - "5 (387)" -> 5.0
+    - "4.1 (1,385)" -> 4.1 (handles commas)
+    - "4.9" -> 4.9 (already clean)
+    - 4.4 -> 4.4 (already numeric)
+    """
+    if pd.isna(value):
+        return None
+    
+    # If already numeric, return it
+    if isinstance(value, (int, float)):
+        return float(value)
+    
+    # Convert to string
+    value_str = str(value).strip()
+    
+    # Try direct conversion first
+    try:
+        return float(value_str)
+    except ValueError:
+        pass
+    
+    # Extract first number before parentheses: "4.4 (65)" -> "4.4"
+    # Pattern: match number at start (can have decimal, can have negative sign)
+    match = re.match(r'^([-+]?[\d.]+)', value_str)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            pass
+    
+    # Fallback: find first number in string
+    numbers = re.findall(r'[-+]?[\d.]+', value_str)
+    if numbers:
+        try:
+            # Remove commas from number string before conversion
+            num_str = numbers[0].replace(',', '')
+            return float(num_str)
+        except ValueError:
+            pass
+    
+    return None
 
 
 class ChartBuilder:
@@ -168,7 +217,12 @@ class ChartBuilder:
             y_data = data[y_column]
         else:
             x_data = df[x_column]
-            y_data = df[y_column]
+            # Extract numeric values from formatted strings for y_column
+            y_data = df[y_column].apply(_extract_numeric_from_string)
+            # Remove rows where y_data extraction failed
+            valid_mask = pd.Series([y is not None for y in y_data])
+            x_data = x_data[valid_mask]
+            y_data = pd.Series([y for y, valid in zip(y_data, valid_mask) if valid])
         
         # Create bar chart
         bars = ax.bar(x_data, y_data, color='#00A878', edgecolor='#008c67', linewidth=1.5)
@@ -200,7 +254,12 @@ class ChartBuilder:
             y_data = data[y_column]
         else:
             x_data = df[x_column]
-            y_data = df[y_column]
+            # Extract numeric values from formatted strings for y_column
+            y_data = df[y_column].apply(_extract_numeric_from_string)
+            # Remove rows where y_data extraction failed
+            valid_mask = pd.Series([y is not None for y in y_data])
+            x_data = x_data[valid_mask]
+            y_data = pd.Series([y for y, valid in zip(y_data, valid_mask) if valid])
         
         # Sort by x if numeric or convert to numeric index
         if pd.api.types.is_numeric_dtype(x_data):
@@ -258,8 +317,9 @@ class ChartBuilder:
     
     def _create_histogram(self, ax, df: pd.DataFrame, x_column: str, y_column: Optional[str], title: Optional[str]):
         """Create histogram chart"""
-        # Prepare data - use x_column for histogram
-        data = pd.to_numeric(df[x_column], errors='coerce').dropna()
+        # Extract numeric values from formatted strings
+        data = df[x_column].apply(_extract_numeric_from_string)
+        data = pd.Series([x for x in data if x is not None])
         
         if len(data) == 0:
             raise ValueError(f"No valid numeric data in column '{x_column}'")
@@ -278,14 +338,15 @@ class ChartBuilder:
     
     def _create_scatter_plot(self, ax, df: pd.DataFrame, x_column: str, y_column: str, title: Optional[str]):
         """Create scatter plot"""
-        # Prepare data
-        x_data = pd.to_numeric(df[x_column], errors='coerce')
-        y_data = pd.to_numeric(df[y_column], errors='coerce')
+        # Extract numeric values from formatted strings
+        x_data = df[x_column].apply(_extract_numeric_from_string)
+        y_data = df[y_column].apply(_extract_numeric_from_string)
         
-        # Remove NaN values
-        valid_mask = x_data.notna() & y_data.notna()
-        x_data = x_data[valid_mask]
-        y_data = y_data[valid_mask]
+        # Remove None values (where extraction failed)
+        valid_mask = pd.Series([x is not None and y is not None 
+                               for x, y in zip(x_data, y_data)])
+        x_data = pd.Series([x for x, valid in zip(x_data, valid_mask) if valid])
+        y_data = pd.Series([y for y, valid in zip(y_data, valid_mask) if valid])
         
         if len(x_data) == 0:
             raise ValueError(f"No valid numeric data in columns '{x_column}' and '{y_column}'")

@@ -91,6 +91,8 @@ class XlsxWriter:
                 format_dict['bg_color'] = formatting['bg_color']
             if formatting.get("text_color"):
                 format_dict['font_color'] = formatting['text_color']
+            if formatting.get("font_size"):
+                format_dict['font_size'] = formatting['font_size']
             
             cell_format = workbook.add_format(format_dict)
             

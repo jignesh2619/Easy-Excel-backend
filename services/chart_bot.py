@@ -12,6 +12,13 @@ from typing import Dict, List, Optional
 from openai import OpenAI
 from dotenv import load_dotenv
 
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent))
+from services.feedback_learner import FeedbackLearner
+from services.training_data_loader import TrainingDataLoader
+from utils.knowledge_base import get_chart_knowledge_base_summary
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -123,6 +130,18 @@ class ChartBot:
         
         self.model = os.getenv("OPENAI_MODEL", model)
         self.client = OpenAI(api_key=self.api_key)
+        
+        # Initialize feedback learner
+        try:
+            self.feedback_learner = FeedbackLearner()
+        except Exception:
+            self.feedback_learner = None
+        
+        # Initialize training data loader
+        try:
+            self.training_data_loader = TrainingDataLoader()
+        except Exception:
+            self.training_data_loader = None
     
     def generate_chart_plan(
         self,
@@ -142,7 +161,41 @@ class ChartBot:
             Chart configuration dict
         """
         try:
-            prompt = self._build_chart_prompt(user_prompt, available_columns, sample_data)
+            # Get chart-specific knowledge base summary
+            kb_summary = get_chart_knowledge_base_summary()
+            
+            # Get similar examples from training data and feedback
+            similar_examples_text = ""
+            all_examples = []
+            
+            if self.training_data_loader:
+                try:
+                    training_examples = self.training_data_loader.get_examples_for_prompt(user_prompt, limit=3)
+                    all_examples.extend(training_examples)
+                except Exception:
+                    pass
+            
+            if self.feedback_learner:
+                try:
+                    feedback_examples = self.feedback_learner.get_similar_successful_examples(user_prompt, limit=2)
+                    for ex in feedback_examples:
+                        all_examples.append({
+                            "prompt": ex["prompt"],
+                            "chart_config": ex.get("chart_config") or ex.get("action_plan", {}).get("chart_config", {})
+                        })
+                except Exception:
+                    pass
+            
+            if all_examples:
+                similar_examples_text = "\n\nFEW-SHOT LEARNING EXAMPLES:\n"
+                for i, ex in enumerate(all_examples[:5], 1):
+                    similar_examples_text += f"\nExample {i}:\n"
+                    similar_examples_text += f"User: {ex['prompt']}\n"
+                    chart_config = ex.get("chart_config", {})
+                    similar_examples_text += f"Response: {json.dumps(chart_config, indent=2)}\n"
+            
+            # Build prompt with context
+            prompt = self._build_chart_prompt(user_prompt, available_columns, sample_data, kb_summary, similar_examples_text)
             
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -191,7 +244,8 @@ class ChartBot:
             logger.error(f"ChartBot failed: {str(e)}")
             raise RuntimeError(f"Chart configuration generation failed: {str(e)}")
     
-    def _build_chart_prompt(self, user_prompt: str, columns: List[str], sample_data: Optional[List[Dict]]) -> str:
+    def _build_chart_prompt(self, user_prompt: str, columns: List[str], sample_data: Optional[List[Dict]], 
+                           kb_summary: str = "", similar_examples: str = "") -> str:
         """Build prompt for chart generation"""
         columns_info = f"Available columns: {', '.join(columns)}"
         
@@ -201,7 +255,17 @@ class ChartBot:
             for i, row in enumerate(sample_data[:5], 1):
                 sample_text += f"Row {i}: {row}\n"
         
-        return f"""
+        kb_context = ""
+        if kb_summary:
+            kb_context = f"\n\nKNOWLEDGE BASE CONTEXT:\n{kb_summary}\n"
+        
+        examples_context = ""
+        if similar_examples:
+            examples_context = f"\n{similar_examples}\n"
+        
+        return f"""You are a chart generation assistant. Return ONLY valid JSON.
+
+{kb_context}{examples_context}
 User Request: {user_prompt}
 
 {columns_info}

@@ -276,6 +276,140 @@ KNOWLEDGE_BASE = {
             "use_for": ["relationship between two numeric variables", "correlation"],
             "keywords": ["relationship", "correlation", "scatter", "vs"]
         }
+    },
+    
+    "chart_knowledge": {
+        "chart_type_rules": {
+            "bar": {
+                "description": "Use for comparing categories, showing counts, or grouped data",
+                "data_requirements": "X-axis: categorical column, Y-axis: numeric column",
+                "examples": ["revenue by country", "sales by region", "count by category"],
+                "when_to_use": [
+                    "User mentions 'by' (e.g., 'by country', 'by category')",
+                    "Comparing values across categories",
+                    "Showing counts or totals per group"
+                ]
+            },
+            "line": {
+                "description": "Use for showing trends over time or sequential data",
+                "data_requirements": "X-axis: date/time or sequential column, Y-axis: numeric column",
+                "examples": ["revenue over time", "sales trend", "growth over months"],
+                "when_to_use": [
+                    "User mentions 'over time', 'trend', 'changes'",
+                    "X-axis column contains dates or sequential values",
+                    "Showing progression or trends"
+                ]
+            },
+            "pie": {
+                "description": "Use for showing proportions or parts of a whole",
+                "data_requirements": "X-axis: categories, Y-axis: values (percentages or counts)",
+                "examples": ["market share", "distribution", "percentage breakdown"],
+                "when_to_use": [
+                    "User mentions 'share', 'percentage', 'distribution', 'parts'",
+                    "Showing how parts relate to whole",
+                    "Limited number of categories (typically < 10)"
+                ]
+            },
+            "histogram": {
+                "description": "Use for showing distribution of a single numeric variable",
+                "data_requirements": "X-axis: numeric column (Y is auto-generated frequency)",
+                "examples": ["age distribution", "price distribution", "score frequency"],
+                "when_to_use": [
+                    "User mentions 'distribution', 'frequency', 'histogram'",
+                    "Single numeric column to analyze",
+                    "Understanding data spread or patterns"
+                ]
+            },
+            "scatter": {
+                "description": "Use for showing relationship between two numeric variables",
+                "data_requirements": "X-axis: numeric column, Y-axis: numeric column",
+                "examples": ["sales vs profit", "price vs quantity", "correlation analysis"],
+                "when_to_use": [
+                    "User mentions 'vs', 'relationship', 'correlation', 'scatter'",
+                    "Both X and Y are numeric columns",
+                    "Finding patterns or relationships"
+                ]
+            }
+        },
+        "column_identification": {
+            "x_axis_rules": [
+                "For bar charts: Use categorical column (country, category, region, etc.)",
+                "For line charts: Use date/time column or sequential column",
+                "For pie charts: Use category column",
+                "For scatter/histogram: Use numeric column"
+            ],
+            "y_axis_rules": [
+                "For bar/line charts: Use numeric column (revenue, sales, count, etc.)",
+                "For pie charts: Use value column (count, percentage, amount)",
+                "For scatter: Use numeric column",
+                "For histogram: Y-axis is auto-generated (frequency)"
+            ],
+            "column_matching": [
+                "Match column names from user request to actual column names (case-insensitive)",
+                "If user says 'revenue by country', find 'Revenue' and 'Country' columns",
+                "If column not found, use closest match or first numeric/categorical column",
+                "For time series, look for date/time column names"
+            ]
+        },
+        "common_chart_patterns": {
+            "revenue_by_category": {
+                "pattern": "revenue by [category]",
+                "chart_type": "bar",
+                "x_column": "[category column]",
+                "y_column": "revenue or amount or sales"
+            },
+            "trend_over_time": {
+                "pattern": "[metric] over time",
+                "chart_type": "line",
+                "x_column": "date or time column",
+                "y_column": "[metric column]"
+            },
+            "distribution": {
+                "pattern": "distribution of [numeric]",
+                "chart_type": "histogram",
+                "x_column": "[numeric column]",
+                "y_column": null
+            },
+            "comparison": {
+                "pattern": "[metric1] vs [metric2]",
+                "chart_type": "scatter",
+                "x_column": "[metric1 column]",
+                "y_column": "[metric2 column]"
+            },
+            "share_or_percentage": {
+                "pattern": "share of [category] or percentage",
+                "chart_type": "pie",
+                "x_column": "[category column]",
+                "y_column": "value or count column"
+            }
+        },
+        "best_practices": [
+            "Always use actual column names from the dataset",
+            "Validate that columns exist before generating chart config",
+            "Choose chart type based on data type and user intent",
+            "Provide descriptive titles that explain what the chart shows",
+            "For time series, ensure X-axis is date/time column",
+            "For comparisons, ensure both axes are appropriate data types",
+            "If user request is unclear, analyze sample data to infer columns"
+        ],
+        "edge_cases": [
+            {
+                "scenario": "User says 'chart' without specifying type",
+                "solution": "Analyze data and user request to infer best chart type (usually bar for categorical, line for time)"
+            },
+            {
+                "scenario": "Column names don't match user request exactly",
+                "solution": "Use fuzzy matching or find closest column name, validate with user if possible"
+            },
+            {
+                "scenario": "User requests chart but no appropriate columns found",
+                "solution": "Use first numeric column for Y-axis, first categorical/numeric for X-axis"
+            },
+            {
+                "scenario": "User says 'show me data' (ambiguous)",
+                "solution": "If visualization keywords present, create bar chart of first categorical vs first numeric column"
+            }
+        ]
     }
 }
 
@@ -406,4 +540,63 @@ def get_task_decision_guide(user_prompt: str) -> dict:
             suggestions["reasoning"].append(f"Matched pattern: {pattern_name}")
     
     return suggestions
+
+
+def get_chart_knowledge_base_summary() -> str:
+    """
+    Get chart-specific knowledge base summary for ChartBot
+    
+    Returns:
+        Formatted string with chart generation knowledge
+    """
+    if "chart_knowledge" not in KNOWLEDGE_BASE:
+        return "Chart knowledge base not available. Use default chart generation rules."
+    
+    chart_kb = KNOWLEDGE_BASE["chart_knowledge"]
+    summary = []
+    
+    # Chart type rules
+    summary.append("📊 CHART TYPE SELECTION RULES:")
+    for chart_type, rules in chart_kb.get("chart_type_rules", {}).items():
+        summary.append(f"\n**{chart_type.upper()} Chart:**")
+        summary.append(f"  Description: {rules.get('description', 'N/A')}")
+        summary.append(f"  Data Requirements: {rules.get('data_requirements', 'N/A')}")
+        summary.append(f"  When to Use:")
+        for use_case in rules.get("when_to_use", [])[:3]:
+            summary.append(f"    - {use_case}")
+        summary.append(f"  Examples: {', '.join(rules.get('examples', [])[:3])}")
+    
+    # Column identification rules
+    summary.append("\n\n📋 COLUMN IDENTIFICATION:")
+    col_id = chart_kb.get("column_identification", {})
+    summary.append("\n**X-Axis Rules:**")
+    for rule in col_id.get("x_axis_rules", [])[:4]:
+        summary.append(f"  - {rule}")
+    summary.append("\n**Y-Axis Rules:**")
+    for rule in col_id.get("y_axis_rules", [])[:4]:
+        summary.append(f"  - {rule}")
+    summary.append("\n**Column Matching:**")
+    for rule in col_id.get("column_matching", [])[:3]:
+        summary.append(f"  - {rule}")
+    
+    # Common chart patterns
+    summary.append("\n\n🔍 COMMON CHART PATTERNS:")
+    for pattern_name, pattern_info in chart_kb.get("common_chart_patterns", {}).items():
+        summary.append(f"\nPattern: '{pattern_info.get('pattern', 'N/A')}'")
+        summary.append(f"  Chart Type: {pattern_info.get('chart_type', 'N/A')}")
+        summary.append(f"  X-Column: {pattern_info.get('x_column', 'N/A')}")
+        summary.append(f"  Y-Column: {pattern_info.get('y_column', 'N/A')}")
+    
+    # Best practices
+    summary.append("\n\n✅ BEST PRACTICES:")
+    for practice in chart_kb.get("best_practices", [])[:5]:
+        summary.append(f"  - {practice}")
+    
+    # Edge cases
+    summary.append("\n\n⚠️ EDGE CASES:")
+    for edge_case in chart_kb.get("edge_cases", [])[:3]:
+        summary.append(f"\nScenario: {edge_case.get('scenario', 'N/A')}")
+        summary.append(f"  Solution: {edge_case.get('solution', 'N/A')}")
+    
+    return "\n".join(summary)
 
