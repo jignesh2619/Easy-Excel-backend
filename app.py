@@ -430,8 +430,11 @@ async def process_file(
                 x_col = first_chart.get("x_column")
                 y_col = first_chart.get("y_column")
             
+            # Get chart type - handle dashboard case
+            display_chart_type = chart_type if chart_type != "none" else "dashboard"
+            
             result_value = {
-                "chart_type": chart_type,
+                "chart_type": display_chart_type,
                 "chart_url": chart_url,
                 "title": f"{prompt[:50]}...",
                 "x_column": x_col,

@@ -352,12 +352,22 @@ class ExcelProcessor:
             if "format" in action_plan:
                 self._execute_format(action_plan)
             
+            # Extract chart_type for response
+            chart_type_for_response = "none"
+            if chart_path:
+                if "chart_configs" in action_plan and action_plan["chart_configs"]:
+                    # Multiple charts - use first chart's type
+                    chart_type_for_response = action_plan["chart_configs"][0].get("chart_type", "dashboard")
+                elif "chart_config" in action_plan:
+                    # Single chart
+                    chart_type_for_response = action_plan["chart_config"].get("chart_type", "chart")
+            
             return {
                 "df": self.df,
                 "summary": self.summary,
                 "chart_path": chart_path,
                 "chart_needed": chart_path is not None,
-                "chart_type": action_plan.get("chart_config", {}).get("chart_type", "none") if chart_path else "none",
+                "chart_type": chart_type_for_response,
                 "formula_result": self.formula_result,
                 "task": task
             }
