@@ -8,6 +8,7 @@ import pandas as pd
 import xlsxwriter
 from typing import Dict, List, Optional, Any
 from pathlib import Path
+import logging
 
 
 class XlsxWriter:
@@ -110,6 +111,8 @@ class XlsxWriter:
     
     def _apply_conditional_formatting(self, workbook, worksheet, df: pd.DataFrame, rules: List[Dict]):
         """Apply conditional formatting rules"""
+        logger = logging.getLogger(__name__)
+        
         for rule in rules:
             if rule.get("type") != "conditional":
                 continue
@@ -125,6 +128,10 @@ class XlsxWriter:
                 format_config["font_color"] = text_color
             if config.get("bold"):
                 format_config["bold"] = True
+            if config.get("italic"):
+                format_config["italic"] = True
+            if config.get("font_size"):
+                format_config["font_size"] = config.get("font_size")
             cell_format = workbook.add_format(format_config)
             
             # Handle text-based conditional formatting
@@ -132,18 +139,27 @@ class XlsxWriter:
                 target_text = config.get("text", "")
                 column_spec = config.get("column")
                 
-                # Resolve columns
+                # Resolve columns with case-insensitive matching
                 if column_spec is None or str(column_spec).lower() == "all_columns":
                     columns = list(df.columns)
                 elif column_spec in df.columns:
                     columns = [column_spec]
                 else:
-                    columns = []
+                    # Try case-insensitive match
+                    matching_cols = [col for col in df.columns if str(col).lower() == str(column_spec).lower()]
+                    if matching_cols:
+                        columns = matching_cols
+                        logger.info(f"Matched column '{column_spec}' to '{matching_cols[0]}' (case-insensitive)")
+                    else:
+                        columns = []
+                        logger.warning(f"Column '{column_spec}' not found. Available: {list(df.columns)[:10]}")
                 
                 if not columns or not target_text:
+                    logger.warning(f"Skipping conditional format: columns={columns}, target_text='{target_text}'")
                     continue
                 
                 # Apply formatting to matching cells
+                matched_count = 0
                 for column in columns:
                     if column not in df.columns:
                         continue
@@ -159,12 +175,18 @@ class XlsxWriter:
                             pattern = config.get("pattern", target_text)
                             matches = series.str.contains(pattern, na=False, regex=True)
                         
+                        match_count = matches.sum()
+                        logger.info(f"Found {match_count} matches for '{target_text}' in column '{column}'")
+                        
                         for row_idx, match in enumerate(matches):
                             if match:
+                                # Excel rows: 0 = header, 1+ = data rows
+                                # DataFrame row_idx: 0 = first data row
+                                # So: excel_row = row_idx + 1 (skip header row)
                                 excel_row = row_idx + 1
                                 cell_value = df.iloc[row_idx, col_idx]
                                 
-                                # Write with proper type handling
+                                # Write with proper type handling - overwrites existing cell with format
                                 if pd.isna(cell_value):
                                     worksheet.write_blank(excel_row, col_idx, cell_format)
                                 elif isinstance(cell_value, (int, float)):
@@ -173,6 +195,10 @@ class XlsxWriter:
                                     worksheet.write_boolean(excel_row, col_idx, cell_value, cell_format)
                                 else:
                                     worksheet.write_string(excel_row, col_idx, str(cell_value), cell_format)
+                                matched_count += 1
                     except Exception as e:
+                        logger.error(f"Error applying conditional formatting to column '{column}': {e}", exc_info=True)
                         continue
+                
+                logger.info(f"Applied conditional formatting: {matched_count} cells formatted in column(s) {columns}")
 
