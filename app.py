@@ -132,6 +132,7 @@ class ProcessFileResponse(BaseModel):
     processed_data: Optional[List[Dict[str, Any]]] = None  # JSON representation of processed dataframe (list of row dicts)
     columns: Optional[List[str]] = None  # Column names
     row_count: Optional[int] = None  # Number of rows
+    formatting_metadata: Optional[Dict[str, Any]] = None  # Formatting metadata for preview display
     # Formula engine response format
     type: Optional[str] = None  # "summary" | "table" | "value" | "chart" | "transformation"
     operation: Optional[str] = None  # Operation name (e.g., "sum", "average", "filter", etc.)
