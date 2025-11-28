@@ -4,7 +4,9 @@ LLM Prompt Templates
 Contains system prompts and templates for LLM interpretation
 """
 
-from typing import Optional
+from typing import Optional, List
+import re, List
+import re
 
 SYSTEM_PROMPT = """You are "EasyExcel AI" — an intelligent assistant built for a spreadsheet automation app.
 
@@ -1454,4 +1456,89 @@ Return action plan for:
 Return JSON format as specified."""
 
 
+def resolve_column_reference(column_ref: str, available_columns: List[str]) -> Optional[str]:
+    """
+    Resolve column reference to actual column name.
+    
+    Priority:
+    1. Check if column_ref is an exact column name (case-insensitive)
+    2. If not, check if it's a column letter (A, B, C, etc.) and convert to position
+    3. Return the actual column name from available_columns
+    
+    Args:
+        column_ref: Column reference (name, letter like "C", or position)
+        available_columns: List of actual column names
+        
+    Returns:
+        Actual column name or None if not found
+    """
+    if not column_ref or not available_columns:
+        return None
+    
+    # Step 1: Check for exact match (case-insensitive)
+    column_ref_lower = str(column_ref).strip().lower()
+    for col in available_columns:
+        if str(col).lower() == column_ref_lower:
+            return col
+    
+    # Step 2: Check if it's a single letter (Excel column reference)
+    # Pattern: single letter A-Z (case-insensitive)
+    if re.match(r'^[A-Z]{1}$', column_ref.upper()):
+        letter = column_ref.upper()
+        # Convert Excel column letter to index: A=0, B=1, C=2, ..., Z=25
+        col_idx = ord(letter) - ord('A')
+        if 0 <= col_idx < len(available_columns):
+            return available_columns[col_idx]
+    
+    # Step 3: Check if it's a multi-letter Excel column (AA, AB, etc.)
+    if re.match(r'^[A-Z]{2,}$', column_ref.upper()):
+        letters = column_ref.upper()
+        col_idx = 0
+        for ch in letters:
+            col_idx = col_idx * 26 + (ord(ch) - ord('A') + 1)
+        col_idx -= 1  # Convert to 0-indexed
+        if 0 <= col_idx < len(available_columns):
+            return available_columns[col_idx]
+    
+    return None
+
+
+def get_column_mapping_info(available_columns: List[str]) -> str:
+    """
+    Generate column mapping information for LLM prompts.
+    Shows Excel column letters mapped to actual column names.
+    
+    Args:
+        available_columns: List of actual column names
+        
+    Returns:
+        Formatted string with column mapping
+    """
+    if not available_columns:
+        return ""
+    
+    mapping_lines = []
+    mapping_lines.append("\n📋 COLUMN MAPPING (Excel Letters → Actual Column Names):")
+    
+    for idx, col_name in enumerate(available_columns):
+        # Convert index to Excel column letter (A=0, B=1, ..., Z=25, AA=26, AB=27, etc.)
+        excel_letter = ""
+        temp_idx = idx + 1  # Convert to 1-indexed for calculation
+        while temp_idx > 0:
+            temp_idx -= 1  # Adjust for 0-based alphabet
+            excel_letter = chr(ord('A') + (temp_idx % 26)) + excel_letter
+            temp_idx = temp_idx // 26
+        
+        mapping_lines.append(f"  Column {excel_letter} (index {idx}): '{col_name}'")
+    
+    mapping_lines.append("\n⚠️ IMPORTANT: When user says 'column C' or 'column A':")
+    mapping_lines.append("  1. FIRST check if there's a column named 'C' or 'A'")
+    mapping_lines.append("  2. If NO column with that name exists, interpret as Excel column letter")
+    mapping_lines.append("  3. Use the ACTUAL column name from the mapping above in your Python code")
+    mapping_lines.append("  4. Example: If user says 'column C' and no column named 'C' exists:")
+    mapping_lines.append("     → Use column at index 2 (C = 3rd column)")
+    mapping_lines.append("     → Get actual name: available_columns[2]")
+    mapping_lines.append("     → Generate code: df['ActualColumnName'] (not df['C'])")
+    
+    return "\n".join(mapping_lines)
 

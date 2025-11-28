@@ -18,6 +18,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from services.feedback_learner import FeedbackLearner
 from services.training_data_loader import TrainingDataLoader
 from utils.knowledge_base import get_chart_knowledge_base_summary
+from utils.prompts import get_column_mapping_info, resolve_column_reference
 
 load_dotenv()
 
@@ -103,8 +104,22 @@ Example 5: "Scatter plot of sales vs profit"
   "description": "Scatter plot showing relationship between sales and profit"
 }
 
+**COLUMN REFERENCE HANDLING:**
+When user mentions "column C", "column A", etc.:
+1. FIRST check if there's a column named "C" or "A" (exact name match)
+2. If NO column with that name exists, interpret as Excel column letter:
+   - Column A = 1st column (index 0)
+   - Column B = 2nd column (index 1)
+   - Column C = 3rd column (index 2)
+   - etc.
+3. Use the ACTUAL column name from available_columns list in your response
+4. Example: User says "chart of column C"
+   - Check: Is there a column named "C"? If yes, use it.
+   - If no: Column C = index 2, get actual name: available_columns[2]
+   - Return: "x_column": "ActualColumnName"  # NOT "C"
+
 **CRITICAL RULES:**
-1. ALWAYS use actual column names from dataset
+1. ALWAYS use actual column names from dataset (not Excel letters)
 2. Analyze dataset to identify appropriate columns
 3. Choose chart type based on data and user request
 4. Provide clear, descriptive title
@@ -194,8 +209,11 @@ class ChartBot:
                     chart_config = ex.get("chart_config", {})
                     similar_examples_text += f"Response: {json.dumps(chart_config, indent=2)}\n"
             
+            # Get column mapping info (Excel letters → actual column names)
+            column_mapping = get_column_mapping_info(available_columns)
+            
             # Build prompt with context
-            prompt = self._build_chart_prompt(user_prompt, available_columns, sample_data, kb_summary, similar_examples_text)
+            prompt = self._build_chart_prompt(user_prompt, available_columns, sample_data, kb_summary, similar_examples_text, column_mapping)
             
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -245,7 +263,7 @@ class ChartBot:
             raise RuntimeError(f"Chart configuration generation failed: {str(e)}")
     
     def _build_chart_prompt(self, user_prompt: str, columns: List[str], sample_data: Optional[List[Dict]], 
-                           kb_summary: str = "", similar_examples: str = "") -> str:
+                           kb_summary: str = "", similar_examples: str = "", column_mapping: str = "") -> str:
         """Build prompt for chart generation"""
         columns_info = f"Available columns: {', '.join(columns)}"
         
@@ -266,6 +284,8 @@ class ChartBot:
         return f"""You are a chart generation assistant. Return ONLY valid JSON.
 
 {kb_context}{examples_context}
+{column_mapping}
+
 User Request: {user_prompt}
 
 {columns_info}
@@ -273,7 +293,7 @@ User Request: {user_prompt}
 
 Analyze the request and generate chart configuration.
 Identify the appropriate chart type and columns from the dataset.
-Use actual column names from the available columns list.
+Use actual column names from the available columns list (not Excel letters).
 Return ONLY valid JSON with chart_type, x_column, y_column, title, and description.
 """
     
@@ -288,25 +308,44 @@ Return ONLY valid JSON with chart_type, x_column, y_column, title, and descripti
         if chart_type not in valid_types:
             chart_type = "bar"  # Default
         
-        # Validate columns exist
-        if x_column and x_column not in available_columns:
-            # Try to find closest match
-            x_column_lower = str(x_column).lower()
-            for col in available_columns:
-                if x_column_lower in str(col).lower() or str(col).lower() in x_column_lower:
-                    x_column = col
-                    break
+        # Validate columns - use column resolution (handles Excel letters)
+        if x_column:
+            resolved = resolve_column_reference(x_column, available_columns)
+            if resolved:
+                x_column = resolved
+            elif x_column not in available_columns:
+                # Try to find closest match (fallback)
+                x_column_lower = str(x_column).lower()
+                for col in available_columns:
+                    if x_column_lower in str(col).lower() or str(col).lower() in x_column_lower:
+                        x_column = col
+                        break
+                else:
+                    x_column = available_columns[0] if available_columns else None
             else:
-                x_column = available_columns[0] if available_columns else None
+                # Column exists, use it
+                pass
+        else:
+            x_column = available_columns[0] if available_columns else None
         
-        if y_column and y_column not in available_columns:
-            y_column_lower = str(y_column).lower()
-            for col in available_columns:
-                if y_column_lower in str(col).lower() or str(col).lower() in y_column_lower:
-                    y_column = col
-                    break
+        if y_column:
+            resolved = resolve_column_reference(y_column, available_columns)
+            if resolved:
+                y_column = resolved
+            elif y_column not in available_columns:
+                # Try to find closest match (fallback)
+                y_column_lower = str(y_column).lower()
+                for col in available_columns:
+                    if y_column_lower in str(col).lower() or str(col).lower() in y_column_lower:
+                        y_column = col
+                        break
+                else:
+                    y_column = available_columns[1] if len(available_columns) > 1 else None
             else:
-                y_column = available_columns[1] if len(available_columns) > 1 else None
+                # Column exists, use it
+                pass
+        else:
+            y_column = available_columns[1] if len(available_columns) > 1 else None
         
         return {
             "chart_type": chart_type,

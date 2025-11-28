@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
-from utils.prompts import get_prompt_with_context
+from utils.prompts import get_prompt_with_context, get_column_mapping_info
 from utils.knowledge_base import get_knowledge_base_summary, get_task_decision_guide
 from services.feedback_learner import FeedbackLearner
 from services.training_data_loader import TrainingDataLoader
@@ -138,9 +138,23 @@ Example 5: "Sum revenue for India in January"
   }]
 }
 
+**COLUMN REFERENCE HANDLING:**
+When user mentions "column C", "column A", etc.:
+1. FIRST check if there's a column named "C" or "A" (exact name match)
+2. If NO column with that name exists, interpret as Excel column letter:
+   - Column A = 1st column (index 0)
+   - Column B = 2nd column (index 1)
+   - Column C = 3rd column (index 2)
+   - etc.
+3. Use the ACTUAL column name from available_columns list in your Python code
+4. Example: User says "remove column C"
+   - Check: Is there a column named "C"? If yes, use it.
+   - If no: Column C = index 2, get actual name: available_columns[2]
+   - Generate: df = df.drop(columns=['ActualColumnName'])  # NOT df.drop(columns=['C'])
+
 **CRITICAL RULES:**
 1. ALWAYS generate python_code (never leave empty)
-2. Use actual column names from dataset
+2. Use actual column names from dataset (not Excel letters in code)
 3. Code must be executable directly
 4. Handle edge cases (NaN, empty data)
 5. DO NOT generate chart code
@@ -240,6 +254,9 @@ class ActionPlanBot:
             if sample_explanation:
                 sample_explanation_text = f"\n\nDATA SAMPLE SUMMARY:\n{sample_explanation}\n"
             
+            # Get column mapping info (Excel letters → actual column names)
+            column_mapping = get_column_mapping_info(available_columns)
+            
             full_prompt = f"""You are a data operations assistant. Return ONLY valid JSON.
 
 CRITICAL: Generate Python code for ALL operations. The backend will execute your code directly.
@@ -250,6 +267,7 @@ KNOWLEDGE BASE CONTEXT:
 TASK DECISION HINT:
 Suggested task: {task_suggestions.get('suggested_task', 'auto-detect')}
 Reasoning: {', '.join(task_suggestions.get('reasoning', []))}
+{column_mapping}
 {similar_examples_text}
 {sample_explanation_text}
 
