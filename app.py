@@ -15,6 +15,15 @@ import traceback
 import logging
 from pathlib import Path
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()  # This ensures logs go to stdout/stderr
+    ]
+)
+
 logger = logging.getLogger(__name__)
 
 import sys
