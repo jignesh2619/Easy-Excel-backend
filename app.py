@@ -365,6 +365,9 @@ async def process_file(
         columns = list(processed_df.columns)
         row_count = len(processed_df)
         
+        # 12a. Get formatting metadata for preview display
+        formatting_metadata = processor.get_formatting_metadata(preview_df)
+        
         # 13. Determine response type and format for formula engine
         response_type = "table"  # Default
         operation = task
@@ -444,6 +447,7 @@ async def process_file(
             processed_data=processed_data,
             columns=columns,
             row_count=row_count,
+            formatting_metadata=formatting_metadata,
             type=response_type,
             operation=operation,
             result=result_value

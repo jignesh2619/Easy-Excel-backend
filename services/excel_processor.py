@@ -1458,6 +1458,66 @@ class ExcelProcessor:
         else:
             self.summary.append(f"Conditional formatting rule stored: {format_type}")
     
+    def get_formatting_metadata(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Extract formatting metadata for preview display"""
+        formatting_metadata = {
+            "conditional_formatting": [],
+            "cell_formats": {}
+        }
+        
+        for rule in self.formatting_rules:
+            if rule.get("type") == "conditional":
+                format_type = rule.get("format_type")
+                config = rule.get("config", {})
+                
+                if format_type == "contains_text":
+                    column = config.get("column")
+                    text = config.get("text", "")
+                    bg_color = config.get("bg_color") or config.get("background_color", "#FFF3CD")
+                    
+                    if column and column in df.columns:
+                        # Find matching rows
+                        series = df[column].astype(str)
+                        matches = series.str.contains(str(text), case=False, na=False)
+                        
+                        # Build cell format map: "row_col" -> format info
+                        for row_idx, match in enumerate(matches):
+                            if match:
+                                cell_key = f"{row_idx}_{column}"
+                                formatting_metadata["cell_formats"][cell_key] = {
+                                    "bg_color": bg_color,
+                                    "text_color": config.get("text_color") or config.get("font_color"),
+                                    "bold": config.get("bold", False),
+                                    "italic": config.get("italic", False)
+                                }
+                        
+                        formatting_metadata["conditional_formatting"].append({
+                            "type": format_type,
+                            "column": column,
+                            "text": text,
+                            "bg_color": bg_color
+                        })
+                elif format_type == "text_equals":
+                    column = config.get("column")
+                    text = config.get("text", "")
+                    bg_color = config.get("bg_color") or config.get("background_color", "#FFF3CD")
+                    
+                    if column and column in df.columns:
+                        series = df[column].astype(str)
+                        matches = series.str.lower() == str(text).lower()
+                        
+                        for row_idx, match in enumerate(matches):
+                            if match:
+                                cell_key = f"{row_idx}_{column}"
+                                formatting_metadata["cell_formats"][cell_key] = {
+                                    "bg_color": bg_color,
+                                    "text_color": config.get("text_color") or config.get("font_color"),
+                                    "bold": config.get("bold", False),
+                                    "italic": config.get("italic", False)
+                                }
+        
+        return formatting_metadata
+    
     def _execute_formula(self, action_plan: Dict):
         """Execute formula operations using FormulaEngine"""
         formula_config = action_plan.get("formula", {})
