@@ -4,6 +4,8 @@ LLM Prompt Templates
 Contains system prompts and templates for LLM interpretation
 """
 
+from __future__ import annotations
+
 from typing import Optional, List
 import re
 
@@ -1455,7 +1457,7 @@ Return action plan for:
 Return JSON format as specified."""
 
 
-def resolve_column_reference(column_ref: str, available_columns: "List[str]") -> Optional[str]:
+def resolve_column_reference(column_ref: str, available_columns: List[str]) -> Optional[str]:
     """
     Resolve column reference to actual column name.
     
@@ -1502,7 +1504,7 @@ def resolve_column_reference(column_ref: str, available_columns: "List[str]") ->
     return None
 
 
-def get_column_mapping_info(available_columns: "List[str]") -> str:
+def get_column_mapping_info(available_columns: List[str]) -> str:
     """
     Generate column mapping information for LLM prompts.
     Shows Excel column letters mapped to actual column names.
