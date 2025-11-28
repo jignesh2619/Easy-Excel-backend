@@ -5,7 +5,6 @@ Contains system prompts and templates for LLM interpretation
 """
 
 from typing import Optional, List
-import re, List
 import re
 
 SYSTEM_PROMPT = """You are "EasyExcel AI" — an intelligent assistant built for a spreadsheet automation app.
