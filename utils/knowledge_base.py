@@ -368,7 +368,7 @@ KNOWLEDGE_BASE = {
                 "pattern": "distribution of [numeric]",
                 "chart_type": "histogram",
                 "x_column": "[numeric column]",
-                "y_column": null
+                "y_column": None
             },
             "comparison": {
                 "pattern": "[metric1] vs [metric2]",
