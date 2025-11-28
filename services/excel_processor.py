@@ -1395,20 +1395,31 @@ class ExcelProcessor:
     
     def _execute_conditional_format(self, action_plan: Dict):
         """Execute conditional format operation - store conditional formatting rules"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"🔍 _execute_conditional_format called with action_plan keys: {list(action_plan.keys())}")
         conditional_format = action_plan.get("conditional_format", {})
         
+        logger.info(f"🔍 Extracted conditional_format: {conditional_format}")
+        
         if not conditional_format:
+            logger.warning(f"⚠️ conditional_format is empty, trying fallback...")
             fallback = self._build_conditional_format_fallback(action_plan)
             if fallback:
                 conditional_format = fallback
+                logger.info(f"✅ Using fallback: {fallback}")
                 self.summary.append("Conditional format: Applied fallback configuration from user prompt.")
             else:
+                logger.error(f"❌ No conditional_format and no fallback available!")
                 self.summary.append("Conditional format: No configuration specified")
                 return
         
         # Extract conditional formatting details
         format_type = conditional_format.get("format_type", "")
         config = conditional_format.get("config", {})
+        
+        logger.info(f"✅ Format type: {format_type}, Config: {config}")
         
         # Store conditional formatting rule to apply when saving
         rule = {
@@ -1417,6 +1428,7 @@ class ExcelProcessor:
             "config": config
         }
         self.formatting_rules.append(rule)
+        logger.info(f"✅ Added conditional format rule to formatting_rules. Total rules: {len(self.formatting_rules)}")
         
         # Build summary message
         if format_type == "duplicates":
