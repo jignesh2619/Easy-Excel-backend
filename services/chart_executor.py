@@ -112,10 +112,18 @@ class ChartExecutor:
                 path = self.execute(config)
                 chart_paths.append(path)
                 logger.info(f"✓ Chart {i} generated successfully: {path}")
+                
+                # Force memory cleanup after each chart to prevent OOM
+                import gc
+                gc.collect()
+                logger.info(f"Memory cleaned after chart {i}")
             except Exception as e:
                 logger.error(f"✗ Failed to generate chart {i}: {str(e)}", exc_info=True)
                 self.execution_log.append(f"✗ Failed to generate chart {i} ({config.get('chart_type', 'unknown')}): {str(e)}")
                 # Continue with other charts even if one fails
+                # Clean memory even on failure
+                import gc
+                gc.collect()
         
         if not chart_paths:
             raise RuntimeError(f"Failed to generate any charts. All {len(chart_configs)} chart generations failed.")

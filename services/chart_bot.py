@@ -553,8 +553,9 @@ Return ONLY valid JSON.
                 "description": f"Scatter plot showing relationship between {numeric_cols[0]} and {numeric_cols[1]}"
             })
         
-        # Limit to top 5 suggestions
-        analysis["suggested_charts"] = analysis["suggested_charts"][:5]
+        # Limit to top 3 suggestions (to avoid OOM on low-memory servers)
+        # For 512MB servers, generating 4+ charts causes OOM kills
+        analysis["suggested_charts"] = analysis["suggested_charts"][:3]
         
         return analysis
 
