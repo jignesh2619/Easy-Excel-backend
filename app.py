@@ -14,6 +14,7 @@ import os
 import traceback
 import logging
 from pathlib import Path
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(
@@ -138,6 +139,12 @@ class ProcessFileResponse(BaseModel):
     type: Optional[str] = None  # "summary" | "table" | "value" | "chart" | "transformation"
     operation: Optional[str] = None  # Operation name (e.g., "sum", "average", "filter", etc.)
     result: Optional[Any] = None  # Result value, dataset, or chart instruction
+
+
+class ProcessDataRequest(BaseModel):
+    data: List[Dict[str, Any]]  # JSON data (list of row objects)
+    columns: List[str]  # Column names
+    prompt: str  # User prompt for processing
 
 
 @app.get("/", response_model=HealthResponse)
@@ -522,6 +529,324 @@ async def process_file(
                 action_plan = locals().get("action_plan", {})
                 llm_agent.feedback_learner.record_failure(
                     user_prompt=prompt,
+                    action_plan=action_plan,
+                    error=str(e),
+                    user_id=user_id
+                )
+            except Exception as feedback_error:
+                logger.warning(f"Failed to record failure feedback: {feedback_error}")
+        
+        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+
+
+@app.post("/process-data", response_model=ProcessFileResponse)
+async def process_data(
+    request: ProcessDataRequest,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+):
+    """
+    Process JSON data directly (for chatbot/iterative processing)
+    
+    Args:
+        request: ProcessDataRequest with data, columns, and prompt
+        credentials: Optional authentication token
+        
+    Returns:
+        Processed data response with updated data
+    """
+    processed_file_path = None
+    chart_path = None
+    
+    try:
+        # 1. Convert JSON data to DataFrame
+        import pandas as pd
+        import numpy as np
+        import tempfile
+        from pathlib import Path
+        
+        df = pd.DataFrame(request.data)
+        
+        # Ensure columns match
+        if set(df.columns) != set(request.columns):
+            # Reorder columns to match request
+            df = df[request.columns]
+        
+        # 2. Get user authentication
+        user = None
+        if credentials and credentials.credentials:
+            token = credentials.credentials
+            try:
+                from services.supabase_client import SupabaseClient
+                supabase = SupabaseClient.get_client()
+                user_info = supabase.auth.get_user(token)
+                if user_info and user_info.user:
+                    user = user_service.get_user_by_supabase_id(user_info.user.id)
+            except Exception:
+                user = user_service.get_user_by_api_key(token)
+        
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        # 3. Save DataFrame to temporary file for processing
+        temp_file_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+                df.to_csv(f.name, index=False)
+                temp_file_path = f.name
+        except Exception as e:
+            logger.error(f"Error creating temp file: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to create temporary file: {str(e)}")
+        
+        # 4. Prepare sample data for LLM
+        available_columns = list(df.columns)
+        sample_data = None
+        sample_explanation = ""
+        data_size_estimate = 0
+        if len(df) > 0:
+            sample_result = sample_selector.build_sample(df)
+            sample_df = sample_result.dataframe
+            sample_explanation = sample_result.explanation
+            sample_data = sample_df.to_dict("records")
+            
+            import json
+            data_json = json.dumps(sample_data)
+            data_size_estimate = len(data_json) // 4
+            logger.info(
+                "✅ Sample prepared for LLM: %s rows selected from %s total, explanation: %s",
+                len(sample_df),
+                len(df),
+                sample_explanation
+            )
+        
+        # 5. Check token limits
+        prompt_tokens_estimate = len(request.prompt) // 4
+        system_prompt_estimate = 2000
+        excel_data_tokens = data_size_estimate
+        response_tokens_estimate = 500
+        estimated_tokens = prompt_tokens_estimate + system_prompt_estimate + excel_data_tokens + response_tokens_estimate
+        
+        token_check = user_service.check_token_limit(user["user_id"], estimated_tokens)
+        if not token_check.get("can_proceed"):
+            if temp_file_path and Path(temp_file_path).exists():
+                file_manager.delete_file(temp_file_path)
+            raise HTTPException(
+                status_code=403,
+                detail=token_check.get("error", "Insufficient tokens. Please upgrade your plan.")
+            )
+        
+        # 6. Interpret prompt with LLM
+        if llm_agent is None:
+            if temp_file_path and Path(temp_file_path).exists():
+                file_manager.delete_file(temp_file_path)
+            raise HTTPException(
+                status_code=500, 
+                detail="LLM service not available. Please set OPENAI_API_KEY environment variable."
+            )
+        
+        user_id = user["user_id"]
+        
+        llm_result = llm_agent.interpret_prompt(
+            request.prompt,
+            available_columns,
+            user_id=user_id,
+            sample_data=sample_data,
+            sample_explanation=sample_explanation,
+            df=df
+        )
+        action_plan = llm_result.get("action_plan", {})
+        action_plan["user_prompt"] = request.prompt
+        
+        actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)
+        
+        # 7. Validate required columns
+        columns_needed = action_plan.get("columns_needed", [])
+        if columns_needed:
+            is_valid, error, missing = validator.validate_columns_exist(df, columns_needed)
+            if not is_valid:
+                if temp_file_path and Path(temp_file_path).exists():
+                    file_manager.delete_file(temp_file_path)
+                raise HTTPException(status_code=400, detail=error)
+        
+        # 8. Process data
+        processor = ExcelProcessor(temp_file_path)
+        processor.load_data()
+        
+        # Check for cleaning operations
+        cleaning_keywords = ['remove duplicates', 'clean', 'fix formatting', 'handle missing', 'duplicate', 'remove empty', 'normalize']
+        prompt_lower = request.prompt.lower()
+        user_wants_cleaning = any(keyword in prompt_lower for keyword in cleaning_keywords)
+        
+        visualization_keywords = ['visualize', 'dashboard', 'chart', 'graph', 'plot', 'show me']
+        user_wants_chart = any(keyword in prompt_lower for keyword in visualization_keywords)
+        
+        original_task = action_plan.get("task", "summarize")
+        if user_wants_cleaning:
+            action_plan["task"] = "clean"
+            if user_wants_chart and action_plan.get("chart_type") == "none":
+                action_plan["chart_type"] = "bar"
+        
+        result = processor.execute_action_plan(action_plan)
+        
+        final_task = result.get("task", original_task)
+        if final_task == "summarize" and user_wants_cleaning:
+            processor.load_data()
+            action_plan["task"] = "clean"
+            if user_wants_chart and action_plan.get("chart_type") == "none":
+                action_plan["chart_type"] = "bar"
+            result = processor.execute_action_plan(action_plan)
+        
+        processed_df = result["df"]
+        summary = result["summary"]
+        chart_path = result.get("chart_path")
+        chart_needed = result.get("chart_needed", False)
+        chart_type = result.get("chart_type", "none")
+        formula_result = result.get("formula_result")
+        task = result.get("task", "summarize")
+        
+        # 9. Save processed file
+        output_filename = f"processed_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        output_path = file_manager.output_dir / output_filename
+        processed_file_path = processor.save_processed_file(str(output_path))
+        
+        # 10. Clean up temp file
+        if temp_file_path and Path(temp_file_path).exists():
+            file_manager.delete_file(temp_file_path)
+        
+        # 11. Prepare response URLs
+        processed_file_url = f"/download/{Path(processed_file_path).name}" if processed_file_path else None
+        chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
+        
+        # 12. Convert processed dataframe to JSON for preview
+        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
+        processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
+        columns = list(processed_df.columns)
+        row_count = len(processed_df)
+        
+        # 13. Get formatting metadata
+        formatting_metadata = processor.get_formatting_metadata(preview_df)
+        logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
+        
+        # 14. Add formatting info to each cell
+        if formatting_metadata.get("cell_formats"):
+            for row_idx, row_data in enumerate(processed_data):
+                for col_name in columns:
+                    cell_key = f"{row_idx}_{col_name}"
+                    if cell_key in formatting_metadata["cell_formats"]:
+                        cell_format = formatting_metadata["cell_formats"][cell_key]
+                        row_data[f"{col_name}_format"] = cell_format
+        
+        # 15. Determine response type
+        response_type = "table"
+        operation = task
+        result_value = None
+        
+        if task == "formula" and action_plan.get("formula"):
+            formula_type = action_plan["formula"].get("type", "")
+            operation = formula_type if formula_type else task
+        
+        if formula_result is not None:
+            response_type = "value"
+            operation = operation if operation != "formula" else action_plan.get("formula", {}).get("type", "formula")
+            result_value = formula_result
+        elif chart_path:
+            response_type = "chart"
+            operation = "visualize" if operation == "formula" else operation
+            
+            x_col = None
+            y_col = None
+            chart_config = action_plan.get("chart_config")
+            if chart_config:
+                x_col = chart_config.get("x_column")
+                y_col = chart_config.get("y_column")
+            elif "chart_configs" in action_plan and action_plan["chart_configs"]:
+                first_chart = action_plan["chart_configs"][0]
+                x_col = first_chart.get("x_column")
+                y_col = first_chart.get("y_column")
+            
+            display_chart_type = chart_type if chart_type != "none" else "dashboard"
+            
+            result_value = {
+                "chart_type": display_chart_type,
+                "chart_url": chart_url,
+                "title": f"{request.prompt[:50]}...",
+                "x_column": x_col,
+                "y_column": y_col
+            }
+        
+        if task == "summarize":
+            if user_wants_chart or chart_path or user_wants_cleaning:
+                response_type = "transformation"
+                result_value = processed_data
+            else:
+                response_type = "summary"
+                result_value = processed_data
+        elif task in ["clean", "transform", "filter", "sort", "group_by", "formula"]:
+            response_type = "transformation"
+            if task == "formula" and action_plan.get("formula"):
+                operation = action_plan["formula"].get("type", "formula")
+            result_value = processed_data
+        else:
+            result_value = processed_data
+        
+        # 16. Record token usage
+        user_service.record_token_usage(user["user_id"], actual_tokens_used, "data_processing")
+        
+        # 17. Record feedback
+        if llm_agent.feedback_learner:
+            try:
+                execution_result = {
+                    "status": "success",
+                    "task": task,
+                    "rows_processed": row_count,
+                    "chart_generated": chart_path is not None
+                }
+                llm_agent.feedback_learner.record_success(
+                    user_prompt=request.prompt,
+                    action_plan=action_plan,
+                    execution_result=execution_result,
+                    user_id=user_id
+                )
+            except Exception as e:
+                logger.warning(f"Failed to record feedback: {e}")
+        
+        return ProcessFileResponse(
+            status="success",
+            processed_file_url=processed_file_url,
+            chart_url=chart_url,
+            summary=summary,
+            action_plan=action_plan,
+            message="Data processed successfully",
+            processed_data=processed_data,
+            columns=columns,
+            row_count=row_count,
+            formatting_metadata=formatting_metadata,
+            type=response_type,
+            operation=operation,
+            result=result_value
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Clean up on error
+        if processed_file_path and Path(processed_file_path).exists():
+            file_manager.delete_file(processed_file_path)
+        if chart_path and Path(chart_path).exists():
+            file_manager.delete_file(chart_path)
+        
+        error_detail = {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+        logger.error(f"Error processing data: {error_detail}")
+        
+        # Record failed execution
+        if llm_agent and llm_agent.feedback_learner:
+            try:
+                user_id = user["user_id"] if user else None
+                action_plan = locals().get("action_plan", {})
+                llm_agent.feedback_learner.record_failure(
+                    user_prompt=request.prompt,
                     action_plan=action_plan,
                     error=str(e),
                     user_id=user_id
