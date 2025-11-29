@@ -402,8 +402,12 @@ async def process_file(
         import numpy as np
         preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
         # Replace NaN/None values with null for proper JSON serialization
+        # Convert all column names to strings (Pydantic requires string keys)
+        preview_df.columns = preview_df.columns.astype(str)
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
-        columns = list(processed_df.columns)
+        # Ensure all dictionary keys are strings (convert any remaining numeric keys)
+        processed_data = [{str(k): v for k, v in record.items()} for record in processed_data]
+        columns = [str(col) for col in processed_df.columns]
         row_count = len(processed_df)
         
         # 12a. Get formatting metadata for preview display
@@ -752,8 +756,12 @@ async def process_data(
         
         # 12. Convert processed dataframe to JSON for preview
         preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
+        # Convert all column names to strings (Pydantic requires string keys)
+        preview_df.columns = preview_df.columns.astype(str)
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
-        columns = list(processed_df.columns)
+        # Ensure all dictionary keys are strings (convert any remaining numeric keys)
+        processed_data = [{str(k): v for k, v in record.items()} for record in processed_data]
+        columns = [str(col) for col in processed_df.columns]
         row_count = len(processed_df)
         
         # 13. Get formatting metadata
