@@ -618,21 +618,22 @@ async def process_data(
                 sample_explanation
             )
         
-        # 5. Check token limits
+        # 5. Check token limits (only if user is authenticated)
         prompt_tokens_estimate = len(request.prompt) // 4
         system_prompt_estimate = 2000
         excel_data_tokens = data_size_estimate
         response_tokens_estimate = 500
         estimated_tokens = prompt_tokens_estimate + system_prompt_estimate + excel_data_tokens + response_tokens_estimate
         
-        token_check = user_service.check_token_limit(user["user_id"], estimated_tokens)
-        if not token_check.get("can_proceed"):
-            if temp_file_path and Path(temp_file_path).exists():
-                file_manager.delete_file(temp_file_path)
-            raise HTTPException(
-                status_code=403,
-                detail=token_check.get("error", "Insufficient tokens. Please upgrade your plan.")
-            )
+        if user:
+            token_check = user_service.check_token_limit(user["user_id"], estimated_tokens)
+            if not token_check.get("can_proceed"):
+                if temp_file_path and Path(temp_file_path).exists():
+                    file_manager.delete_file(temp_file_path)
+                raise HTTPException(
+                    status_code=403,
+                    detail=token_check.get("error", "Insufficient tokens. Please upgrade your plan.")
+                )
         
         # 6. Interpret prompt with LLM
         if llm_agent is None:
@@ -643,7 +644,8 @@ async def process_data(
                 detail="LLM service not available. Please set OPENAI_API_KEY environment variable."
             )
         
-        user_id = user["user_id"]
+        if user:
+            user_id = user["user_id"]
         
         llm_result = llm_agent.interpret_prompt(
             request.prompt,
@@ -788,11 +790,12 @@ async def process_data(
         else:
             result_value = processed_data
         
-        # 16. Record token usage
-        user_service.record_token_usage(user["user_id"], actual_tokens_used, "data_processing")
+        # 16. Record token usage (only if user is authenticated)
+        if user:
+            user_service.record_token_usage(user["user_id"], actual_tokens_used, "data_processing")
         
-        # 17. Record feedback
-        if llm_agent.feedback_learner:
+        # 17. Record feedback (only if user is authenticated)
+        if user and llm_agent.feedback_learner:
             try:
                 execution_result = {
                     "status": "success",
@@ -840,8 +843,8 @@ async def process_data(
         }
         logger.error(f"Error processing data: {error_detail}")
         
-        # Record failed execution
-        if llm_agent and llm_agent.feedback_learner:
+        # Record failed execution (only if user is authenticated)
+        if user and llm_agent and llm_agent.feedback_learner:
             try:
                 user_id = user["user_id"] if user else None
                 action_plan = locals().get("action_plan", {})
