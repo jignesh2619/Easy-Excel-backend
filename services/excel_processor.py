@@ -1527,7 +1527,86 @@ class ExcelProcessor:
             rule_type = rule.get("type")
             logger.info(f"🔍 Rule {rule_idx}: type={rule_type}")
             
-            if rule_type == "conditional":
+            if rule_type == "format":
+                # Handle static formatting rules
+                formatting = rule.get("formatting", {})
+                range_info = rule.get("range", {})
+                
+                logger.info(f"🔍 Static format rule: formatting={formatting}, range={range_info}")
+                
+                # Extract formatting properties
+                bold = formatting.get("bold", False)
+                italic = formatting.get("italic", False)
+                text_color = formatting.get("text_color") or formatting.get("font_color")
+                bg_color = formatting.get("bg_color") or formatting.get("background_color")
+                font_size = formatting.get("font_size")
+                
+                # Apply to cells based on range
+                if "cells" in range_info:
+                    cells = range_info["cells"]
+                    for cell in cells:
+                        row_idx = cell.get("row", 0)
+                        col_name = cell.get("column")
+                        if col_name and col_name in df.columns and 0 <= row_idx < len(df):
+                            cell_key = f"{row_idx}_{col_name}"
+                            cell_format = {}
+                            if bg_color:
+                                cell_format["bg_color"] = bg_color
+                            if text_color:
+                                cell_format["text_color"] = text_color
+                            if bold:
+                                cell_format["bold"] = True
+                            if italic:
+                                cell_format["italic"] = True
+                            if font_size:
+                                cell_format["font_size"] = font_size
+                            
+                            if cell_format:
+                                formatting_metadata["cell_formats"][cell_key] = cell_format
+                
+                elif "column" in range_info:
+                    # Apply to entire column
+                    col_name = range_info["column"]
+                    if col_name in df.columns:
+                        for row_idx in range(len(df)):
+                            cell_key = f"{row_idx}_{col_name}"
+                            cell_format = {}
+                            if bg_color:
+                                cell_format["bg_color"] = bg_color
+                            if text_color:
+                                cell_format["text_color"] = text_color
+                            if bold:
+                                cell_format["bold"] = True
+                            if italic:
+                                cell_format["italic"] = True
+                            if font_size:
+                                cell_format["font_size"] = font_size
+                            
+                            if cell_format:
+                                formatting_metadata["cell_formats"][cell_key] = cell_format
+                
+                elif "row" in range_info:
+                    # Apply to entire row
+                    row_idx = range_info["row"]
+                    if 0 <= row_idx < len(df):
+                        for col_name in df.columns:
+                            cell_key = f"{row_idx}_{col_name}"
+                            cell_format = {}
+                            if bg_color:
+                                cell_format["bg_color"] = bg_color
+                            if text_color:
+                                cell_format["text_color"] = text_color
+                            if bold:
+                                cell_format["bold"] = True
+                            if italic:
+                                cell_format["italic"] = True
+                            if font_size:
+                                cell_format["font_size"] = font_size
+                            
+                            if cell_format:
+                                formatting_metadata["cell_formats"][cell_key] = cell_format
+            
+            elif rule_type == "conditional":
                 format_type = rule.get("format_type")
                 config = rule.get("config", {})
                 
