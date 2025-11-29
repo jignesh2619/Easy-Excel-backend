@@ -329,7 +329,7 @@ class ChartBot:
                            kb_summary: str = "", similar_examples: str = "", column_mapping: str = "",
                            data_analysis: Optional[Dict] = None, is_generic: bool = False) -> str:
         """Build prompt for chart generation"""
-        columns_info = f"Available columns: {', '.join(columns)}"
+        columns_info = f"Available columns: {', '.join(str(col) for col in columns)}"
         
         sample_text = ""
         if sample_data:

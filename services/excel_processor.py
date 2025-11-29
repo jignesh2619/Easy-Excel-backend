@@ -1810,14 +1810,14 @@ class ExcelProcessor:
                     raise ValueError("Columns required for CONCAT")
                 separator = params.get("separator", "")
                 self.df = FormulaEngine.CONCAT(self.df, columns, separator)
-                self.summary.append(f"CONCAT({', '.join(columns)}) applied")
+                self.summary.append(f"CONCAT({', '.join(str(col) for col in columns)}) applied")
             
             elif formula_type == "textjoin":
                 if not columns:
                     raise ValueError("Columns required for TEXTJOIN")
                 separator = params.get("separator", ", ")
                 self.df = FormulaEngine.TEXTJOIN(self.df, columns, separator)
-                self.summary.append(f"TEXTJOIN({', '.join(columns)}) applied")
+                self.summary.append(f"TEXTJOIN({', '.join(str(col) for col in columns)}) applied")
             
             elif formula_type == "left":
                 if not column:
@@ -1935,7 +1935,7 @@ class ExcelProcessor:
                 conditions = params.get("conditions", [])
                 values = params.get("values", [])
                 self.df = FormulaEngine.AND(self.df, columns, conditions, values)
-                self.summary.append(f"AND({', '.join(columns)}) applied")
+                self.summary.append(f"AND({', '.join(str(col) for col in columns)}) applied")
             
             elif formula_type == "or":
                 if not columns:
@@ -1943,7 +1943,7 @@ class ExcelProcessor:
                 conditions = params.get("conditions", [])
                 values = params.get("values", [])
                 self.df = FormulaEngine.OR(self.df, columns, conditions, values)
-                self.summary.append(f"OR({', '.join(columns)}) applied")
+                self.summary.append(f"OR({', '.join(str(col) for col in columns)}) applied")
             
             elif formula_type == "not":
                 if not column:
@@ -1978,7 +1978,7 @@ class ExcelProcessor:
             elif formula_type == "remove_duplicates":
                 if columns:
                     self.df = FormulaEngine.remove_duplicates(self.df, columns)
-                    self.summary.append(f"Removed duplicates based on {', '.join(columns)}")
+                    self.summary.append(f"Removed duplicates based on {', '.join(str(col) for col in columns)}")
                 else:
                     self.df = FormulaEngine.remove_duplicates(self.df)
                     self.summary.append("Removed duplicate rows")

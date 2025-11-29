@@ -1144,7 +1144,7 @@ def get_prompt_with_context(user_prompt: str, available_columns: list, sample_da
         columns_with_indices.append(f"{idx}: {col_label}{position_name}")
     
     columns_info = f"Available columns (with indices for positional references):\n" + "\n".join(columns_with_indices)
-    columns_list = f"Column list: {', '.join(columns_for_display)}"
+    columns_list = f"Column list: {', '.join(str(col) for col in columns_for_display)}"
     
     # Add full Excel data if provided - MAKE IT VERY PROMINENT
     sample_data_text = ""
@@ -1198,7 +1198,7 @@ Use this sample to:
 DATASET SUMMARY:
   • Total Rows: {total_rows}
   • Total Columns: {len(available_columns)}
-  • Column Names: {', '.join(available_columns)}
+  • Column Names: {', '.join(str(col) for col in available_columns)}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -1414,7 +1414,7 @@ def get_clean_prompt(user_prompt: str, available_columns: list) -> str:
     Returns:
         Formatted cleaning prompt
     """
-    columns_info = f"Available columns: {', '.join(available_columns)}"
+    columns_info = f"Available columns: {', '.join(str(col) for col in available_columns)}"
     
     return f"""Interpret this data cleaning request:
 {user_prompt}
@@ -1441,7 +1441,7 @@ def get_analysis_prompt(user_prompt: str, available_columns: list) -> str:
     Returns:
         Formatted analysis prompt
     """
-    columns_info = f"Available columns: {', '.join(available_columns)}"
+    columns_info = f"Available columns: {', '.join(str(col) for col in available_columns)}"
     
     return f"""Interpret this data analysis request:
 {user_prompt}
