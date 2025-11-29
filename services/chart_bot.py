@@ -347,9 +347,9 @@ class ChartBot:
 ═══════════════════════════════════════════════════════════════════════════════
 
 Column Types:
-- Numeric columns: {', '.join(data_analysis.get('numeric_columns', [])) if data_analysis.get('numeric_columns') else 'None'}
-- Categorical columns: {', '.join(data_analysis.get('categorical_columns', [])) if data_analysis.get('categorical_columns') else 'None'}
-- Datetime columns: {', '.join(data_analysis.get('datetime_columns', [])) if data_analysis.get('datetime_columns') else 'None'}
+- Numeric columns: {', '.join(str(item) for item in data_analysis.get('numeric_columns', [])) if data_analysis.get('numeric_columns') else 'None'}
+- Categorical columns: {', '.join(str(item) for item in data_analysis.get('categorical_columns', [])) if data_analysis.get('categorical_columns') else 'None'}
+- Datetime columns: {', '.join(str(item) for item in data_analysis.get('datetime_columns', [])) if data_analysis.get('datetime_columns') else 'None'}
 
 Suggested Chart Configurations:
 """

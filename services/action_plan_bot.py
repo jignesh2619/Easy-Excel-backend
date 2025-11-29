@@ -266,7 +266,7 @@ KNOWLEDGE BASE CONTEXT:
 
 TASK DECISION HINT:
 Suggested task: {task_suggestions.get('suggested_task', 'auto-detect')}
-Reasoning: {', '.join(task_suggestions.get('reasoning', []))}
+Reasoning: {', '.join(str(item) for item in task_suggestions.get('reasoning', []))}
 {column_mapping}
 {similar_examples_text}
 {sample_explanation_text}

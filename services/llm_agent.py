@@ -274,7 +274,7 @@ KNOWLEDGE BASE CONTEXT:
 
 TASK DECISION HINT (use as guidance, not strict rule):
 Based on the user prompt, the suggested task is: {task_suggestions.get('suggested_task', 'auto-detect')}
-Reasoning: {', '.join(task_suggestions.get('reasoning', []))}
+Reasoning: {', '.join(str(item) for item in task_suggestions.get('reasoning', []))}
 Confidence: {task_suggestions.get('confidence', 0)}
 {similar_examples_text}
 {sample_explanation_text}

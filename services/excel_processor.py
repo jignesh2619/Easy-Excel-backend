@@ -303,6 +303,8 @@ class ExcelProcessor:
         
         task = action_plan.get("task", "execute")
         chart_path = None
+        chart_paths = []
+        chart_data = None  # Store chart data for interactive charts
         
         try:
             # Handle chart requests (single or multiple)
@@ -318,10 +320,13 @@ class ExcelProcessor:
                     logger.info(f"Processing {len(chart_configs)} charts for dashboard")
                     if chart_configs:
                         try:
+                            # Generate chart data for interactive charts
+                            chart_data = chart_executor.execute_multiple_data(chart_configs)
+                            # Also generate images (for backward compatibility/download)
                             chart_paths = chart_executor.execute_multiple(chart_configs)
                             self.summary.extend(chart_executor.get_execution_log())
                             self.summary.append(f"Generated {len(chart_paths)} charts for dashboard")
-                            # Use first chart path for compatibility (or could return array)
+                            # Use first chart path for backward compatibility
                             chart_path = chart_paths[0] if chart_paths else None
                         except Exception as e:
                             logger.error(f"Failed to generate multiple charts: {str(e)}", exc_info=True)
@@ -329,12 +334,17 @@ class ExcelProcessor:
                     else:
                         logger.warning("chart_configs is empty")
                         chart_path = None
+                        chart_data = None
                 else:
                     # Single chart
                     chart_config = action_plan.get("chart_config", {})
                     if chart_config:
                         try:
+                            # Generate chart data for interactive charts
+                            chart_data = chart_executor.execute_data(chart_config)
+                            # Also generate image (for backward compatibility/download)
                             chart_path = chart_executor.execute(chart_config)
+                            chart_paths = [chart_path]  # Store as array for consistency
                             self.summary.extend(chart_executor.get_execution_log())
                             chart_type = chart_config.get("chart_type", "chart")
                             self.summary.append(f"Generated {chart_type} chart")
@@ -344,6 +354,8 @@ class ExcelProcessor:
                     else:
                         logger.warning("chart_config is empty")
                         chart_path = None
+                        chart_data = None
+                        chart_paths = []
             
             # Handle data operations (Python code execution)
             operations = action_plan.get("operations", [])
@@ -382,6 +394,8 @@ class ExcelProcessor:
                 "df": self.df,
                 "summary": self.summary,
                 "chart_path": chart_path,
+                "chart_paths": chart_paths,  # Array of all chart paths
+                "chart_data": chart_data,  # Chart data for interactive rendering (single dict or list of dicts)
                 "chart_needed": chart_path is not None,
                 "chart_type": chart_type_for_response,
                 "formula_result": self.formula_result,
@@ -1373,7 +1387,7 @@ class ExcelProcessor:
         if len(sort_descriptions) == 1:
             self.summary.append(f"Sorted by {sort_descriptions[0]}")
         else:
-            self.summary.append(f"Multi-column sorted by: {', '.join(sort_descriptions)}")
+            self.summary.append(f"Multi-column sorted by: {', '.join(str(item) for item in sort_descriptions)}")
         
         self.summary.append(f"Total rows: {len(self.df)}")
     
@@ -1441,7 +1455,7 @@ class ExcelProcessor:
             range_desc = f"{len(range_info['cells'])} cell(s)"
         
         if format_parts:
-            self.summary.append(f"Applied formatting ({', '.join(format_parts)}) to {range_desc}")
+            self.summary.append(f"Applied formatting ({', '.join(str(item) for item in format_parts)}) to {range_desc}")
         else:
             self.summary.append(f"Formatting rule stored for {range_desc}")
     
