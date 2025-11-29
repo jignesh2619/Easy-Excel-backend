@@ -143,6 +143,10 @@ class ProcessFileResponse(BaseModel):
     type: Optional[str] = None  # "summary" | "table" | "value" | "chart" | "transformation"
     operation: Optional[str] = None  # Operation name (e.g., "sum", "average", "filter", etc.)
     result: Optional[Any] = None  # Result value, dataset, or chart instruction
+    # Token usage information
+    tokens_used: Optional[int] = None  # Tokens used for this operation (OpenAI API calls only)
+    tokens_limit: Optional[int] = None  # User's token limit
+    tokens_remaining: Optional[int] = None  # Remaining tokens after this operation
 
 
 class ProcessDataRequest(BaseModel):
@@ -488,9 +492,21 @@ async def process_file(
         else:
             result_value = processed_data
         
+        # Get token info for response (before recording usage)
+        tokens_limit = None
+        tokens_remaining = None
+        if user:
+            token_info = user_service.check_token_limit(user["user_id"], 0)  # Check without needing tokens
+            tokens_limit = token_info.get("tokens_limit")
+            tokens_used_current = token_info.get("tokens_used", 0)
+            tokens_remaining = token_info.get("tokens_remaining", tokens_limit)
+        
         # Record token usage if we have an authenticated user (use actual tokens from LLM API)
         if user:
             user_service.record_token_usage(user["user_id"], actual_tokens_used, "file_processing")
+            # Update tokens_remaining after recording
+            if tokens_limit:
+                tokens_remaining = tokens_limit - (tokens_used_current + actual_tokens_used)
         
         # Record successful execution for feedback learning
         if llm_agent.feedback_learner:
@@ -527,7 +543,10 @@ async def process_file(
             formatting_metadata=formatting_metadata,
             type=response_type,
             operation=operation,
-            result=result_value
+            result=result_value,
+            tokens_used=actual_tokens_used if user else None,
+            tokens_limit=tokens_limit,
+            tokens_remaining=tokens_remaining
         )
         
     except HTTPException:
@@ -830,11 +849,23 @@ async def process_data(
         else:
             result_value = processed_data
         
-        # 16. Record token usage (only if user is authenticated)
+        # 16. Get token info for response (before recording usage)
+        tokens_limit = None
+        tokens_remaining = None
+        if user:
+            token_info = user_service.check_token_limit(user["user_id"], 0)  # Check without needing tokens
+            tokens_limit = token_info.get("tokens_limit")
+            tokens_used_current = token_info.get("tokens_used", 0)
+            tokens_remaining = token_info.get("tokens_remaining", tokens_limit)
+        
+        # 17. Record token usage (only if user is authenticated)
         if user:
             user_service.record_token_usage(user["user_id"], actual_tokens_used, "data_processing")
+            # Update tokens_remaining after recording
+            if tokens_limit:
+                tokens_remaining = tokens_limit - (tokens_used_current + actual_tokens_used)
         
-        # 17. Record feedback (only if user is authenticated)
+        # 18. Record feedback (only if user is authenticated)
         if user and llm_agent.feedback_learner:
             try:
                 execution_result = {
@@ -869,7 +900,10 @@ async def process_data(
             formatting_metadata=formatting_metadata,
             type=response_type,
             operation=operation,
-            result=result_value
+            result=result_value,
+            tokens_used=actual_tokens_used if user else None,
+            tokens_limit=tokens_limit,
+            tokens_remaining=tokens_remaining
         )
         
     except HTTPException:
@@ -1108,6 +1142,30 @@ async def get_current_user_info(user: Dict[str, Any] = Depends(get_current_user)
         "status": "success",
         "user": user
     })
+
+
+@app.get("/api/users/token-stats")
+async def get_token_stats(user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Get current user token statistics.
+    
+    Returns:
+        Token usage statistics (tokens_used, tokens_limit, tokens_remaining)
+    """
+    try:
+        user_id = user["user_id"]
+        token_info = user_service.check_token_limit(user_id, 0)  # Check without needing tokens
+        
+        return JSONResponse(content={
+            "status": "success",
+            "tokens_used": token_info.get("tokens_used", 0),
+            "tokens_limit": token_info.get("tokens_limit", 0),
+            "tokens_remaining": token_info.get("tokens_remaining", 0),
+            "plan": user.get("plan", "Free")
+        })
+    except Exception as e:
+        logger.error(f"Error getting token stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get token stats: {str(e)}")
 
 
 # PayPal Payment Endpoints
