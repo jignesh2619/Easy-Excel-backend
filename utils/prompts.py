@@ -1143,7 +1143,7 @@ def get_prompt_with_context(user_prompt: str, available_columns: list, sample_da
             position_name = " (last column)"
         columns_with_indices.append(f"{idx}: {col_label}{position_name}")
     
-    columns_info = f"Available columns (with indices for positional references):\n" + "\n".join(columns_with_indices)
+    columns_info = f"Available columns (with indices for positional references):\n" + "\n".join(str(item) for item in columns_with_indices)
     columns_list = f"Column list: {', '.join(str(col) for col in columns_for_display)}"
     
     # Add full Excel data if provided - MAKE IT VERY PROMINENT
@@ -1541,5 +1541,5 @@ def get_column_mapping_info(available_columns: List[str]) -> str:
     mapping_lines.append("     → Get actual name: available_columns[2]")
     mapping_lines.append("     → Generate code: df['ActualColumnName'] (not df['C'])")
     
-    return "\n".join(mapping_lines)
+    return "\n".join(str(line) for line in mapping_lines)
 
