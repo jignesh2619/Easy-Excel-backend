@@ -571,8 +571,9 @@ async def process_data(
             # Reorder columns to match request
             df = df[request.columns]
         
-        # 2. Get user authentication
+        # 2. Get user authentication (optional for chatbot)
         user = None
+        user_id = None
         if credentials and credentials.credentials:
             token = credentials.credentials
             try:
@@ -584,8 +585,7 @@ async def process_data(
             except Exception:
                 user = user_service.get_user_by_api_key(token)
         
-        if not user:
-            raise HTTPException(status_code=401, detail="Authentication required")
+        # Authentication is optional for chatbot - proceed without user if not authenticated
         
         # 3. Save DataFrame to temporary file for processing
         temp_file_path = None
