@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 import os
 import traceback
 import logging
@@ -128,6 +128,10 @@ class ProcessFileResponse(BaseModel):
     status: str
     processed_file_url: Optional[str] = None
     chart_url: Optional[str] = None
+    chart_urls: Optional[List[str]] = None  # Array of chart URLs for multiple charts
+    chart_data: Optional[Union[Dict, List[Dict]]] = None  # Chart data for interactive rendering (single dict or list of dicts)
+    chart_type: Optional[str] = None  # Chart type for single chart
+    chart_types: Optional[List[str]] = None  # Chart types for multiple charts
     summary: list
     action_plan: Optional[dict] = None
     message: Optional[str] = None
@@ -362,7 +366,9 @@ async def process_file(
         
         processed_df = result["df"]
         summary = result["summary"]
-        chart_path = result.get("chart_path")  # Chart path from ChartExecutor
+        chart_path = result.get("chart_path")  # Chart path from ChartExecutor (single, for backward compatibility)
+        chart_paths = result.get("chart_paths", [])  # Array of all chart paths
+        chart_data = result.get("chart_data")  # Chart data for interactive rendering
         chart_needed = result.get("chart_needed", False)
         chart_type = result.get("chart_type", "none")
         formula_result = result.get("formula_result")
@@ -379,6 +385,16 @@ async def process_file(
         # 11. Prepare response URLs
         processed_file_url = f"/download/{Path(processed_file_path).name}" if processed_file_path else None
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
+        
+        # Convert chart_paths to chart_urls array
+        chart_urls = [f"/download/charts/{Path(p).name}" for p in chart_paths] if chart_paths else None
+        
+        # Extract chart types
+        chart_types = []
+        if "chart_configs" in action_plan:
+            chart_types = [c.get("chart_type", "chart") for c in action_plan.get("chart_configs", [])]
+        elif "chart_config" in action_plan:
+            chart_types = [action_plan["chart_config"].get("chart_type", "chart")]
         
         # 12. Convert processed dataframe to JSON for preview
         # Limit to first 1000 rows for preview to avoid large responses
@@ -494,6 +510,10 @@ async def process_file(
             status="success",
             processed_file_url=processed_file_url,
             chart_url=chart_url,
+            chart_urls=chart_urls,
+            chart_data=chart_data,
+            chart_type=chart_type if chart_type != "none" else None,
+            chart_types=chart_types if chart_types else None,
             summary=summary,
             action_plan=action_plan,
             message="File processed successfully",
@@ -700,6 +720,8 @@ async def process_data(
         processed_df = result["df"]
         summary = result["summary"]
         chart_path = result.get("chart_path")
+        chart_paths = result.get("chart_paths", [])
+        chart_data = result.get("chart_data")
         chart_needed = result.get("chart_needed", False)
         chart_type = result.get("chart_type", "none")
         formula_result = result.get("formula_result")
@@ -717,6 +739,16 @@ async def process_data(
         # 11. Prepare response URLs
         processed_file_url = f"/download/{Path(processed_file_path).name}" if processed_file_path else None
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
+        
+        # Convert chart_paths to chart_urls array
+        chart_urls = [f"/download/charts/{Path(p).name}" for p in chart_paths] if chart_paths else None
+        
+        # Extract chart types
+        chart_types = []
+        if "chart_configs" in action_plan:
+            chart_types = [c.get("chart_type", "chart") for c in action_plan.get("chart_configs", [])]
+        elif "chart_config" in action_plan:
+            chart_types = [action_plan["chart_config"].get("chart_type", "chart")]
         
         # 12. Convert processed dataframe to JSON for preview
         preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
@@ -816,6 +848,10 @@ async def process_data(
             status="success",
             processed_file_url=processed_file_url,
             chart_url=chart_url,
+            chart_urls=chart_urls,
+            chart_data=chart_data,
+            chart_type=chart_type if chart_type != "none" else None,
+            chart_types=chart_types if chart_types else None,
             summary=summary,
             action_plan=action_plan,
             message="Data processed successfully",
