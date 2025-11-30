@@ -1095,7 +1095,17 @@ class ExcelProcessor:
         # Create new row with default values for all columns
         new_row = {}
         for col in self.df.columns:
-            new_row[col] = row_data.get(col, "")
+            value = row_data.get(col, "")
+            # Preserve numeric types - don't convert to string if it's a number
+            if value == "":
+                # If no value provided, use empty string for text columns, 0 for numeric
+                if col in self.df.columns and self.df[col].dtype in ['int64', 'float64', 'int32', 'float32']:
+                    new_row[col] = 0
+                else:
+                    new_row[col] = ""
+            else:
+                # Preserve the type of the provided value
+                new_row[col] = value
         
         # Insert at specified position or append
         if position == -1 or position >= len(self.df):

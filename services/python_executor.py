@@ -103,6 +103,17 @@ class PythonExecutor:
             self.execution_log.append(f"✗ {description}: {error_msg}")
             raise RuntimeError(error_msg)
             
+        except TypeError as e:
+            # Handle type errors (e.g., "can only concatenate str (not 'int') to str")
+            error_str = str(e)
+            if "concatenate" in error_str.lower() or "unsupported operand" in error_str.lower():
+                error_msg = f"Type error: {error_str}. Hint: When working with mixed types (strings and numbers), ensure proper type conversion (e.g., use str() for strings or keep numbers as numeric types)."
+            else:
+                error_msg = f"Type error: {error_str}"
+            self.errors.append(error_msg)
+            self.execution_log.append(f"✗ {description}: {error_msg}")
+            logger.error(f"Type error: {error_msg}\nCode: {python_code[:200]}")
+            raise RuntimeError(error_msg)
         except Exception as e:
             error_msg = f"Execution failed: {str(e)}"
             self.errors.append(error_msg)
@@ -112,6 +123,35 @@ class PythonExecutor:
     
     def _build_execution_environment(self) -> Dict[str, Any]:
         """Build safe execution environment with all available resources"""
+        
+        def safe_add_total_row(df: pd.DataFrame, label: str = "Total") -> pd.DataFrame:
+            """Safely add a total row with sums of numeric columns"""
+            df = df.copy()
+            total_row = {}
+            for col in df.columns:
+                if df[col].dtype in ['int64', 'float64', 'int32', 'float32']:
+                    # Sum numeric columns
+                    total_row[col] = df[col].sum()
+                else:
+                    # For non-numeric columns, use the label in first column, empty string for others
+                    if col == df.columns[0]:
+                        total_row[col] = label
+                    else:
+                        total_row[col] = ""
+            df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+            return df
+        
+        def safe_add_total_column(df: pd.DataFrame, column_name: str = "Total") -> pd.DataFrame:
+            """Safely add a total column with sums of numeric rows"""
+            df = df.copy()
+            # Sum only numeric columns for each row
+            numeric_cols = df.select_dtypes(include=['int64', 'float64', 'int32', 'float32']).columns
+            if len(numeric_cols) > 0:
+                df[column_name] = df[numeric_cols].sum(axis=1)
+            else:
+                df[column_name] = ""
+            return df
+        
         return {
             # Data
             'df': self.df,
@@ -164,6 +204,10 @@ class PythonExecutor:
             'notna': pd.notna,
             'concat': pd.concat,
             'merge': pd.merge,
+            
+            # Helper functions for common operations
+            'safe_add_total_row': safe_add_total_row,
+            'safe_add_total_column': safe_add_total_column,
         }
     
     def _validate_code(self, python_code: str) -> Dict[str, Any]:
