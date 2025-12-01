@@ -127,6 +127,146 @@ CRITICAL RULES:
 - Use actual column names from available_columns
 - Handle empty/missing values appropriately (treat as 0 for sums)
 
+═══════════════════════════════════════════════════════════════════════════════
+🧠 INTELLIGENT DATA PLACEMENT (AUTOMATIC LOCATION DETECTION)
+═══════════════════════════════════════════════════════════════════════════════
+
+⚠️ CRITICAL: When user requests a calculation or operation WITHOUT specifying WHERE to place the result, you MUST intelligently determine the best location based on the operation type and context.
+
+AUTOMATIC PLACEMENT RULES (Apply when user doesn't specify location):
+
+1. **SUM/AVERAGE/COUNT of a COLUMN** (e.g., "sum of column C", "average of column A"):
+   - If user says "sum of column C" → Place result at BOTTOM of column C (in a new total row)
+   - If user says "average of column A" → Place result at BOTTOM of column A (in a new total row)
+   - Pattern: Single column calculation → Bottom of that column
+   - Implementation: Add a total row with the calculation in the specified column
+
+2. **SUM/AVERAGE/COUNT of MULTIPLE COLUMNS** (e.g., "sum of columns A and B"):
+   - Place results at BOTTOM of each specified column (in a new total row)
+   - Each column gets its own sum/average/count at the bottom
+
+3. **TOTAL ROW** (e.g., "add totals", "sum all columns"):
+   - Add a new row at the BOTTOM of the sheet
+   - First column: "Total" label
+   - Each numeric column: Sum at the bottom
+   - Pattern: "total" or "sum all" → Bottom row with sums
+
+4. **TOTAL COLUMN** (e.g., "add total column", "sum all rows"):
+   - Add a new column on the RIGHT side of the sheet
+   - Column name: "Total"
+   - Each row: Sum of all numeric values in that row
+   - Pattern: "total column" or "sum rows" → Right column with row sums
+
+5. **CALCULATIONS PER ROW** (e.g., "calculate revenue - cost for each row"):
+   - Add a NEW COLUMN on the right
+   - Column name: Descriptive (e.g., "Profit" for revenue - cost)
+   - Each row: Calculation result for that row
+   - Pattern: Per-row calculation → New column on right
+
+6. **SINGLE VALUE RESULT** (e.g., "what's the total revenue", "how many rows"):
+   - If user asks a question (what, how many) → Return as formula result (display in summary)
+   - If user wants it in sheet → Place in logical location:
+     * Bottom of relevant column if it's a column calculation
+     * New cell if it's a general calculation
+     * New column if it's a per-row calculation
+
+7. **CONDITIONAL CALCULATIONS** (e.g., "if revenue > 1000, mark as High"):
+   - Add a NEW COLUMN on the right
+   - Column name: Descriptive (e.g., "Status", "Category")
+   - Each row: Conditional result
+   - Pattern: IF/conditional logic → New column
+
+8. **FORMULA APPLICATIONS** (e.g., "round all values in column C"):
+   - Modify values IN PLACE in the same column
+   - Don't create new column unless user explicitly asks
+   - Pattern: Transformation → Same column, modified values
+
+PLACEMENT DECISION TREE:
+
+User Request: "sum of column C"
+→ Analysis: Single column sum, no location specified
+→ Decision: Place at bottom of column C
+→ Action: Add total row with sum in column C
+
+User Request: "give me sum of column C"
+→ Analysis: Same as above - user wants sum, didn't say where
+→ Decision: Place at bottom of column C (logical location)
+→ Action: Add total row with sum in column C
+
+User Request: "calculate total revenue"
+→ Analysis: Sum calculation, no location specified
+→ Decision: If "revenue" is a column → bottom of revenue column
+→ Action: Add total row with sum in revenue column
+
+User Request: "add total row"
+→ Analysis: Explicit request for total row
+→ Decision: Add row at bottom with sums
+→ Action: Add total row
+
+User Request: "what's the sum of column C"
+→ Analysis: Question format, might want display only
+→ Decision: Still place at bottom (user can see it in sheet)
+→ Action: Add total row with sum in column C
+
+User Request: "calculate profit = revenue - cost"
+→ Analysis: Per-row calculation, no location specified
+→ Decision: New column on right named "Profit"
+→ Action: Add new column with calculation
+
+CRITICAL PLACEMENT PRINCIPLES:
+1. **Column calculations** → Bottom of column (in total row)
+2. **Row calculations** → Right side (new column)
+3. **Per-row operations** → New column on right
+4. **Transformations** → Same column (in place)
+5. **Questions** → Still place in logical location (bottom or new column)
+6. **When in doubt** → Choose the most logical location based on operation type
+
+PYTHON CODE EXAMPLES:
+
+Example 1: "sum of column C" (no location specified)
+```python
+# Identify column C (index 2)
+col_name = available_columns[2]  # Get actual column name
+# Add total row with sum in column C
+total_row = {}
+for col in df.columns:
+    if col == col_name and df[col].dtype in ['int64', 'float64']:
+        total_row[col] = df[col].sum()  # Sum at bottom
+    elif col == df.columns[0]:
+        total_row[col] = "Total"  # Label
+    else:
+        total_row[col] = ""
+df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+```
+
+Example 2: "calculate profit = revenue - cost" (no location specified)
+```python
+# Add new column on right
+df['Profit'] = df['Revenue'] - df['Cost']  # New column with calculation
+```
+
+Example 3: "average of column A" (no location specified)
+```python
+# Place average at bottom of column A
+col_name = available_columns[0]  # Column A
+total_row = {}
+for col in df.columns:
+    if col == col_name and df[col].dtype in ['int64', 'float64']:
+        total_row[col] = df[col].mean()  # Average at bottom
+    elif col == df.columns[0]:
+        total_row[col] = "Average"
+    else:
+        total_row[col] = ""
+df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+```
+
+REMEMBER:
+- User says "sum of column X" → Automatically place at BOTTOM of column X
+- User says "calculate Y" → Determine if it's per-row (new column) or per-column (bottom)
+- User says "total" → Usually means bottom row or right column
+- Always use actual column names from available_columns, not Excel letters in code
+- Preserve data types (numbers stay numbers, don't convert to strings)
+
 EXAMPLE ANALYSIS PROCESS:
 User: "remove 3rd column"
 Your Analysis:

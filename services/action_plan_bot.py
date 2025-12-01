@@ -152,6 +152,37 @@ When user mentions "column C", "column A", etc.:
    - If no: Column C = index 2, get actual name: available_columns[2]
    - Generate: df = df.drop(columns=['ActualColumnName'])  # NOT df.drop(columns=['C'])
 
+**INTELLIGENT DATA PLACEMENT (CRITICAL):**
+When user requests a calculation WITHOUT specifying WHERE to place the result, automatically determine the best location:
+
+1. **SUM/AVERAGE/COUNT of a COLUMN** (e.g., "sum of column C"):
+   - Place result at BOTTOM of that column (add total row)
+   - Example: "sum of column C" → Add row with sum in column C at bottom
+   - Code: Add total row with calculation in specified column
+
+2. **TOTAL ROW/COLUMN** (e.g., "add totals", "sum all columns"):
+   - "Total row" → Bottom row with sums of numeric columns
+   - "Total column" → Right column with sums of numeric rows
+   - Use helper functions: safe_add_total_row() or safe_add_total_column()
+
+3. **PER-ROW CALCULATIONS** (e.g., "calculate profit = revenue - cost"):
+   - Add NEW COLUMN on the right
+   - Column name: Descriptive (e.g., "Profit")
+   - Each row: Calculation result
+
+4. **TRANSFORMATIONS** (e.g., "round values in column C"):
+   - Modify IN PLACE in same column
+   - Don't create new column unless explicitly requested
+
+5. **SINGLE VALUE QUESTIONS** (e.g., "what's the total revenue"):
+   - If it's a column calculation → Place at bottom of that column
+   - If it's a general question → Still place in logical location (bottom or new column)
+
+CRITICAL: Always place results in logical locations even when user doesn't specify!
+- Column calculations → Bottom of column
+- Row calculations → New column on right
+- Total operations → Bottom row or right column
+
 **CRITICAL RULES:**
 1. ALWAYS generate python_code (never leave empty)
 2. Use actual column names from dataset (not Excel letters in code)
