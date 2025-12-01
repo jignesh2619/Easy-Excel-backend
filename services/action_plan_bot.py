@@ -171,119 +171,235 @@ When user mentions "column C", "column A", etc.:
    - Generate: df = df.drop(columns=['ActualColumnName'])  # NOT df.drop(columns=['C'])
 
 ═══════════════════════════════════════════════════════════════════════════════
-📊 ADDING ROWS - CRITICAL INSTRUCTIONS
+📊 ADDING ROWS AND COLUMNS - CRITICAL INSTRUCTIONS
 ═══════════════════════════════════════════════════════════════════════════════
 
-⚠️ YOU CAN ADD MORE ROWS TO THE DATAFRAME. The DataFrame is dynamic and can grow.
+⚠️ YOU CAN ADD MORE ROWS AND COLUMNS TO THE DATAFRAME. The DataFrame is dynamic and can grow.
 
 **WHEN TO ADD ROWS:**
 - User asks for "sum of column X" without specifying a cell → Add total row at bottom
 - User asks for "total of rows" → Add total row at bottom
 - User asks for "add totals" → Add total row at bottom
-- User wants to add new data rows → Use add_row operation
+- User wants to add new data rows → Use add_row JSON format
 
-**HOW TO ADD A SINGLE ROW (CORRECT METHOD):**
+**WHEN TO ADD COLUMNS:**
+- User asks for "total of columns" → Add total column
+- User asks for "row totals" → Add column with row totals
+- User wants to add a new column → Use add_column JSON format
 
-When adding ONE row (e.g., a total row), you MUST:
-1. Create a dictionary with values for ONLY the columns you need to fill
-2. Use pd.concat() or df.loc[] to add the row
-3. ALWAYS use .reset_index(drop=True) after adding rows
+**⚠️ CRITICAL: USE JSON FORMAT, NOT PYTHON CODE FOR ADDING ROWS/COLUMNS**
 
-CORRECT - Adding total row at bottom:
-```python
-# Calculate sum for a column
-total_value = df['ColumnName'].sum()
-# Create a new row with only the necessary values
-new_row = {'ColumnName': total_value}
-# Add the row at the end
-df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-```
+When adding rows or columns, you MUST use JSON format in your response, NOT Python code in operations.
 
-CORRECT - Adding total row with multiple column sums:
-```python
-# Calculate sums for multiple columns
-total_col1 = df['Column1'].sum()
-total_col2 = df['Column2'].sum()
-# Create new row with only the columns you're calculating
-new_row = {'Column1': total_col1, 'Column2': total_col2}
-# Add the row
-df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-```
+**CORRECT - Adding total row using JSON format:**
 
-CORRECT - Adding total row with label in first column:
-```python
-# If first column is text (like "Name" or "Id"), put "Total" there
-first_col = df.columns[0]
-total_value = df['Amount'].sum()
-new_row = {first_col: 'Total', 'Amount': total_value}
-df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-```
+Pattern: Calculate sums in operations and store in temporary columns, then reference them in add_row.data
 
-**CRITICAL - WHAT NOT TO DO:**
+Step 1: Use operations to calculate and store the sum in a temporary column
+Step 2: Use add_row with data that references the temporary column
+Step 3: (Optional) Clean up the temporary column
 
-❌ WRONG - Trying to assign a list to all columns:
-```python
-# NEVER do this - this causes "Length of values does not match length of index"
-df.loc[len(df)] = [value1, value2, value3, ...]  # WRONG if list length != number of columns
-```
+Example - Adding total row for Jan column:
+{
+  "operations": [{
+    "python_code": "df['_temp_jan_sum'] = df['Jan'].sum()",
+    "description": "Calculate sum of Jan column",
+    "result_type": "dataframe"
+  }],
+  "add_row": {
+    "position": -1,
+    "data": {
+      "Jan": "df['_temp_jan_sum'].iloc[0]"
+    }
+  },
+  "operations": [{
+    "python_code": "df = df.drop(columns=['_temp_jan_sum'])",
+    "description": "Remove temporary column",
+    "result_type": "dataframe"
+  }]
+}
 
-❌ WRONG - Trying to assign values to all columns when you only need some:
-```python
-# DON'T create a list with values for ALL columns
-# Only specify the columns you actually need to fill
-```
+**IMPORTANT:** In add_row.data, you can use string expressions like "df['ColumnName'].iloc[0]" or "df['ColumnName'].sum()" 
+The system will evaluate these expressions safely.
 
-✅ CORRECT - Only specify columns you need:
-```python
-# Only fill the columns you're calculating totals for
-new_row = {'ColumnName': total_value}  # Only this column
-df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-```
+**CORRECT - Adding total row with label in first column:**
+{
+  "operations": [{
+    "python_code": "df['_temp_first_col'] = df.columns[0]; df['_temp_jan_sum'] = df['Jan'].sum()",
+    "description": "Store first column name and calculate Jan sum",
+    "result_type": "dataframe"
+  }],
+  "add_row": {
+    "position": -1,
+    "data": {
+      "df['_temp_first_col'].iloc[0]": "Total",
+      "Jan": "df['_temp_jan_sum'].iloc[0]"
+    }
+  },
+  "operations": [{
+    "python_code": "df = df.drop(columns=['_temp_first_col', '_temp_jan_sum'])",
+    "description": "Clean up temporary columns",
+    "result_type": "dataframe"
+  }]
+}
+
+**BETTER - Adding total row with label (simpler approach):**
+{
+  "operations": [{
+    "python_code": "df['_temp_jan_sum'] = df['Jan'].sum()",
+    "description": "Calculate Jan sum",
+    "result_type": "dataframe"
+  }],
+  "add_row": {
+    "position": -1,
+    "data": {
+      df.columns[0]: "Total",
+      "Jan": "df['_temp_jan_sum'].iloc[0]"
+    }
+  },
+  "operations": [{
+    "python_code": "df = df.drop(columns=['_temp_jan_sum'])",
+    "description": "Clean up temporary column",
+    "result_type": "dataframe"
+  }]
+}
+
+**CORRECT - Adding total row for multiple columns:**
+{
+  "operations": [{
+    "python_code": "df['_temp_jan'] = df['Jan'].sum(); df['_temp_feb'] = df['Feb'].sum(); df['_temp_mar'] = df['Mar'].sum()",
+    "description": "Calculate sums for multiple columns",
+    "result_type": "dataframe"
+  }],
+  "add_row": {
+    "position": -1,
+    "data": {
+      "Jan": "df['_temp_jan'].iloc[0]",
+      "Feb": "df['_temp_feb'].iloc[0]",
+      "Mar": "df['_temp_mar'].iloc[0]"
+    }
+  },
+  "operations": [{
+    "python_code": "df = df.drop(columns=['_temp_jan', '_temp_feb', '_temp_mar'])",
+    "description": "Clean up temporary columns",
+    "result_type": "dataframe"
+  }]
+}
+
+**CORRECT - Adding total column:**
+{
+  "add_column": {
+    "name": "Total",
+    "position": -1,
+    "default_value": ""
+  },
+  "operations": [{
+    "python_code": "df['Total'] = df[['Jan', 'Feb', 'Mar']].sum(axis=1)",
+    "description": "Calculate row totals",
+    "result_type": "dataframe"
+  }]
+}
+
+**CORRECT - Adding both row totals column and column totals row:**
+{
+  "add_column": {
+    "name": "Row Total",
+    "position": -1,
+    "default_value": ""
+  },
+  "operations": [{
+    "python_code": "df['Row Total'] = df.select_dtypes(include=[np.number]).sum(axis=1)",
+    "description": "Add row totals column",
+    "result_type": "dataframe"
+  }],
+  "add_row": {
+    "position": -1,
+    "data": {
+      "{{df.columns[0]}}": "Total",
+      "Jan": "{{df['Jan'].sum()}}",
+      "Feb": "{{df['Feb'].sum()}}",
+      "Mar": "{{df['Mar'].sum()}}",
+      "Row Total": "{{df['Row Total'].sum()}}"
+    }
+  }
+}
 
 **WHEN USER ASKS FOR SUM WITHOUT SPECIFYING CELL:**
 - User: "give me sum of column C"
 - User: "total of column Amount"
 - User: "sum of Jan column"
 → These mean: Add a total row at the BOTTOM of the column with the sum value
-→ The DataFrame will have MORE rows after this operation (original rows + 1 total row)
+→ Use JSON format with "add_row" and calculate the sum in operations first
 
 **EXAMPLE - User asks "sum of column Jan":**
-```python
-# Step 1: Calculate the sum
-jan_sum = df['Jan'].sum()
-# Step 2: Create a new row with the sum in the Jan column
-# If there's a label column (first column), you might want to put "Total" there
-first_col = df.columns[0]
-new_row = {first_col: 'Total', 'Jan': jan_sum}
-# Step 3: Add the row at the bottom
-df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-```
+{
+  "operations": [{
+    "python_code": "df['_temp_jan_sum'] = df['Jan'].sum()",
+    "description": "Calculate sum of Jan column",
+    "result_type": "dataframe"
+  }],
+  "add_row": {
+    "position": -1,
+    "data": {
+      df.columns[0]: "Total",
+      "Jan": "df['_temp_jan_sum'].iloc[0]"
+    }
+  },
+  "operations": [{
+    "python_code": "df = df.drop(columns=['_temp_jan_sum'])",
+    "description": "Remove temporary column",
+    "result_type": "dataframe"
+  }]
+}
 
 **EXAMPLE - User asks "total of rows and columns":**
-```python
-# Calculate row totals (sum across columns for each row)
-# Calculate column totals (sum down rows for each column)
-# Add both a total row and total column
-
-# First, add a column for row totals
-df['Row Total'] = df.select_dtypes(include=[np.number]).sum(axis=1)
-
-# Then, add a row for column totals
-col_totals = {}
-for col in df.select_dtypes(include=[np.number]).columns:
-    col_totals[col] = df[col].sum()
-first_col = df.columns[0]
-col_totals[first_col] = 'Total'
-df = pd.concat([df, pd.DataFrame([col_totals])], ignore_index=True)
-```
+{
+  "add_column": {
+    "name": "Row Total",
+    "position": -1,
+    "default_value": ""
+  },
+  "operations": [{
+    "python_code": "df['Row Total'] = df.select_dtypes(include=[np.number]).sum(axis=1)",
+    "description": "Add row totals column",
+    "result_type": "dataframe"
+  }],
+  "operations": [{
+    "python_code": "df['_temp_jan'] = df['Jan'].sum(); df['_temp_feb'] = df['Feb'].sum(); df['_temp_mar'] = df['Mar'].sum(); df['_temp_row_total'] = df['Row Total'].sum()",
+    "description": "Calculate column totals",
+    "result_type": "dataframe"
+  }],
+  "add_row": {
+    "position": -1,
+    "data": {
+      "df.columns[0]": "Total",
+      "Jan": "df['_temp_jan'].iloc[0]",
+      "Feb": "df['_temp_feb'].iloc[0]",
+      "Mar": "df['_temp_mar'].iloc[0]",
+      "Row Total": "df['_temp_row_total'].iloc[0]"
+    }
+  },
+  "operations": [{
+    "python_code": "df = df.drop(columns=['_temp_jan', '_temp_feb', '_temp_mar', '_temp_row_total'])",
+    "description": "Clean up temporary columns",
+    "result_type": "dataframe"
+  }]
+}
 
 **KEY PRINCIPLES:**
-1. When adding ONE row, create a dictionary with ONLY the columns you need
-2. Use pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-3. NEVER try to assign a list of values to all columns at once
-4. The DataFrame CAN have more rows - it's not fixed size
-5. Always use .reset_index(drop=True) or ignore_index=True when adding rows
-6. If you need to fill other columns with empty values, pandas will do it automatically
+1. ALWAYS use JSON format (add_row, add_column) for adding rows/columns, NOT Python code in operations
+2. Calculate values in operations first and store in temporary columns (e.g., df['_temp_sum'] = df['Column'].sum())
+3. Reference those temporary columns in add_row.data using string expressions (e.g., "df['_temp_sum'].iloc[0]")
+4. Clean up temporary columns after adding the row
+5. Use position: -1 to add at the end (bottom for rows, right for columns)
+6. In add_row.data, only specify the columns you need to fill - other columns will be empty
+7. The DataFrame CAN have more rows/columns - it's not fixed size
+8. You can use expressions like "df.columns[0]" for column names in add_row.data keys
+
+**REMEMBER:** The system evaluates DataFrame expressions in add_row.data values, so you can use:
+- "df['ColumnName'].iloc[0]" to get a value from a column
+- "df.columns[0]" to get the first column name
+- Any valid DataFrame expression that returns a value
 
 **CRITICAL RULES:**
 1. ALWAYS generate python_code (never leave empty)

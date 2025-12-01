@@ -257,17 +257,29 @@ KNOWLEDGE BASE - TASK SELECTION GUIDE:
   * User: "sum of Jan column" (no cell mentioned)
   * → These mean: Add a TOTAL ROW at the BOTTOM of the column with the sum value
   * → The DataFrame CAN and WILL have MORE rows after this (original rows + 1 total row)
-  * → Use operations with python_code to add the row correctly:
+  * → Use JSON format with add_row (NOT Python code in operations):
   *   {
   *     "task": "formula",
   *     "operations": [{
-  *       "python_code": "total_value = df['ColumnName'].sum(); first_col = df.columns[0]; new_row = {first_col: 'Total', 'ColumnName': total_value}; df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)",
-  *       "description": "Add total row at bottom with sum",
+  *       "python_code": "df['_temp_sum'] = df['ColumnName'].sum()",
+  *       "description": "Calculate sum and store in temp column",
+  *       "result_type": "dataframe"
+  *     }],
+  *     "add_row": {
+  *       "position": -1,
+  *       "data": {
+  *         "df.columns[0]": "Total",
+  *         "ColumnName": "df['_temp_sum'].iloc[0]"
+  *       }
+  *     },
+  *     "operations": [{
+  *       "python_code": "df = df.drop(columns=['_temp_sum'])",
+  *       "description": "Clean up temp column",
   *       "result_type": "dataframe"
   *     }]
   *   }
-  * → CRITICAL: Only specify columns you need in the new_row dict, NOT all columns
-  * → Use pd.concat([df, pd.DataFrame([new_row])], ignore_index=True) to add the row safely
+  * → CRITICAL: Use add_row JSON format, NOT Python code to add rows
+  * → Calculate values in operations, store in temp columns, reference in add_row.data
 
 **TASK: "sort"**
 - USE WHEN: User wants to reorder rows

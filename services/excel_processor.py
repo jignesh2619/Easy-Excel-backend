@@ -303,8 +303,6 @@ class ExcelProcessor:
         
         task = action_plan.get("task", "execute")
         chart_path = None
-        chart_paths = []
-        chart_data = None  # Store chart data for interactive charts
         
         try:
             # Handle chart requests (single or multiple)
@@ -320,13 +318,10 @@ class ExcelProcessor:
                     logger.info(f"Processing {len(chart_configs)} charts for dashboard")
                     if chart_configs:
                         try:
-                            # Generate chart data for interactive charts
-                            chart_data = chart_executor.execute_multiple_data(chart_configs)
-                            # Also generate images (for backward compatibility/download)
                             chart_paths = chart_executor.execute_multiple(chart_configs)
                             self.summary.extend(chart_executor.get_execution_log())
                             self.summary.append(f"Generated {len(chart_paths)} charts for dashboard")
-                            # Use first chart path for backward compatibility
+                            # Use first chart path for compatibility (or could return array)
                             chart_path = chart_paths[0] if chart_paths else None
                         except Exception as e:
                             logger.error(f"Failed to generate multiple charts: {str(e)}", exc_info=True)
@@ -334,17 +329,12 @@ class ExcelProcessor:
                     else:
                         logger.warning("chart_configs is empty")
                         chart_path = None
-                        chart_data = None
                 else:
                     # Single chart
                     chart_config = action_plan.get("chart_config", {})
                     if chart_config:
                         try:
-                            # Generate chart data for interactive charts
-                            chart_data = chart_executor.execute_data(chart_config)
-                            # Also generate image (for backward compatibility/download)
                             chart_path = chart_executor.execute(chart_config)
-                            chart_paths = [chart_path]  # Store as array for consistency
                             self.summary.extend(chart_executor.get_execution_log())
                             chart_type = chart_config.get("chart_type", "chart")
                             self.summary.append(f"Generated {chart_type} chart")
@@ -354,8 +344,6 @@ class ExcelProcessor:
                     else:
                         logger.warning("chart_config is empty")
                         chart_path = None
-                        chart_data = None
-                        chart_paths = []
             
             # Handle data operations (Python code execution)
             operations = action_plan.get("operations", [])
@@ -394,8 +382,6 @@ class ExcelProcessor:
                 "df": self.df,
                 "summary": self.summary,
                 "chart_path": chart_path,
-                "chart_paths": chart_paths,  # Array of all chart paths
-                "chart_data": chart_data,  # Chart data for interactive rendering (single dict or list of dicts)
                 "chart_needed": chart_path is not None,
                 "chart_type": chart_type_for_response,
                 "formula_result": self.formula_result,
@@ -1092,26 +1078,52 @@ class ExcelProcessor:
         position = add_row.get("position", -1)  # -1 means append at end
         row_data = add_row.get("data", {})
         
+        # Evaluate DataFrame column references in row_data values
+        # This allows add_row.data to reference calculated values from operations
+        evaluated_data = {}
+        for col, value in row_data.items():
+            # Handle column name that might be a DataFrame expression (e.g., df.columns[0])
+            actual_col = col
+            if isinstance(col, str) and (col.startswith("df['") or col.startswith('df["') or col.startswith("df[") or col.startswith("df.") or "df.columns" in col):
+                try:
+                    safe_dict = {'df': self.df, 'pd': pd, 'np': np}
+                    evaluated_col = eval(col, {"__builtins__": {}}, safe_dict)
+                    actual_col = str(evaluated_col) if evaluated_col else col
+                except:
+                    actual_col = col  # Use col as-is if evaluation fails
+            
+            if isinstance(value, str):
+                # Check if it's a DataFrame column reference pattern
+                if value.startswith("df['") or value.startswith('df["') or value.startswith("df[") or value.startswith("df."):
+                    try:
+                        # Safe evaluation - only allow df, pd, np access
+                        safe_dict = {'df': self.df, 'pd': pd, 'np': np}
+                        evaluated_value = eval(value, {"__builtins__": {}}, safe_dict)
+                        # If result is a Series, get first value
+                        if hasattr(evaluated_value, 'iloc'):
+                            evaluated_data[actual_col] = evaluated_value.iloc[0] if len(evaluated_value) > 0 else ""
+                        elif hasattr(evaluated_value, 'item'):
+                            evaluated_data[actual_col] = evaluated_value.item()
+                        else:
+                            evaluated_data[actual_col] = evaluated_value
+                    except Exception as e:
+                        # If evaluation fails, use the string value as-is
+                        evaluated_data[actual_col] = value
+                else:
+                    evaluated_data[actual_col] = value
+            else:
+                evaluated_data[actual_col] = value
+        
         # Create new row with default values for all columns
         new_row = {}
         for col in self.df.columns:
-            value = row_data.get(col, "")
-            # Preserve numeric types - don't convert to string if it's a number
-            if value == "":
-                # If no value provided, use empty string for text columns, 0 for numeric
-                if col in self.df.columns and self.df[col].dtype in ['int64', 'float64', 'int32', 'float32']:
-                    new_row[col] = 0
-                else:
-                    new_row[col] = ""
-            else:
-                # Preserve the type of the provided value
-                new_row[col] = value
+            new_row[col] = evaluated_data.get(col, "")
         
         # Insert at specified position or append
         if position == -1 or position >= len(self.df):
             # Append at end
             self.df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
-            self.summary.append(f"Added new row at the end with {len(row_data)} specified values")
+            self.summary.append(f"Added new row at the end with {len(evaluated_data)} specified values")
         else:
             # Insert at position
             position = max(0, min(position, len(self.df)))
@@ -1397,7 +1409,7 @@ class ExcelProcessor:
         if len(sort_descriptions) == 1:
             self.summary.append(f"Sorted by {sort_descriptions[0]}")
         else:
-            self.summary.append(f"Multi-column sorted by: {', '.join(str(item) for item in sort_descriptions)}")
+            self.summary.append(f"Multi-column sorted by: {', '.join(sort_descriptions)}")
         
         self.summary.append(f"Total rows: {len(self.df)}")
     
@@ -1465,7 +1477,7 @@ class ExcelProcessor:
             range_desc = f"{len(range_info['cells'])} cell(s)"
         
         if format_parts:
-            self.summary.append(f"Applied formatting ({', '.join(str(item) for item in format_parts)}) to {range_desc}")
+            self.summary.append(f"Applied formatting ({', '.join(format_parts)}) to {range_desc}")
         else:
             self.summary.append(f"Formatting rule stored for {range_desc}")
     
@@ -1820,14 +1832,14 @@ class ExcelProcessor:
                     raise ValueError("Columns required for CONCAT")
                 separator = params.get("separator", "")
                 self.df = FormulaEngine.CONCAT(self.df, columns, separator)
-                self.summary.append(f"CONCAT({', '.join(str(col) for col in columns)}) applied")
+                self.summary.append(f"CONCAT({', '.join(columns)}) applied")
             
             elif formula_type == "textjoin":
                 if not columns:
                     raise ValueError("Columns required for TEXTJOIN")
                 separator = params.get("separator", ", ")
                 self.df = FormulaEngine.TEXTJOIN(self.df, columns, separator)
-                self.summary.append(f"TEXTJOIN({', '.join(str(col) for col in columns)}) applied")
+                self.summary.append(f"TEXTJOIN({', '.join(columns)}) applied")
             
             elif formula_type == "left":
                 if not column:
@@ -1945,7 +1957,7 @@ class ExcelProcessor:
                 conditions = params.get("conditions", [])
                 values = params.get("values", [])
                 self.df = FormulaEngine.AND(self.df, columns, conditions, values)
-                self.summary.append(f"AND({', '.join(str(col) for col in columns)}) applied")
+                self.summary.append(f"AND({', '.join(columns)}) applied")
             
             elif formula_type == "or":
                 if not columns:
@@ -1953,7 +1965,7 @@ class ExcelProcessor:
                 conditions = params.get("conditions", [])
                 values = params.get("values", [])
                 self.df = FormulaEngine.OR(self.df, columns, conditions, values)
-                self.summary.append(f"OR({', '.join(str(col) for col in columns)}) applied")
+                self.summary.append(f"OR({', '.join(columns)}) applied")
             
             elif formula_type == "not":
                 if not column:
@@ -1988,7 +2000,7 @@ class ExcelProcessor:
             elif formula_type == "remove_duplicates":
                 if columns:
                     self.df = FormulaEngine.remove_duplicates(self.df, columns)
-                    self.summary.append(f"Removed duplicates based on {', '.join(str(col) for col in columns)}")
+                    self.summary.append(f"Removed duplicates based on {', '.join(columns)}")
                 else:
                     self.df = FormulaEngine.remove_duplicates(self.df)
                     self.summary.append("Removed duplicate rows")
