@@ -180,7 +180,8 @@ When user mentions "column C", "column A", etc.:
 - User asks for "sum of column X" without specifying a cell → Add total row at bottom
 - User asks for "total of rows" → Add total row at bottom
 - User asks for "add totals" → Add total row at bottom
-- User wants to add new data rows → Use add_row JSON format
+- User wants to add a SINGLE new data row → Use add_row JSON format
+- User wants to add MULTIPLE rows (e.g., "add numbers 1-50", "add 50 rows") → Use operations with Python code
 
 **WHEN TO ADD COLUMNS:**
 - User asks for "total of columns" → Add total column
@@ -350,6 +351,41 @@ Example - Adding total row for Jan column:
 → These mean: Add a total row at the BOTTOM of the column with the sum value
 → Use JSON format with "add_row" and calculate the sum in operations first
 
+**WHEN USER ASKS TO ADD MULTIPLE ROWS WITH SEQUENTIAL DATA:**
+- User: "add numbers 1-50 in column B"
+- User: "add 50 rows with numbers 1-50"
+- User: "fill column B with 1 to 50"
+→ These mean: Add 50 NEW ROWS to the DataFrame, each with a number in column B
+→ Use operations with Python code to add multiple rows at once
+→ DO NOT use add_row JSON format for multiple rows - use operations instead
+
+**CORRECT - Adding multiple rows with sequential data (e.g., numbers 1-50 in column B):**
+{
+  "operations": [{
+    "python_code": "new_rows = [{'B': i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
+    "description": "Add 50 new rows with numbers 1-50 in column B",
+    "result_type": "dataframe"
+  }]
+}
+
+**CORRECT - Adding multiple rows with data in specific column:**
+If column name is "Id" or "ColumnB" or similar:
+{
+  "operations": [{
+    "python_code": "column_name = 'Id'; new_rows = [{column_name: i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
+    "description": "Add 50 new rows with numbers 1-50 in specified column",
+    "result_type": "dataframe"
+  }]
+}
+
+**CRITICAL RULES FOR ADDING MULTIPLE ROWS:**
+1. When adding MULTIPLE rows (more than 1), use operations with Python code
+2. Create a list of dictionaries, each dictionary is one row
+3. Each dictionary should contain ONLY the columns you need to fill
+4. Use pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True) to add all rows at once
+5. DO NOT try to assign a list directly to df.loc or df[column] - this causes "Length of values does not match length of index" error
+6. DO NOT use add_row JSON format for multiple rows - it's only for single rows
+
 **EXAMPLE - User asks "sum of column Jan":**
 {
   "operations": [{
@@ -406,20 +442,22 @@ Example - Adding total row for Jan column:
 }
 
 **KEY PRINCIPLES:**
-1. ALWAYS use BOTH: operations (with Python code) AND JSON format (add_row/add_column)
-2. Operations calculate values and store in temporary columns (e.g., df['_temp_sum'] = df['Column'].sum())
-3. add_row/add_column JSON format adds the row/column using those calculated values
-4. Reference temporary columns in add_row.data using string expressions (e.g., "df['_temp_sum'].iloc[0]")
-5. Clean up temporary columns after adding the row (add another operation to drop them)
-6. Use position: -1 to add at the end (bottom for rows, right for columns)
-7. In add_row.data, only specify the columns you need to fill - other columns will be empty
-8. The DataFrame CAN have more rows/columns - it's not fixed size
-9. You can use expressions like "df.columns[0]" for column names in add_row.data keys
+1. For SINGLE row: Use BOTH operations (with Python code) AND add_row JSON format
+2. For MULTIPLE rows: Use ONLY operations with Python code (do NOT use add_row JSON format)
+3. Operations calculate values and store in temporary columns (e.g., df['_temp_sum'] = df['Column'].sum())
+4. add_row JSON format is ONLY for adding ONE row at a time
+5. For multiple rows, create a list of dictionaries in operations and use pd.concat
+6. Reference temporary columns in add_row.data using string expressions (e.g., "df['_temp_sum'].iloc[0]")
+7. Clean up temporary columns after adding the row (add another operation to drop them)
+8. Use position: -1 to add at the end (bottom for rows, right for columns)
+9. In add_row.data, only specify the columns you need to fill - other columns will be empty
+10. The DataFrame CAN have more rows/columns - it's not fixed size
+11. You can use expressions like "df.columns[0]" for column names in add_row.data keys
 
 **REMEMBER:** 
-- Operations = Calculate values (Python code)
-- add_row/add_column = Add the row/column (JSON format)
-- BOTH are required - don't skip either one!
+- Single row = Operations + add_row JSON format
+- Multiple rows = Operations ONLY (with list of dictionaries)
+- NEVER try to assign a list of values directly to a column - always use pd.concat with DataFrame
 
 **REMEMBER:** The system evaluates DataFrame expressions in add_row.data values, so you can use:
 - "df['ColumnName'].iloc[0]" to get a value from a column
@@ -428,16 +466,21 @@ Example - Adding total row for Jan column:
 
 **CRITICAL RULES:**
 1. ALWAYS generate python_code in operations (never leave empty)
-2. When adding rows/columns, you MUST include BOTH:
+2. When adding a SINGLE row, you MUST include BOTH:
    - operations with Python code to calculate values
-   - add_row/add_column JSON format to add the row/column
-3. Use actual column names from dataset (not Excel letters in code)
-4. Code must be executable directly
-5. Handle edge cases (NaN, empty data)
-6. DO NOT generate chart code
-7. Return ONLY valid JSON (no markdown, no explanations)
-8. When using add_row, only specify columns you need in data - other columns will be empty
-9. Calculate values in operations first, then reference them in add_row.data using expressions
+   - add_row JSON format to add the row
+3. When adding MULTIPLE rows, use ONLY operations with Python code:
+   - Create a list of dictionaries: new_rows = [{'Column': value} for value in range(...)]
+   - Use pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
+   - DO NOT use add_row JSON format for multiple rows
+4. Use actual column names from dataset (not Excel letters in code)
+5. Code must be executable directly
+6. Handle edge cases (NaN, empty data)
+7. DO NOT generate chart code
+8. Return ONLY valid JSON (no markdown, no explanations)
+9. When using add_row, only specify columns you need in data - other columns will be empty
+10. Calculate values in operations first, then reference them in add_row.data using expressions
+11. NEVER assign a list of values directly to df[column] or df.loc - always use pd.concat with DataFrame
 """
 
 

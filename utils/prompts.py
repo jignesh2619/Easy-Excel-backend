@@ -278,8 +278,25 @@ KNOWLEDGE BASE - TASK SELECTION GUIDE:
   *       "result_type": "dataframe"
   *     }]
   *   }
-  * → CRITICAL: Use add_row JSON format, NOT Python code to add rows
+  * → CRITICAL: Use add_row JSON format for SINGLE row, NOT Python code to add rows
   * → Calculate values in operations, store in temp columns, reference in add_row.data
+
+- SPECIAL CASE - When user asks to add MULTIPLE rows with sequential data:
+  * User: "add numbers 1-50 in column B"
+  * User: "add 50 rows with numbers 1-50"
+  * User: "fill column B with 1 to 50"
+  * → These mean: Add 50 NEW ROWS to the DataFrame, each with a number in column B
+  * → Use operations with Python code ONLY (do NOT use add_row JSON format):
+  *   {
+  *     "task": "execute",
+  *     "operations": [{
+  *       "python_code": "new_rows = [{'B': i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
+  *       "description": "Add 50 new rows with numbers 1-50 in column B",
+  *       "result_type": "dataframe"
+  *     }]
+  *   }
+  * → CRITICAL: For MULTIPLE rows, use operations ONLY, create list of dicts, use pd.concat
+  * → NEVER assign a list directly to df[column] - this causes "Length of values does not match length of index" error
 
 **TASK: "sort"**
 - USE WHEN: User wants to reorder rows
