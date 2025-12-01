@@ -285,17 +285,21 @@ KNOWLEDGE BASE - TASK SELECTION GUIDE:
   * User: "add numbers 1-50 in column B"
   * User: "add 50 rows with numbers 1-50"
   * User: "fill column B with 1 to 50"
-  * → These mean: Add 50 NEW ROWS to the DataFrame, each with a number in column B
+  * → These mean: Add numbers 1-50 in the specified column, starting from where that column's data ends
+  * → CRITICAL: Analyze where the SPECIFIC COLUMN has data, NOT where the entire sheet ends
+  * → Find the last row where that column has a non-empty value
+  * → Add new rows starting from the next row after that column's data ends
   * → Use operations with Python code ONLY (do NOT use add_row JSON format):
   *   {
   *     "task": "execute",
   *     "operations": [{
-  *       "python_code": "new_rows = [{'B': i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
-  *       "description": "Add 50 new rows with numbers 1-50 in column B",
+  *       "python_code": "column_name = 'B'; # Find where column B has data; mask = df[column_name].notna() & (df[column_name] != ''); last_row = mask.idxmax() if mask.any() else -1; new_rows = [{column_name: i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
+  *       "description": "Find where column B data ends, add 50 new rows with numbers 1-50 starting from that point",
   *       "result_type": "dataframe"
   *     }]
   *   }
   * → CRITICAL: For MULTIPLE rows, use operations ONLY, create list of dicts, use pd.concat
+  * → CRITICAL: Analyze the SPECIFIC COLUMN, not the whole sheet - find where that column's data ends
   * → NEVER assign a list directly to df[column] - this causes "Length of values does not match length of index" error
 
 **TASK: "sort"**

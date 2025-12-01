@@ -355,36 +355,55 @@ Example - Adding total row for Jan column:
 - User: "add numbers 1-50 in column B"
 - User: "add 50 rows with numbers 1-50"
 - User: "fill column B with 1 to 50"
-→ These mean: Add 50 NEW ROWS to the DataFrame, each with a number in column B
+→ These mean: Add numbers 1-50 in the specified column, starting from where that column's data ends
+→ CRITICAL: Analyze where the SPECIFIC COLUMN has data, NOT where the entire sheet ends
+→ Find the last row where that column has a non-empty value
+→ Add new rows starting from the next row after that column's data ends
 → Use operations with Python code to add multiple rows at once
 → DO NOT use add_row JSON format for multiple rows - use operations instead
 
 **CORRECT - Adding multiple rows with sequential data (e.g., numbers 1-50 in column B):**
+Step 1: Find where the target column's data ends
+Step 2: Add new rows starting from that point
+
 {
   "operations": [{
-    "python_code": "new_rows = [{'B': i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
-    "description": "Add 50 new rows with numbers 1-50 in column B",
+    "python_code": "column_name = 'B'; last_row_with_data = df[column_name].last_valid_index(); start_row = (last_row_with_data + 1) if last_row_with_data is not None else len(df); new_rows = [{column_name: i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
+    "description": "Find where column B data ends, then add 50 new rows with numbers 1-50 starting from that point",
     "result_type": "dataframe"
   }]
 }
 
-**CORRECT - Adding multiple rows with data in specific column:**
-If column name is "Id" or "ColumnB" or similar:
+**BETTER - More robust approach:**
 {
   "operations": [{
-    "python_code": "column_name = 'Id'; new_rows = [{column_name: i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
-    "description": "Add 50 new rows with numbers 1-50 in specified column",
+    "python_code": "column_name = 'B'; # Find last non-null, non-empty value in the column; mask = df[column_name].notna() & (df[column_name] != ''); last_idx = mask.idxmax() if mask.any() else -1; start_num = df[column_name].iloc[last_idx] + 1 if last_idx >= 0 and pd.notna(df[column_name].iloc[last_idx]) and isinstance(df[column_name].iloc[last_idx], (int, float)) else 1; new_rows = [{column_name: start_num + i} for i in range(50)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
+    "description": "Find last value in column B, continue sequence from there, add 50 rows",
     "result_type": "dataframe"
   }]
 }
+
+**SIMPLEST AND RECOMMENDED - Analyze specific column, not whole sheet:**
+{
+  "operations": [{
+    "python_code": "column_name = 'B'; # Find where this SPECIFIC column has data (not whole sheet); mask = df[column_name].notna() & (df[column_name] != ''); last_row_idx = mask.idxmax() if mask.any() else -1; # Add new rows - they will be appended after existing rows; new_rows = [{column_name: i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
+    "description": "Analyze where column B has data, add 50 new rows with numbers 1-50 starting after that column's data ends",
+    "result_type": "dataframe"
+  }]
+}
+
+**IMPORTANT:** The key is to analyze the SPECIFIC COLUMN, not the entire sheet. If column "Id" has data in rows 1-10 but is empty in rows 11-16, and other columns have data in row 11, you should still add the new numbers starting from where column "Id" data ends (row 11), not from where the sheet ends.
 
 **CRITICAL RULES FOR ADDING MULTIPLE ROWS:**
 1. When adding MULTIPLE rows (more than 1), use operations with Python code
-2. Create a list of dictionaries, each dictionary is one row
-3. Each dictionary should contain ONLY the columns you need to fill
-4. Use pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True) to add all rows at once
-5. DO NOT try to assign a list directly to df.loc or df[column] - this causes "Length of values does not match length of index" error
-6. DO NOT use add_row JSON format for multiple rows - it's only for single rows
+2. CRITICAL: Analyze where the SPECIFIC COLUMN has data, NOT the entire sheet
+3. Find the last row where the target column has a non-empty value using: mask = df[column_name].notna() & (df[column_name] != ''); last_row = mask.idxmax() if mask.any() else -1
+4. Add new rows starting from where that column's data ends, not where the sheet ends
+5. Create a list of dictionaries, each dictionary is one row
+6. Each dictionary should contain ONLY the columns you need to fill
+7. Use pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True) to add all rows at once
+8. DO NOT try to assign a list directly to df.loc or df[column] - this causes "Length of values does not match length of index" error
+9. DO NOT use add_row JSON format for multiple rows - it's only for single rows
 
 **EXAMPLE - User asks "sum of column Jan":**
 {
