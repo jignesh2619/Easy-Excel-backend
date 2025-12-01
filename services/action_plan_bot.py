@@ -363,13 +363,14 @@ Example - Adding total row for Jan column:
 → DO NOT use add_row JSON format for multiple rows - use operations instead
 
 **CORRECT - Adding multiple rows with sequential data (e.g., numbers 1-50 in column B):**
-Step 1: Find where the target column's data ends
-Step 2: Add new rows starting from that point
+Step 1: Find the LAST row where the target column has data (not first, not whole sheet)
+Step 2: Convert that index to a position (iloc position)
+Step 3: Insert new rows at that position using pd.concat with iloc slicing
 
 {
   "operations": [{
-    "python_code": "column_name = 'B'; last_row_with_data = df[column_name].last_valid_index(); start_row = (last_row_with_data + 1) if last_row_with_data is not None else len(df); new_rows = [{column_name: i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
-    "description": "Find where column B data ends, then add 50 new rows with numbers 1-50 starting from that point",
+    "python_code": "column_name = 'B'; # Find LAST row where column has data; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); last_row_idx = valid_indices[-1] if valid_indices else -1; # Convert to position for iloc; insert_pos = df.index.get_loc(last_row_idx) + 1 if last_row_idx != -1 else len(df); # Create and insert new rows; new_rows = [{column_name: i} for i in range(1, 51)]; new_df = pd.DataFrame(new_rows); df = pd.concat([df.iloc[:insert_pos], new_df, df.iloc[insert_pos:]], ignore_index=True)",
+    "description": "Find last row where column B has data, insert 50 new rows with numbers 1-50 starting after that position",
     "result_type": "dataframe"
   }]
 }
@@ -386,8 +387,8 @@ Step 2: Add new rows starting from that point
 **SIMPLEST AND RECOMMENDED - Analyze specific column, insert at correct position:**
 {
   "operations": [{
-    "python_code": "column_name = 'B'; # Find where this SPECIFIC column has data (not whole sheet); mask = df[column_name].notna() & (df[column_name] != ''); last_row_idx = mask.idxmax() if mask.any() else -1; insert_position = last_row_idx + 1 if last_row_idx >= 0 else len(df); # Create new rows with sequential numbers; new_rows = [{column_name: i} for i in range(1, 51)]; new_df = pd.DataFrame(new_rows); # Insert at the position where column data ends; df = pd.concat([df.iloc[:insert_position], new_df, df.iloc[insert_position:]], ignore_index=True)",
-    "description": "Analyze where column B has data, insert 50 new rows with numbers 1-50 starting at that position",
+    "python_code": "column_name = 'B'; # Find LAST row where this SPECIFIC column has data (not whole sheet); mask = df[column_name].notna() & (df[column_name] != ''); # Get all indices where column has data, find the last one; valid_indices = df[mask].index.tolist(); last_row_idx = valid_indices[-1] if valid_indices else -1; # Convert index to position (iloc position); insert_position = df.index.get_loc(last_row_idx) + 1 if last_row_idx != -1 else len(df); # Create new rows with sequential numbers; new_rows = [{column_name: i} for i in range(1, 51)]; new_df = pd.DataFrame(new_rows); # Insert at the position where column data ends; df = pd.concat([df.iloc[:insert_position], new_df, df.iloc[insert_position:]], ignore_index=True)",
+    "description": "Find last row where column B has data, insert 50 new rows with numbers 1-50 starting after that position",
     "result_type": "dataframe"
   }]
 }
