@@ -138,6 +138,24 @@ Example 5: "Sum revenue for India in January"
   }]
 }
 
+Example 6: "Give me sum of column Jan" (user wants total row added)
+{
+  "operations": [{
+    "python_code": "jan_sum = df['Jan'].sum(); first_col = df.columns[0]; new_row = {first_col: 'Total', 'Jan': jan_sum}; df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)",
+    "description": "Add total row at bottom with sum of Jan column",
+    "result_type": "dataframe"
+  }]
+}
+
+Example 7: "Total of rows and columns" (user wants both row and column totals)
+{
+  "operations": [{
+    "python_code": "df['Row Total'] = df.select_dtypes(include=[np.number]).sum(axis=1); col_totals = {}; [col_totals.update({col: df[col].sum()}) for col in df.select_dtypes(include=[np.number]).columns]; first_col = df.columns[0]; col_totals[first_col] = 'Total'; df = pd.concat([df, pd.DataFrame([col_totals])], ignore_index=True)",
+    "description": "Add row totals column and column totals row",
+    "result_type": "dataframe"
+  }]
+}
+
 **COLUMN REFERENCE HANDLING:**
 When user mentions "column C", "column A", etc.:
 1. FIRST check if there's a column named "C" or "A" (exact name match)
@@ -152,36 +170,120 @@ When user mentions "column C", "column A", etc.:
    - If no: Column C = index 2, get actual name: available_columns[2]
    - Generate: df = df.drop(columns=['ActualColumnName'])  # NOT df.drop(columns=['C'])
 
-**INTELLIGENT DATA PLACEMENT (CRITICAL):**
-When user requests a calculation WITHOUT specifying WHERE to place the result, automatically determine the best location:
+═══════════════════════════════════════════════════════════════════════════════
+📊 ADDING ROWS - CRITICAL INSTRUCTIONS
+═══════════════════════════════════════════════════════════════════════════════
 
-1. **SUM/AVERAGE/COUNT of a COLUMN** (e.g., "sum of column C"):
-   - Place result at BOTTOM of that column (add total row)
-   - Example: "sum of column C" → Add row with sum in column C at bottom
-   - Code: Add total row with calculation in specified column
+⚠️ YOU CAN ADD MORE ROWS TO THE DATAFRAME. The DataFrame is dynamic and can grow.
 
-2. **TOTAL ROW/COLUMN** (e.g., "add totals", "sum all columns"):
-   - "Total row" → Bottom row with sums of numeric columns
-   - "Total column" → Right column with sums of numeric rows
-   - Use helper functions: safe_add_total_row() or safe_add_total_column()
+**WHEN TO ADD ROWS:**
+- User asks for "sum of column X" without specifying a cell → Add total row at bottom
+- User asks for "total of rows" → Add total row at bottom
+- User asks for "add totals" → Add total row at bottom
+- User wants to add new data rows → Use add_row operation
 
-3. **PER-ROW CALCULATIONS** (e.g., "calculate profit = revenue - cost"):
-   - Add NEW COLUMN on the right
-   - Column name: Descriptive (e.g., "Profit")
-   - Each row: Calculation result
+**HOW TO ADD A SINGLE ROW (CORRECT METHOD):**
 
-4. **TRANSFORMATIONS** (e.g., "round values in column C"):
-   - Modify IN PLACE in same column
-   - Don't create new column unless explicitly requested
+When adding ONE row (e.g., a total row), you MUST:
+1. Create a dictionary with values for ONLY the columns you need to fill
+2. Use pd.concat() or df.loc[] to add the row
+3. ALWAYS use .reset_index(drop=True) after adding rows
 
-5. **SINGLE VALUE QUESTIONS** (e.g., "what's the total revenue"):
-   - If it's a column calculation → Place at bottom of that column
-   - If it's a general question → Still place in logical location (bottom or new column)
+CORRECT - Adding total row at bottom:
+```python
+# Calculate sum for a column
+total_value = df['ColumnName'].sum()
+# Create a new row with only the necessary values
+new_row = {'ColumnName': total_value}
+# Add the row at the end
+df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+```
 
-CRITICAL: Always place results in logical locations even when user doesn't specify!
-- Column calculations → Bottom of column
-- Row calculations → New column on right
-- Total operations → Bottom row or right column
+CORRECT - Adding total row with multiple column sums:
+```python
+# Calculate sums for multiple columns
+total_col1 = df['Column1'].sum()
+total_col2 = df['Column2'].sum()
+# Create new row with only the columns you're calculating
+new_row = {'Column1': total_col1, 'Column2': total_col2}
+# Add the row
+df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+```
+
+CORRECT - Adding total row with label in first column:
+```python
+# If first column is text (like "Name" or "Id"), put "Total" there
+first_col = df.columns[0]
+total_value = df['Amount'].sum()
+new_row = {first_col: 'Total', 'Amount': total_value}
+df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+```
+
+**CRITICAL - WHAT NOT TO DO:**
+
+❌ WRONG - Trying to assign a list to all columns:
+```python
+# NEVER do this - this causes "Length of values does not match length of index"
+df.loc[len(df)] = [value1, value2, value3, ...]  # WRONG if list length != number of columns
+```
+
+❌ WRONG - Trying to assign values to all columns when you only need some:
+```python
+# DON'T create a list with values for ALL columns
+# Only specify the columns you actually need to fill
+```
+
+✅ CORRECT - Only specify columns you need:
+```python
+# Only fill the columns you're calculating totals for
+new_row = {'ColumnName': total_value}  # Only this column
+df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+```
+
+**WHEN USER ASKS FOR SUM WITHOUT SPECIFYING CELL:**
+- User: "give me sum of column C"
+- User: "total of column Amount"
+- User: "sum of Jan column"
+→ These mean: Add a total row at the BOTTOM of the column with the sum value
+→ The DataFrame will have MORE rows after this operation (original rows + 1 total row)
+
+**EXAMPLE - User asks "sum of column Jan":**
+```python
+# Step 1: Calculate the sum
+jan_sum = df['Jan'].sum()
+# Step 2: Create a new row with the sum in the Jan column
+# If there's a label column (first column), you might want to put "Total" there
+first_col = df.columns[0]
+new_row = {first_col: 'Total', 'Jan': jan_sum}
+# Step 3: Add the row at the bottom
+df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+```
+
+**EXAMPLE - User asks "total of rows and columns":**
+```python
+# Calculate row totals (sum across columns for each row)
+# Calculate column totals (sum down rows for each column)
+# Add both a total row and total column
+
+# First, add a column for row totals
+df['Row Total'] = df.select_dtypes(include=[np.number]).sum(axis=1)
+
+# Then, add a row for column totals
+col_totals = {}
+for col in df.select_dtypes(include=[np.number]).columns:
+    col_totals[col] = df[col].sum()
+first_col = df.columns[0]
+col_totals[first_col] = 'Total'
+df = pd.concat([df, pd.DataFrame([col_totals])], ignore_index=True)
+```
+
+**KEY PRINCIPLES:**
+1. When adding ONE row, create a dictionary with ONLY the columns you need
+2. Use pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+3. NEVER try to assign a list of values to all columns at once
+4. The DataFrame CAN have more rows - it's not fixed size
+5. Always use .reset_index(drop=True) or ignore_index=True when adding rows
+6. If you need to fill other columns with empty values, pandas will do it automatically
 
 **CRITICAL RULES:**
 1. ALWAYS generate python_code (never leave empty)
@@ -190,6 +292,8 @@ CRITICAL: Always place results in logical locations even when user doesn't speci
 4. Handle edge cases (NaN, empty data)
 5. DO NOT generate chart code
 6. Return ONLY valid JSON (no markdown, no explanations)
+7. When adding rows, create a dictionary with ONLY needed columns, not all columns
+8. Use pd.concat() with pd.DataFrame([dict]) to add rows safely
 """
 
 
@@ -297,7 +401,7 @@ KNOWLEDGE BASE CONTEXT:
 
 TASK DECISION HINT:
 Suggested task: {task_suggestions.get('suggested_task', 'auto-detect')}
-Reasoning: {', '.join(str(item) for item in task_suggestions.get('reasoning', []))}
+Reasoning: {', '.join(task_suggestions.get('reasoning', []))}
 {column_mapping}
 {similar_examples_text}
 {sample_explanation_text}
