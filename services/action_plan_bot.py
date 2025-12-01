@@ -383,16 +383,21 @@ Step 2: Add new rows starting from that point
   }]
 }
 
-**SIMPLEST AND RECOMMENDED - Analyze specific column, not whole sheet:**
+**SIMPLEST AND RECOMMENDED - Analyze specific column, insert at correct position:**
 {
   "operations": [{
-    "python_code": "column_name = 'B'; # Find where this SPECIFIC column has data (not whole sheet); mask = df[column_name].notna() & (df[column_name] != ''); last_row_idx = mask.idxmax() if mask.any() else -1; # Add new rows - they will be appended after existing rows; new_rows = [{column_name: i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
-    "description": "Analyze where column B has data, add 50 new rows with numbers 1-50 starting after that column's data ends",
+    "python_code": "column_name = 'B'; # Find where this SPECIFIC column has data (not whole sheet); mask = df[column_name].notna() & (df[column_name] != ''); last_row_idx = mask.idxmax() if mask.any() else -1; insert_position = last_row_idx + 1 if last_row_idx >= 0 else len(df); # Create new rows with sequential numbers; new_rows = [{column_name: i} for i in range(1, 51)]; new_df = pd.DataFrame(new_rows); # Insert at the position where column data ends; df = pd.concat([df.iloc[:insert_position], new_df, df.iloc[insert_position:]], ignore_index=True)",
+    "description": "Analyze where column B has data, insert 50 new rows with numbers 1-50 starting at that position",
     "result_type": "dataframe"
   }]
 }
 
-**IMPORTANT:** The key is to analyze the SPECIFIC COLUMN, not the entire sheet. If column "Id" has data in rows 1-10 but is empty in rows 11-16, and other columns have data in row 11, you should still add the new numbers starting from where column "Id" data ends (row 11), not from where the sheet ends.
+**IMPORTANT:** The key is to analyze the SPECIFIC COLUMN, not the entire sheet. 
+- If column "Id" has data in rows 1-10 but is empty in rows 11-16
+- And other columns have data in row 11
+- You should INSERT the new numbers starting at row 11 (where column "Id" data ends)
+- NOT append at the end of the sheet (row 17)
+- Use pd.concat with df.iloc[:position], new_df, df.iloc[position:] to insert at specific position
 
 **CRITICAL RULES FOR ADDING MULTIPLE ROWS:**
 1. When adding MULTIPLE rows (more than 1), use operations with Python code
