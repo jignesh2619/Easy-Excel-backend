@@ -364,15 +364,15 @@ Example - Adding total row for Jan column:
 
 **CORRECT - Adding multiple rows with sequential data (e.g., numbers 1-50 in column B):**
 Step 1: Find the LAST row where the target column has data (not first, not whole sheet)
-Step 2: If column is empty, insert at position 0 (beginning)
-Step 3: If column has data, insert after the last row with data
-Step 4: Convert that index to a position (iloc position)
-Step 5: Insert new rows at that position using pd.concat with iloc slicing
+Step 2: If column is empty, start filling from row 0
+Step 3: If column has data, start filling from the next row after the last data
+Step 4: Directly assign values to the column - DO NOT use pd.concat (it shifts existing data)
+Step 5: Extend DataFrame if needed to accommodate all values
 
 {
   "operations": [{
-    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); insert_pos = (df.index.get_loc(valid_indices[-1]) + 1) if valid_indices else 0; new_rows = [{column_name: i} for i in range(1, 51)]; new_df = pd.DataFrame(new_rows); df = pd.concat([df.iloc[:insert_pos], new_df, df.iloc[insert_pos:]], ignore_index=True)",
-    "description": "Find last row where column B has data (or start at 0 if empty), insert 50 new rows with numbers 1-50",
+    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); start_row = (df.index.get_loc(valid_indices[-1]) + 1) if valid_indices else 0; end_row = start_row + 50; if end_row > len(df): df = pd.concat([df, pd.DataFrame([{}] * (end_row - len(df)))], ignore_index=True); df[column_name].iloc[start_row:end_row] = list(range(1, 51))",
+    "description": "Find last row where column B has data (or start at 0 if empty), fill 50 cells with numbers 1-50 without shifting existing data",
     "result_type": "dataframe"
   }]
 }
@@ -380,17 +380,17 @@ Step 5: Insert new rows at that position using pd.concat with iloc slicing
 **BETTER - Continue sequence from last value:**
 {
   "operations": [{
-    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); last_idx = valid_indices[-1] if valid_indices else None; insert_pos = (df.index.get_loc(last_idx) + 1) if last_idx is not None else 0; last_val = df[column_name].iloc[df.index.get_loc(last_idx)] if last_idx is not None else None; start_num = (int(last_val) + 1) if (last_val is not None and pd.notna(last_val) and isinstance(last_val, (int, float))) else 1; new_rows = [{column_name: start_num + i} for i in range(50)]; new_df = pd.DataFrame(new_rows); df = pd.concat([df.iloc[:insert_pos], new_df, df.iloc[insert_pos:]], ignore_index=True)",
-    "description": "Find last value in column B (or start at 0 if empty), continue sequence, insert 50 rows at correct position",
+    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); last_idx = valid_indices[-1] if valid_indices else None; start_row = (df.index.get_loc(last_idx) + 1) if last_idx is not None else 0; last_val = df[column_name].iloc[df.index.get_loc(last_idx)] if last_idx is not None else None; start_num = (int(last_val) + 1) if (last_val is not None and pd.notna(last_val) and isinstance(last_val, (int, float))) else 1; end_row = start_row + 50; if end_row > len(df): df = pd.concat([df, pd.DataFrame([{}] * (end_row - len(df)))], ignore_index=True); df[column_name].iloc[start_row:end_row] = list(range(start_num, start_num + 50))",
+    "description": "Find last value in column B (or start at 0 if empty), continue sequence, fill 50 cells without shifting existing data",
     "result_type": "dataframe"
   }]
 }
 
-**SIMPLEST AND RECOMMENDED - Analyze specific column, insert at correct position:**
+**SIMPLEST AND RECOMMENDED - Analyze specific column, fill without shifting:**
 {
   "operations": [{
-    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); insert_position = (df.index.get_loc(valid_indices[-1]) + 1) if valid_indices else 0; new_rows = [{column_name: i} for i in range(1, 51)]; new_df = pd.DataFrame(new_rows); df = pd.concat([df.iloc[:insert_position], new_df, df.iloc[insert_position:]], ignore_index=True)",
-    "description": "Find last row where column B has data (or start at 0 if empty), insert 50 new rows with numbers 1-50",
+    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); start_row = (df.index.get_loc(valid_indices[-1]) + 1) if valid_indices else 0; end_row = start_row + 50; if end_row > len(df): df = pd.concat([df, pd.DataFrame([{}] * (end_row - len(df)))], ignore_index=True); df[column_name].iloc[start_row:end_row] = list(range(1, 51))",
+    "description": "Find last row where column B has data (or start at 0 if empty), fill 50 cells with numbers 1-50 without shifting existing data",
     "result_type": "dataframe"
   }]
 }
@@ -398,10 +398,12 @@ Step 5: Insert new rows at that position using pd.concat with iloc slicing
 **IMPORTANT:** The key is to analyze the SPECIFIC COLUMN, not the entire sheet. 
 - If column "Id" has data in rows 1-10 but is empty in rows 11-16
 - And other columns have data in row 11
-- You should INSERT the new numbers starting at row 11 (where column "Id" data ends)
+- You should FILL the new numbers starting at row 11 (where column "Id" data ends)
 - NOT append at the end of the sheet (row 17)
-- If column "Id" is COMPLETELY EMPTY, insert at position 0 (beginning)
-- Use pd.concat with df.iloc[:position], new_df, df.iloc[position:] to insert at specific position
+- If column "Id" is COMPLETELY EMPTY, fill from position 0 (beginning)
+- Use direct column assignment: df[column_name].iloc[start:end] = values
+- DO NOT use pd.concat to insert rows - it shifts existing data
+- Only extend DataFrame if needed: if end_row > len(df): add empty rows first
 
 **CRITICAL RULES FOR ADDING MULTIPLE ROWS:**
 1. When adding MULTIPLE rows (more than 1), use operations with Python code

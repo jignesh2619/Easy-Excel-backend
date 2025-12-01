@@ -294,15 +294,17 @@ KNOWLEDGE BASE - TASK SELECTION GUIDE:
   *   {
   *     "task": "execute",
   *     "operations": [{
-  *       "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); insert_pos = (df.index.get_loc(valid_indices[-1]) + 1) if valid_indices else 0; new_rows = [{column_name: i} for i in range(1, 51)]; new_df = pd.DataFrame(new_rows); df = pd.concat([df.iloc[:insert_pos], new_df, df.iloc[insert_pos:]], ignore_index=True)",
+  *       "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); start_row = (df.index.get_loc(valid_indices[-1]) + 1) if valid_indices else 0; end_row = start_row + 50; if end_row > len(df): df = pd.concat([df, pd.DataFrame([{}] * (end_row - len(df)))], ignore_index=True); df[column_name].iloc[start_row:end_row] = list(range(1, 51))",
   *       "description": "Find where column B data ends (or start at 0 if empty), insert 50 new rows with numbers 1-50",
   *       "result_type": "dataframe"
   *     }]
   *   }
-  * → CRITICAL: For MULTIPLE rows, use operations ONLY, create list of dicts, use pd.concat with iloc slicing
+  * → CRITICAL: For MULTIPLE rows, use operations ONLY, use direct column assignment
   * → CRITICAL: Analyze the SPECIFIC COLUMN, not the whole sheet - find where that column's data ends
-  * → CRITICAL: If column is empty, insert at position 0, not at the end
-  * → NEVER assign a list directly to df[column] - this causes "Length of values does not match length of index" error
+  * → CRITICAL: If column is empty, fill from position 0, not at the end
+  * → Use: df[column_name].iloc[start_row:end_row] = list(range(1, 51))
+  * → DO NOT use pd.concat to insert rows - it shifts existing data
+  * → Only extend DataFrame if needed: if end_row > len(df): add empty rows first
 
 **TASK: "sort"**
 - USE WHEN: User wants to reorder rows
