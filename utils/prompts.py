@@ -294,7 +294,7 @@ KNOWLEDGE BASE - TASK SELECTION GUIDE:
   *   {
   *     "task": "execute",
   *     "operations": [{
-  *       "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); if valid_indices: last_row_idx = valid_indices[-1]; insert_pos = df.index.get_loc(last_row_idx) + 1; else: insert_pos = 0; new_rows = [{column_name: i} for i in range(1, 51)]; new_df = pd.DataFrame(new_rows); df = pd.concat([df.iloc[:insert_pos], new_df, df.iloc[insert_pos:]], ignore_index=True)",
+  *       "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); insert_pos = (df.index.get_loc(valid_indices[-1]) + 1) if valid_indices else 0; new_rows = [{column_name: i} for i in range(1, 51)]; new_df = pd.DataFrame(new_rows); df = pd.concat([df.iloc[:insert_pos], new_df, df.iloc[insert_pos:]], ignore_index=True)",
   *       "description": "Find where column B data ends (or start at 0 if empty), insert 50 new rows with numbers 1-50",
   *       "result_type": "dataframe"
   *     }]
