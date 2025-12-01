@@ -288,18 +288,20 @@ KNOWLEDGE BASE - TASK SELECTION GUIDE:
   * → These mean: Add numbers 1-50 in the specified column, starting from where that column's data ends
   * → CRITICAL: Analyze where the SPECIFIC COLUMN has data, NOT where the entire sheet ends
   * → Find the last row where that column has a non-empty value
-  * → Add new rows starting from the next row after that column's data ends
+  * → If column is COMPLETELY EMPTY, insert at position 0 (beginning)
+  * → If column has data, insert after the last row with data
   * → Use operations with Python code ONLY (do NOT use add_row JSON format):
   *   {
   *     "task": "execute",
   *     "operations": [{
-  *       "python_code": "column_name = 'B'; # Find where column B has data; mask = df[column_name].notna() & (df[column_name] != ''); last_row = mask.idxmax() if mask.any() else -1; new_rows = [{column_name: i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
-  *       "description": "Find where column B data ends, add 50 new rows with numbers 1-50 starting from that point",
+  *       "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); if valid_indices: last_row_idx = valid_indices[-1]; insert_pos = df.index.get_loc(last_row_idx) + 1; else: insert_pos = 0; new_rows = [{column_name: i} for i in range(1, 51)]; new_df = pd.DataFrame(new_rows); df = pd.concat([df.iloc[:insert_pos], new_df, df.iloc[insert_pos:]], ignore_index=True)",
+  *       "description": "Find where column B data ends (or start at 0 if empty), insert 50 new rows with numbers 1-50",
   *       "result_type": "dataframe"
   *     }]
   *   }
-  * → CRITICAL: For MULTIPLE rows, use operations ONLY, create list of dicts, use pd.concat
+  * → CRITICAL: For MULTIPLE rows, use operations ONLY, create list of dicts, use pd.concat with iloc slicing
   * → CRITICAL: Analyze the SPECIFIC COLUMN, not the whole sheet - find where that column's data ends
+  * → CRITICAL: If column is empty, insert at position 0, not at the end
   * → NEVER assign a list directly to df[column] - this causes "Length of values does not match length of index" error
 
 **TASK: "sort"**
