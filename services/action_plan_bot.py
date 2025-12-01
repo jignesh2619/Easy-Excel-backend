@@ -380,7 +380,7 @@ Step 5: Insert new rows at that position using pd.concat with iloc slicing
 **BETTER - Continue sequence from last value:**
 {
   "operations": [{
-    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); if valid_indices: last_idx = valid_indices[-1]; insert_pos = df.index.get_loc(last_idx) + 1; last_val = df[column_name].iloc[df.index.get_loc(last_idx)]; start_num = int(last_val) + 1 if pd.notna(last_val) and isinstance(last_val, (int, float)) else 1; else: insert_pos = 0; start_num = 1; new_rows = [{column_name: start_num + i} for i in range(50)]; new_df = pd.DataFrame(new_rows); df = pd.concat([df.iloc[:insert_pos], new_df, df.iloc[insert_pos:]], ignore_index=True)",
+    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); last_idx = valid_indices[-1] if valid_indices else None; insert_pos = (df.index.get_loc(last_idx) + 1) if last_idx is not None else 0; last_val = df[column_name].iloc[df.index.get_loc(last_idx)] if last_idx is not None else None; start_num = (int(last_val) + 1) if (last_val is not None and pd.notna(last_val) and isinstance(last_val, (int, float))) else 1; new_rows = [{column_name: start_num + i} for i in range(50)]; new_df = pd.DataFrame(new_rows); df = pd.concat([df.iloc[:insert_pos], new_df, df.iloc[insert_pos:]], ignore_index=True)",
     "description": "Find last value in column B (or start at 0 if empty), continue sequence, insert 50 rows at correct position",
     "result_type": "dataframe"
   }]
