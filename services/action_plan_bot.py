@@ -187,23 +187,25 @@ When user mentions "column C", "column A", etc.:
 - User asks for "row totals" → Add column with row totals
 - User wants to add a new column → Use add_column JSON format
 
-**⚠️ CRITICAL: USE JSON FORMAT, NOT PYTHON CODE FOR ADDING ROWS/COLUMNS**
+**⚠️ CRITICAL: USE BOTH PYTHON CODE (operations) AND JSON FORMAT (add_row/add_column)**
 
-When adding rows or columns, you MUST use JSON format in your response, NOT Python code in operations.
+When adding rows or columns, you MUST:
+1. Use operations with Python code to CALCULATE the values
+2. Use JSON format (add_row/add_column) to ADD the row/column
+3. BOTH are required - operations calculate, JSON format adds
 
-**CORRECT - Adding total row using JSON format:**
+**CORRECT - Adding total row using BOTH operations AND JSON format:**
 
-Pattern: Calculate sums in operations and store in temporary columns, then reference them in add_row.data
-
-Step 1: Use operations to calculate and store the sum in a temporary column
-Step 2: Use add_row with data that references the temporary column
-Step 3: (Optional) Clean up the temporary column
+Pattern: 
+1. Use operations with Python code to CALCULATE values
+2. Use add_row JSON format to ADD the row
+3. BOTH are required - don't skip operations!
 
 Example - Adding total row for Jan column:
 {
   "operations": [{
     "python_code": "df['_temp_jan_sum'] = df['Jan'].sum()",
-    "description": "Calculate sum of Jan column",
+    "description": "Calculate sum of Jan column and store in temp column",
     "result_type": "dataframe"
   }],
   "add_row": {
@@ -219,8 +221,11 @@ Example - Adding total row for Jan column:
   }]
 }
 
-**IMPORTANT:** In add_row.data, you can use string expressions like "df['ColumnName'].iloc[0]" or "df['ColumnName'].sum()" 
-The system will evaluate these expressions safely.
+**CRITICAL:** 
+- You MUST include operations with Python code to calculate values
+- You MUST include add_row/add_column JSON format to add the row/column
+- In add_row.data, use string expressions like "df['ColumnName'].iloc[0]" to reference calculated values
+- The system evaluates these expressions safely
 
 **CORRECT - Adding total row with label in first column:**
 {
@@ -307,21 +312,35 @@ The system will evaluate these expressions safely.
     "position": -1,
     "default_value": ""
   },
-  "operations": [{
-    "python_code": "df['Row Total'] = df.select_dtypes(include=[np.number]).sum(axis=1)",
-    "description": "Add row totals column",
-    "result_type": "dataframe"
-  }],
+  "operations": [
+    {
+      "python_code": "df['Row Total'] = df.select_dtypes(include=[np.number]).sum(axis=1)",
+      "description": "Calculate and add row totals column",
+      "result_type": "dataframe"
+    },
+    {
+      "python_code": "df['_temp_jan'] = df['Jan'].sum(); df['_temp_feb'] = df['Feb'].sum(); df['_temp_mar'] = df['Mar'].sum(); df['_temp_row_total'] = df['Row Total'].sum()",
+      "description": "Calculate column totals and store in temp columns",
+      "result_type": "dataframe"
+    }
+  ],
   "add_row": {
     "position": -1,
     "data": {
-      "{{df.columns[0]}}": "Total",
-      "Jan": "{{df['Jan'].sum()}}",
-      "Feb": "{{df['Feb'].sum()}}",
-      "Mar": "{{df['Mar'].sum()}}",
-      "Row Total": "{{df['Row Total'].sum()}}"
+      "df.columns[0]": "Total",
+      "Jan": "df['_temp_jan'].iloc[0]",
+      "Feb": "df['_temp_feb'].iloc[0]",
+      "Mar": "df['_temp_mar'].iloc[0]",
+      "Row Total": "df['_temp_row_total'].iloc[0]"
     }
-  }
+  },
+  "operations": [
+    {
+      "python_code": "df = df.drop(columns=['_temp_jan', '_temp_feb', '_temp_mar', '_temp_row_total'])",
+      "description": "Clean up temporary columns",
+      "result_type": "dataframe"
+    }
+  ]
 }
 
 **WHEN USER ASKS FOR SUM WITHOUT SPECIFYING CELL:**
@@ -387,14 +406,20 @@ The system will evaluate these expressions safely.
 }
 
 **KEY PRINCIPLES:**
-1. ALWAYS use JSON format (add_row, add_column) for adding rows/columns, NOT Python code in operations
-2. Calculate values in operations first and store in temporary columns (e.g., df['_temp_sum'] = df['Column'].sum())
-3. Reference those temporary columns in add_row.data using string expressions (e.g., "df['_temp_sum'].iloc[0]")
-4. Clean up temporary columns after adding the row
-5. Use position: -1 to add at the end (bottom for rows, right for columns)
-6. In add_row.data, only specify the columns you need to fill - other columns will be empty
-7. The DataFrame CAN have more rows/columns - it's not fixed size
-8. You can use expressions like "df.columns[0]" for column names in add_row.data keys
+1. ALWAYS use BOTH: operations (with Python code) AND JSON format (add_row/add_column)
+2. Operations calculate values and store in temporary columns (e.g., df['_temp_sum'] = df['Column'].sum())
+3. add_row/add_column JSON format adds the row/column using those calculated values
+4. Reference temporary columns in add_row.data using string expressions (e.g., "df['_temp_sum'].iloc[0]")
+5. Clean up temporary columns after adding the row (add another operation to drop them)
+6. Use position: -1 to add at the end (bottom for rows, right for columns)
+7. In add_row.data, only specify the columns you need to fill - other columns will be empty
+8. The DataFrame CAN have more rows/columns - it's not fixed size
+9. You can use expressions like "df.columns[0]" for column names in add_row.data keys
+
+**REMEMBER:** 
+- Operations = Calculate values (Python code)
+- add_row/add_column = Add the row/column (JSON format)
+- BOTH are required - don't skip either one!
 
 **REMEMBER:** The system evaluates DataFrame expressions in add_row.data values, so you can use:
 - "df['ColumnName'].iloc[0]" to get a value from a column
@@ -402,14 +427,17 @@ The system will evaluate these expressions safely.
 - Any valid DataFrame expression that returns a value
 
 **CRITICAL RULES:**
-1. ALWAYS generate python_code (never leave empty)
-2. Use actual column names from dataset (not Excel letters in code)
-3. Code must be executable directly
-4. Handle edge cases (NaN, empty data)
-5. DO NOT generate chart code
-6. Return ONLY valid JSON (no markdown, no explanations)
-7. When adding rows, create a dictionary with ONLY needed columns, not all columns
-8. Use pd.concat() with pd.DataFrame([dict]) to add rows safely
+1. ALWAYS generate python_code in operations (never leave empty)
+2. When adding rows/columns, you MUST include BOTH:
+   - operations with Python code to calculate values
+   - add_row/add_column JSON format to add the row/column
+3. Use actual column names from dataset (not Excel letters in code)
+4. Code must be executable directly
+5. Handle edge cases (NaN, empty data)
+6. DO NOT generate chart code
+7. Return ONLY valid JSON (no markdown, no explanations)
+8. When using add_row, only specify columns you need in data - other columns will be empty
+9. Calculate values in operations first, then reference them in add_row.data using expressions
 """
 
 
