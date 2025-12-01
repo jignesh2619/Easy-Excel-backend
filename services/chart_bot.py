@@ -310,9 +310,20 @@ class ChartBot:
                 # Single chart - validate normally
                 chart_config = self._validate_chart_config(chart_config, available_columns)
             
-            prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
-            completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
-            tokens_used = prompt_tokens + completion_tokens
+            # Extract token usage from OpenAI API response
+            # CRITICAL: Only count OpenAI tokens, ensure usage object exists
+            if response.usage is None:
+                logger.error("⚠️ WARNING: OpenAI response.usage is None - cannot calculate tokens!")
+                prompt_tokens = 0
+                completion_tokens = 0
+                tokens_used = 0
+            else:
+                prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
+                completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
+                tokens_used = prompt_tokens + completion_tokens
+                
+                if tokens_used == 0:
+                    logger.warning("⚠️ WARNING: Token count is 0 - OpenAI API may not have returned usage info")
             
             logger.info(f"ChartBot tokens: prompt={prompt_tokens}, completion={completion_tokens}, total={tokens_used}")
             
@@ -329,7 +340,7 @@ class ChartBot:
                            kb_summary: str = "", similar_examples: str = "", column_mapping: str = "",
                            data_analysis: Optional[Dict] = None, is_generic: bool = False) -> str:
         """Build prompt for chart generation"""
-        columns_info = f"Available columns: {', '.join(str(col) for col in columns)}"
+        columns_info = f"Available columns: {', '.join(columns)}"
         
         sample_text = ""
         if sample_data:
@@ -347,9 +358,9 @@ class ChartBot:
 ═══════════════════════════════════════════════════════════════════════════════
 
 Column Types:
-- Numeric columns: {', '.join(str(item) for item in data_analysis.get('numeric_columns', [])) if data_analysis.get('numeric_columns') else 'None'}
-- Categorical columns: {', '.join(str(item) for item in data_analysis.get('categorical_columns', [])) if data_analysis.get('categorical_columns') else 'None'}
-- Datetime columns: {', '.join(str(item) for item in data_analysis.get('datetime_columns', [])) if data_analysis.get('datetime_columns') else 'None'}
+- Numeric columns: {', '.join(data_analysis.get('numeric_columns', [])) if data_analysis.get('numeric_columns') else 'None'}
+- Categorical columns: {', '.join(data_analysis.get('categorical_columns', [])) if data_analysis.get('categorical_columns') else 'None'}
+- Datetime columns: {', '.join(data_analysis.get('datetime_columns', [])) if data_analysis.get('datetime_columns') else 'None'}
 
 Suggested Chart Configurations:
 """

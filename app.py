@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any
 import os
 import traceback
 import logging
@@ -128,10 +128,6 @@ class ProcessFileResponse(BaseModel):
     status: str
     processed_file_url: Optional[str] = None
     chart_url: Optional[str] = None
-    chart_urls: Optional[List[str]] = None  # Array of chart URLs for multiple charts
-    chart_data: Optional[Union[Dict, List[Dict]]] = None  # Chart data for interactive rendering (single dict or list of dicts)
-    chart_type: Optional[str] = None  # Chart type for single chart
-    chart_types: Optional[List[str]] = None  # Chart types for multiple charts
     summary: list
     action_plan: Optional[dict] = None
     message: Optional[str] = None
@@ -143,10 +139,6 @@ class ProcessFileResponse(BaseModel):
     type: Optional[str] = None  # "summary" | "table" | "value" | "chart" | "transformation"
     operation: Optional[str] = None  # Operation name (e.g., "sum", "average", "filter", etc.)
     result: Optional[Any] = None  # Result value, dataset, or chart instruction
-    # Token usage information
-    tokens_used: Optional[int] = None  # Tokens used for this operation (OpenAI API calls only)
-    tokens_limit: Optional[int] = None  # User's token limit
-    tokens_remaining: Optional[int] = None  # Remaining tokens after this operation
 
 
 class ProcessDataRequest(BaseModel):
@@ -311,13 +303,21 @@ async def process_file(
         action_plan["user_prompt"] = prompt
         
         # Get actual token usage from OpenAI API (includes prompt + data + response)
-        actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)
+        # CRITICAL: Always use actual OpenAI tokens, never fall back to estimates
+        actual_tokens_used = llm_result.get("tokens_used")
         
-        # Log actual vs estimated for monitoring
-        if actual_tokens_used != estimated_tokens:
-            logger.info(f"Token usage: estimated={estimated_tokens}, actual={actual_tokens_used}, difference={actual_tokens_used - estimated_tokens}")
+        if actual_tokens_used is None:
+            logger.error(f"⚠️ WARNING: tokens_used not found in LLM result! Keys: {list(llm_result.keys())}")
+            logger.error(f"⚠️ This should never happen - all LLM services must return tokens_used")
+            # Use 0 instead of estimate to avoid incorrect billing
+            actual_tokens_used = 0
+            logger.warning(f"⚠️ Token usage set to 0 (missing from LLM result). Estimated would have been: {estimated_tokens}")
         else:
-            logger.info(f"Token usage: {actual_tokens_used} tokens (used estimate as fallback)")
+            # Log actual vs estimated for monitoring
+            if actual_tokens_used != estimated_tokens:
+                logger.info(f"Token usage: estimated={estimated_tokens}, actual={actual_tokens_used}, difference={actual_tokens_used - estimated_tokens}")
+            else:
+                logger.info(f"Token usage: {actual_tokens_used} tokens (actual from OpenAI API)")
         
         # 8. Validate required columns exist
         columns_needed = action_plan.get("columns_needed", [])
@@ -370,9 +370,7 @@ async def process_file(
         
         processed_df = result["df"]
         summary = result["summary"]
-        chart_path = result.get("chart_path")  # Chart path from ChartExecutor (single, for backward compatibility)
-        chart_paths = result.get("chart_paths", [])  # Array of all chart paths
-        chart_data = result.get("chart_data")  # Chart data for interactive rendering
+        chart_path = result.get("chart_path")  # Chart path from ChartExecutor
         chart_needed = result.get("chart_needed", False)
         chart_type = result.get("chart_type", "none")
         formula_result = result.get("formula_result")
@@ -390,28 +388,14 @@ async def process_file(
         processed_file_url = f"/download/{Path(processed_file_path).name}" if processed_file_path else None
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
         
-        # Convert chart_paths to chart_urls array
-        chart_urls = [f"/download/charts/{Path(p).name}" for p in chart_paths] if chart_paths else None
-        
-        # Extract chart types
-        chart_types = []
-        if "chart_configs" in action_plan:
-            chart_types = [c.get("chart_type", "chart") for c in action_plan.get("chart_configs", [])]
-        elif "chart_config" in action_plan:
-            chart_types = [action_plan["chart_config"].get("chart_type", "chart")]
-        
         # 12. Convert processed dataframe to JSON for preview
         # Limit to first 1000 rows for preview to avoid large responses
         import pandas as pd
         import numpy as np
         preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
         # Replace NaN/None values with null for proper JSON serialization
-        # Convert all column names to strings (Pydantic requires string keys)
-        preview_df.columns = preview_df.columns.astype(str)
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
-        # Ensure all dictionary keys are strings (convert any remaining numeric keys)
-        processed_data = [{str(k): v for k, v in record.items()} for record in processed_data]
-        columns = [str(col) for col in processed_df.columns]
+        columns = list(processed_df.columns)
         row_count = len(processed_df)
         
         # 12a. Get formatting metadata for preview display
@@ -492,21 +476,9 @@ async def process_file(
         else:
             result_value = processed_data
         
-        # Get token info for response (before recording usage)
-        tokens_limit = None
-        tokens_remaining = None
-        if user:
-            token_info = user_service.check_token_limit(user["user_id"], 0)  # Check without needing tokens
-            tokens_limit = token_info.get("tokens_limit")
-            tokens_used_current = token_info.get("tokens_used", 0)
-            tokens_remaining = token_info.get("tokens_remaining", tokens_limit)
-        
         # Record token usage if we have an authenticated user (use actual tokens from LLM API)
         if user:
             user_service.record_token_usage(user["user_id"], actual_tokens_used, "file_processing")
-            # Update tokens_remaining after recording
-            if tokens_limit:
-                tokens_remaining = tokens_limit - (tokens_used_current + actual_tokens_used)
         
         # Record successful execution for feedback learning
         if llm_agent.feedback_learner:
@@ -530,10 +502,6 @@ async def process_file(
             status="success",
             processed_file_url=processed_file_url,
             chart_url=chart_url,
-            chart_urls=chart_urls,
-            chart_data=chart_data,
-            chart_type=chart_type if chart_type != "none" else None,
-            chart_types=chart_types if chart_types else None,
             summary=summary,
             action_plan=action_plan,
             message="File processed successfully",
@@ -543,10 +511,7 @@ async def process_file(
             formatting_metadata=formatting_metadata,
             type=response_type,
             operation=operation,
-            result=result_value,
-            tokens_used=actual_tokens_used if user else None,
-            tokens_limit=tokens_limit,
-            tokens_remaining=tokens_remaining
+            result=result_value
         )
         
     except HTTPException:
@@ -701,7 +666,18 @@ async def process_data(
         action_plan = llm_result.get("action_plan", {})
         action_plan["user_prompt"] = request.prompt
         
-        actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)
+        # Get actual token usage from OpenAI API
+        # CRITICAL: Always use actual OpenAI tokens, never fall back to estimates
+        actual_tokens_used = llm_result.get("tokens_used")
+        
+        if actual_tokens_used is None:
+            logger.error(f"⚠️ WARNING: tokens_used not found in LLM result! Keys: {list(llm_result.keys())}")
+            logger.error(f"⚠️ This should never happen - all LLM services must return tokens_used")
+            # Use 0 instead of estimate to avoid incorrect billing
+            actual_tokens_used = 0
+            logger.warning(f"⚠️ Token usage set to 0 (missing from LLM result). Estimated would have been: {estimated_tokens}")
+        else:
+            logger.info(f"Token usage: {actual_tokens_used} tokens (actual from OpenAI API)")
         
         # 7. Validate required columns
         columns_needed = action_plan.get("columns_needed", [])
@@ -743,8 +719,6 @@ async def process_data(
         processed_df = result["df"]
         summary = result["summary"]
         chart_path = result.get("chart_path")
-        chart_paths = result.get("chart_paths", [])
-        chart_data = result.get("chart_data")
         chart_needed = result.get("chart_needed", False)
         chart_type = result.get("chart_type", "none")
         formula_result = result.get("formula_result")
@@ -763,24 +737,10 @@ async def process_data(
         processed_file_url = f"/download/{Path(processed_file_path).name}" if processed_file_path else None
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
         
-        # Convert chart_paths to chart_urls array
-        chart_urls = [f"/download/charts/{Path(p).name}" for p in chart_paths] if chart_paths else None
-        
-        # Extract chart types
-        chart_types = []
-        if "chart_configs" in action_plan:
-            chart_types = [c.get("chart_type", "chart") for c in action_plan.get("chart_configs", [])]
-        elif "chart_config" in action_plan:
-            chart_types = [action_plan["chart_config"].get("chart_type", "chart")]
-        
         # 12. Convert processed dataframe to JSON for preview
         preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
-        # Convert all column names to strings (Pydantic requires string keys)
-        preview_df.columns = preview_df.columns.astype(str)
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
-        # Ensure all dictionary keys are strings (convert any remaining numeric keys)
-        processed_data = [{str(k): v for k, v in record.items()} for record in processed_data]
-        columns = [str(col) for col in processed_df.columns]
+        columns = list(processed_df.columns)
         row_count = len(processed_df)
         
         # 13. Get formatting metadata
@@ -849,23 +809,11 @@ async def process_data(
         else:
             result_value = processed_data
         
-        # 16. Get token info for response (before recording usage)
-        tokens_limit = None
-        tokens_remaining = None
-        if user:
-            token_info = user_service.check_token_limit(user["user_id"], 0)  # Check without needing tokens
-            tokens_limit = token_info.get("tokens_limit")
-            tokens_used_current = token_info.get("tokens_used", 0)
-            tokens_remaining = token_info.get("tokens_remaining", tokens_limit)
-        
-        # 17. Record token usage (only if user is authenticated)
+        # 16. Record token usage (only if user is authenticated)
         if user:
             user_service.record_token_usage(user["user_id"], actual_tokens_used, "data_processing")
-            # Update tokens_remaining after recording
-            if tokens_limit:
-                tokens_remaining = tokens_limit - (tokens_used_current + actual_tokens_used)
         
-        # 18. Record feedback (only if user is authenticated)
+        # 17. Record feedback (only if user is authenticated)
         if user and llm_agent.feedback_learner:
             try:
                 execution_result = {
@@ -887,10 +835,6 @@ async def process_data(
             status="success",
             processed_file_url=processed_file_url,
             chart_url=chart_url,
-            chart_urls=chart_urls,
-            chart_data=chart_data,
-            chart_type=chart_type if chart_type != "none" else None,
-            chart_types=chart_types if chart_types else None,
             summary=summary,
             action_plan=action_plan,
             message="Data processed successfully",
@@ -900,10 +844,7 @@ async def process_data(
             formatting_metadata=formatting_metadata,
             type=response_type,
             operation=operation,
-            result=result_value,
-            tokens_used=actual_tokens_used if user else None,
-            tokens_limit=tokens_limit,
-            tokens_remaining=tokens_remaining
+            result=result_value
         )
         
     except HTTPException:
@@ -1142,30 +1083,6 @@ async def get_current_user_info(user: Dict[str, Any] = Depends(get_current_user)
         "status": "success",
         "user": user
     })
-
-
-@app.get("/api/users/token-stats")
-async def get_token_stats(user: Dict[str, Any] = Depends(get_current_user)):
-    """
-    Get current user token statistics.
-    
-    Returns:
-        Token usage statistics (tokens_used, tokens_limit, tokens_remaining)
-    """
-    try:
-        user_id = user["user_id"]
-        token_info = user_service.check_token_limit(user_id, 0)  # Check without needing tokens
-        
-        return JSONResponse(content={
-            "status": "success",
-            "tokens_used": token_info.get("tokens_used", 0),
-            "tokens_limit": token_info.get("tokens_limit", 0),
-            "tokens_remaining": token_info.get("tokens_remaining", 0),
-            "plan": user.get("plan", "Free")
-        })
-    except Exception as e:
-        logger.error(f"Error getting token stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get token stats: {str(e)}")
 
 
 # PayPal Payment Endpoints

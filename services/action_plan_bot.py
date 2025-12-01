@@ -355,66 +355,36 @@ Example - Adding total row for Jan column:
 - User: "add numbers 1-50 in column B"
 - User: "add 50 rows with numbers 1-50"
 - User: "fill column B with 1 to 50"
-→ These mean: Add numbers 1-50 in the specified column, starting from where that column's data ends
-→ CRITICAL: Analyze where the SPECIFIC COLUMN has data, NOT where the entire sheet ends
-→ Find the last row where that column has a non-empty value
-→ Add new rows starting from the next row after that column's data ends
+→ These mean: Add 50 NEW ROWS to the DataFrame, each with a number in column B
 → Use operations with Python code to add multiple rows at once
 → DO NOT use add_row JSON format for multiple rows - use operations instead
 
 **CORRECT - Adding multiple rows with sequential data (e.g., numbers 1-50 in column B):**
-Step 1: Find the LAST row where the target column has data (not first, not whole sheet)
-Step 2: If column is empty, start filling from row 0
-Step 3: If column has data, start filling from the next row after the last data
-Step 4: Directly assign values to the column - DO NOT use pd.concat (it shifts existing data)
-Step 5: Extend DataFrame if needed to accommodate all values
-
 {
   "operations": [{
-    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); start_row = (df.index.get_loc(valid_indices[-1]) + 1) if valid_indices else 0; end_row = start_row + 50; rows_needed = max(0, end_row - len(df)); df = pd.concat([df, pd.DataFrame([{}] * rows_needed)], ignore_index=True) if rows_needed > 0 else df; df[column_name].iloc[start_row:end_row] = list(range(1, 51))",
-    "description": "Find last row where column B has data (or start at 0 if empty), fill 50 cells with numbers 1-50 without shifting existing data",
+    "python_code": "new_rows = [{'B': i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
+    "description": "Add 50 new rows with numbers 1-50 in column B",
     "result_type": "dataframe"
   }]
 }
 
-**BETTER - Continue sequence from last value:**
+**CORRECT - Adding multiple rows with data in specific column:**
+If column name is "Id" or "ColumnB" or similar:
 {
   "operations": [{
-    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); last_idx = valid_indices[-1] if valid_indices else None; start_row = (df.index.get_loc(last_idx) + 1) if last_idx is not None else 0; last_val = df[column_name].iloc[df.index.get_loc(last_idx)] if last_idx is not None else None; start_num = (int(last_val) + 1) if (last_val is not None and pd.notna(last_val) and isinstance(last_val, (int, float))) else 1; end_row = start_row + 50; rows_needed = max(0, end_row - len(df)); df = pd.concat([df, pd.DataFrame([{}] * rows_needed)], ignore_index=True) if rows_needed > 0 else df; df[column_name].iloc[start_row:end_row] = list(range(start_num, start_num + 50))",
-    "description": "Find last value in column B (or start at 0 if empty), continue sequence, fill 50 cells without shifting existing data",
+    "python_code": "column_name = 'Id'; new_rows = [{column_name: i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
+    "description": "Add 50 new rows with numbers 1-50 in specified column",
     "result_type": "dataframe"
   }]
 }
-
-**SIMPLEST AND RECOMMENDED - Analyze specific column, fill without shifting:**
-{
-  "operations": [{
-    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); start_row = (df.index.get_loc(valid_indices[-1]) + 1) if valid_indices else 0; end_row = start_row + 50; rows_needed = max(0, end_row - len(df)); df = pd.concat([df, pd.DataFrame([{}] * rows_needed)], ignore_index=True) if rows_needed > 0 else df; df[column_name].iloc[start_row:end_row] = list(range(1, 51))",
-    "description": "Find last row where column B has data (or start at 0 if empty), fill 50 cells with numbers 1-50 without shifting existing data",
-    "result_type": "dataframe"
-  }]
-}
-
-**IMPORTANT:** The key is to analyze the SPECIFIC COLUMN, not the entire sheet. 
-- If column "Id" has data in rows 1-10 but is empty in rows 11-16
-- And other columns have data in row 11
-- You should FILL the new numbers starting at row 11 (where column "Id" data ends)
-- NOT append at the end of the sheet (row 17)
-- If column "Id" is COMPLETELY EMPTY, fill from position 0 (beginning)
-- Use direct column assignment: df[column_name].iloc[start:end] = values
-- DO NOT use pd.concat to insert rows - it shifts existing data
-- Only extend DataFrame if needed: if end_row > len(df): add empty rows first
 
 **CRITICAL RULES FOR ADDING MULTIPLE ROWS:**
 1. When adding MULTIPLE rows (more than 1), use operations with Python code
-2. CRITICAL: Analyze where the SPECIFIC COLUMN has data, NOT the entire sheet
-3. Find the last row where the target column has a non-empty value using: mask = df[column_name].notna() & (df[column_name] != ''); last_row = mask.idxmax() if mask.any() else -1
-4. Add new rows starting from where that column's data ends, not where the sheet ends
-5. Create a list of dictionaries, each dictionary is one row
-6. Each dictionary should contain ONLY the columns you need to fill
-7. Use pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True) to add all rows at once
-8. DO NOT try to assign a list directly to df.loc or df[column] - this causes "Length of values does not match length of index" error
-9. DO NOT use add_row JSON format for multiple rows - it's only for single rows
+2. Create a list of dictionaries, each dictionary is one row
+3. Each dictionary should contain ONLY the columns you need to fill
+4. Use pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True) to add all rows at once
+5. DO NOT try to assign a list directly to df.loc or df[column] - this causes "Length of values does not match length of index" error
+6. DO NOT use add_row JSON format for multiple rows - it's only for single rows
 
 **EXAMPLE - User asks "sum of column Jan":**
 {
@@ -681,9 +651,20 @@ Include "operations" array with "python_code" for each operation.
             # Normalize action plan
             normalized_plan = self._normalize_action_plan(action_plan)
             
-            prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
-            completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
-            tokens_used = prompt_tokens + completion_tokens
+            # Extract token usage from OpenAI API response
+            # CRITICAL: Only count OpenAI tokens, ensure usage object exists
+            if response.usage is None:
+                logger.error("⚠️ WARNING: OpenAI response.usage is None - cannot calculate tokens!")
+                prompt_tokens = 0
+                completion_tokens = 0
+                tokens_used = 0
+            else:
+                prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
+                completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
+                tokens_used = prompt_tokens + completion_tokens
+                
+                if tokens_used == 0:
+                    logger.warning("⚠️ WARNING: Token count is 0 - OpenAI API may not have returned usage info")
             
             logger.info(f"ActionPlanBot tokens: prompt={prompt_tokens}, completion={completion_tokens}, total={tokens_used}")
             

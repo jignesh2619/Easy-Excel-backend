@@ -274,7 +274,7 @@ KNOWLEDGE BASE CONTEXT:
 
 TASK DECISION HINT (use as guidance, not strict rule):
 Based on the user prompt, the suggested task is: {task_suggestions.get('suggested_task', 'auto-detect')}
-Reasoning: {', '.join(str(item) for item in task_suggestions.get('reasoning', []))}
+Reasoning: {', '.join(task_suggestions.get('reasoning', []))}
 Confidence: {task_suggestions.get('confidence', 0)}
 {similar_examples_text}
 {sample_explanation_text}
@@ -296,9 +296,21 @@ Include "operations" array with "execution_instructions" for each operation."""
             
             content = (response.choices[0].message.content or "").strip()
             
-            prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
-            completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
-            tokens_used = prompt_tokens + completion_tokens
+            # Extract token usage from OpenAI API response
+            # CRITICAL: Only count OpenAI tokens, ensure usage object exists
+            if response.usage is None:
+                logger.error("⚠️ WARNING: OpenAI response.usage is None - cannot calculate tokens!")
+                prompt_tokens = 0
+                completion_tokens = 0
+                tokens_used = 0
+            else:
+                prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
+                completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
+                tokens_used = prompt_tokens + completion_tokens
+                
+                if tokens_used == 0:
+                    logger.warning("⚠️ WARNING: Token count is 0 - OpenAI API may not have returned usage info")
+            
             logger.info(
                 "OpenAI token usage: prompt=%s, completion=%s, total=%s",
                 prompt_tokens,
