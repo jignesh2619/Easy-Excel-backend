@@ -371,7 +371,7 @@ Step 5: Extend DataFrame if needed to accommodate all values
 
 {
   "operations": [{
-    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); start_row = (df.index.get_loc(valid_indices[-1]) + 1) if valid_indices else 0; end_row = start_row + 50; if end_row > len(df): df = pd.concat([df, pd.DataFrame([{}] * (end_row - len(df)))], ignore_index=True); df[column_name].iloc[start_row:end_row] = list(range(1, 51))",
+    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); start_row = (df.index.get_loc(valid_indices[-1]) + 1) if valid_indices else 0; end_row = start_row + 50; rows_needed = max(0, end_row - len(df)); df = pd.concat([df, pd.DataFrame([{}] * rows_needed)], ignore_index=True) if rows_needed > 0 else df; df[column_name].iloc[start_row:end_row] = list(range(1, 51))",
     "description": "Find last row where column B has data (or start at 0 if empty), fill 50 cells with numbers 1-50 without shifting existing data",
     "result_type": "dataframe"
   }]
@@ -380,7 +380,7 @@ Step 5: Extend DataFrame if needed to accommodate all values
 **BETTER - Continue sequence from last value:**
 {
   "operations": [{
-    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); last_idx = valid_indices[-1] if valid_indices else None; start_row = (df.index.get_loc(last_idx) + 1) if last_idx is not None else 0; last_val = df[column_name].iloc[df.index.get_loc(last_idx)] if last_idx is not None else None; start_num = (int(last_val) + 1) if (last_val is not None and pd.notna(last_val) and isinstance(last_val, (int, float))) else 1; end_row = start_row + 50; if end_row > len(df): df = pd.concat([df, pd.DataFrame([{}] * (end_row - len(df)))], ignore_index=True); df[column_name].iloc[start_row:end_row] = list(range(start_num, start_num + 50))",
+    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); last_idx = valid_indices[-1] if valid_indices else None; start_row = (df.index.get_loc(last_idx) + 1) if last_idx is not None else 0; last_val = df[column_name].iloc[df.index.get_loc(last_idx)] if last_idx is not None else None; start_num = (int(last_val) + 1) if (last_val is not None and pd.notna(last_val) and isinstance(last_val, (int, float))) else 1; end_row = start_row + 50; rows_needed = max(0, end_row - len(df)); df = pd.concat([df, pd.DataFrame([{}] * rows_needed)], ignore_index=True) if rows_needed > 0 else df; df[column_name].iloc[start_row:end_row] = list(range(start_num, start_num + 50))",
     "description": "Find last value in column B (or start at 0 if empty), continue sequence, fill 50 cells without shifting existing data",
     "result_type": "dataframe"
   }]
@@ -389,7 +389,7 @@ Step 5: Extend DataFrame if needed to accommodate all values
 **SIMPLEST AND RECOMMENDED - Analyze specific column, fill without shifting:**
 {
   "operations": [{
-    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); start_row = (df.index.get_loc(valid_indices[-1]) + 1) if valid_indices else 0; end_row = start_row + 50; if end_row > len(df): df = pd.concat([df, pd.DataFrame([{}] * (end_row - len(df)))], ignore_index=True); df[column_name].iloc[start_row:end_row] = list(range(1, 51))",
+    "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); start_row = (df.index.get_loc(valid_indices[-1]) + 1) if valid_indices else 0; end_row = start_row + 50; rows_needed = max(0, end_row - len(df)); df = pd.concat([df, pd.DataFrame([{}] * rows_needed)], ignore_index=True) if rows_needed > 0 else df; df[column_name].iloc[start_row:end_row] = list(range(1, 51))",
     "description": "Find last row where column B has data (or start at 0 if empty), fill 50 cells with numbers 1-50 without shifting existing data",
     "result_type": "dataframe"
   }]
