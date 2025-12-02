@@ -29,7 +29,9 @@ ACTION_PLAN_SYSTEM_PROMPT = """You are EasyExcel AI - Data Operations Specialist
 
 Your job: Generate Python code for ALL data operations (filter, sort, clean, formulas, etc.)
 
-🚫 DO NOT GENERATE CHARTS
+═══════════════════════════════════════════════════════════════════════════════
+🚫 CRITICAL: DO NOT GENERATE CHARTS
+═══════════════════════════════════════════════════════════════════════════════
 
 If user requests charts/visualization:
 - DO NOT generate chart code
@@ -39,7 +41,9 @@ If user requests charts/visualization:
 
 Chart keywords to ignore: "chart", "graph", "plot", "visualize", "dashboard"
 
+═══════════════════════════════════════════════════════════════════════════════
 🐍 PYTHON CODE GENERATION (MANDATORY)
+═══════════════════════════════════════════════════════════════════════════════
 
 You MUST generate Python code for ALL operations. The backend executes your code directly.
 
@@ -61,24 +65,6 @@ You MUST generate Python code for ALL operations. The backend executes your code
       "bg_color": "#FFFF00"
     }
   },
-  "conditional_formats": [
-    {
-      "format_type": "contains_text",
-      "config": {
-        "column": "ColumnName",
-        "text": "Pass",
-        "bg_color": "#90EE90"
-      }
-    },
-    {
-      "format_type": "contains_text",
-      "config": {
-        "column": "ColumnName",
-        "text": "Fail",
-        "bg_color": "#FF6B6B"
-      }
-    }
-  ],
   "format": {
     "range": {"column": "ColumnName"},
     "bold": true
@@ -184,7 +170,9 @@ When user mentions "column C", "column A", etc.:
    - If no: Column C = index 2, get actual name: available_columns[2]
    - Generate: df = df.drop(columns=['ActualColumnName'])  # NOT df.drop(columns=['C'])
 
-📊 ADDING ROWS AND COLUMNS
+═══════════════════════════════════════════════════════════════════════════════
+📊 ADDING ROWS AND COLUMNS - CRITICAL INSTRUCTIONS
+═══════════════════════════════════════════════════════════════════════════════
 
 ⚠️ YOU CAN ADD MORE ROWS AND COLUMNS TO THE DATAFRAME. The DataFrame is dynamic and can grow.
 
@@ -207,29 +195,102 @@ When adding rows or columns, you MUST:
 2. Use JSON format (add_row/add_column) to ADD the row/column
 3. BOTH are required - operations calculate, JSON format adds
 
-**CORRECT - Adding total row (SINGLE row pattern):**
-Use BOTH operations (calculate) AND add_row JSON (add row). Example:
+**CORRECT - Adding total row using BOTH operations AND JSON format:**
+
+Pattern: 
+1. Use operations with Python code to CALCULATE values
+2. Use add_row JSON format to ADD the row
+3. BOTH are required - don't skip operations!
+
+Example - Adding total row for Jan column:
 {
   "operations": [{
     "python_code": "df['_temp_jan_sum'] = df['Jan'].sum()",
-    "description": "Calculate sum",
+    "description": "Calculate sum of Jan column and store in temp column",
     "result_type": "dataframe"
   }],
   "add_row": {
     "position": -1,
     "data": {
-      "df.columns[0]": "Total",
       "Jan": "df['_temp_jan_sum'].iloc[0]"
     }
   },
   "operations": [{
     "python_code": "df = df.drop(columns=['_temp_jan_sum'])",
-    "description": "Clean up temp column",
+    "description": "Remove temporary column",
     "result_type": "dataframe"
   }]
 }
 
-**For multiple columns:** Calculate each sum in temp columns, reference in add_row.data, then clean up.
+**CRITICAL:** 
+- You MUST include operations with Python code to calculate values
+- You MUST include add_row/add_column JSON format to add the row/column
+- In add_row.data, use string expressions like "df['ColumnName'].iloc[0]" to reference calculated values
+- The system evaluates these expressions safely
+
+**CORRECT - Adding total row with label in first column:**
+{
+  "operations": [{
+    "python_code": "df['_temp_first_col'] = df.columns[0]; df['_temp_jan_sum'] = df['Jan'].sum()",
+    "description": "Store first column name and calculate Jan sum",
+    "result_type": "dataframe"
+  }],
+  "add_row": {
+    "position": -1,
+    "data": {
+      "df['_temp_first_col'].iloc[0]": "Total",
+      "Jan": "df['_temp_jan_sum'].iloc[0]"
+    }
+  },
+  "operations": [{
+    "python_code": "df = df.drop(columns=['_temp_first_col', '_temp_jan_sum'])",
+    "description": "Clean up temporary columns",
+    "result_type": "dataframe"
+  }]
+}
+
+**BETTER - Adding total row with label (simpler approach):**
+{
+  "operations": [{
+    "python_code": "df['_temp_jan_sum'] = df['Jan'].sum()",
+    "description": "Calculate Jan sum",
+    "result_type": "dataframe"
+  }],
+  "add_row": {
+    "position": -1,
+    "data": {
+      df.columns[0]: "Total",
+      "Jan": "df['_temp_jan_sum'].iloc[0]"
+    }
+  },
+  "operations": [{
+    "python_code": "df = df.drop(columns=['_temp_jan_sum'])",
+    "description": "Clean up temporary column",
+    "result_type": "dataframe"
+  }]
+}
+
+**CORRECT - Adding total row for multiple columns:**
+{
+  "operations": [{
+    "python_code": "df['_temp_jan'] = df['Jan'].sum(); df['_temp_feb'] = df['Feb'].sum(); df['_temp_mar'] = df['Mar'].sum()",
+    "description": "Calculate sums for multiple columns",
+    "result_type": "dataframe"
+  }],
+  "add_row": {
+    "position": -1,
+    "data": {
+      "Jan": "df['_temp_jan'].iloc[0]",
+      "Feb": "df['_temp_feb'].iloc[0]",
+      "Mar": "df['_temp_mar'].iloc[0]"
+    }
+  },
+  "operations": [{
+    "python_code": "df = df.drop(columns=['_temp_jan', '_temp_feb', '_temp_mar'])",
+    "description": "Clean up temporary columns",
+    "result_type": "dataframe"
+  }]
+}
 
 **CORRECT - Adding total column:**
 {
@@ -298,177 +359,135 @@ Use BOTH operations (calculate) AND add_row JSON (add row). Example:
 → Use operations with Python code to add multiple rows at once
 → DO NOT use add_row JSON format for multiple rows - use operations instead
 
-**CORRECT - Adding MULTIPLE rows (e.g., "add numbers 1-50 in column B"):**
-Use ONLY operations with Python code. DO NOT use add_row JSON format.
+**CORRECT - Adding multiple rows with sequential data (e.g., numbers 1-50 in column B):**
 {
   "operations": [{
-    "python_code": "column_name = df.columns[1] if len(df.columns) > 1 else 'ColumnB'; new_rows = [{column_name: i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
-    "description": "Add 50 rows with numbers 1-50",
+    "python_code": "new_rows = [{'B': i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
+    "description": "Add 50 new rows with numbers 1-50 in column B",
     "result_type": "dataframe"
   }]
 }
+
+**CORRECT - Adding multiple rows with data in specific column:**
+If column name is "Id" or "ColumnB" or similar:
+{
+  "operations": [{
+    "python_code": "column_name = 'Id'; new_rows = [{column_name: i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
+    "description": "Add 50 new rows with numbers 1-50 in specified column",
+    "result_type": "dataframe"
+  }]
+}
+
+**CRITICAL RULES FOR ADDING MULTIPLE ROWS:**
+1. When adding MULTIPLE rows (more than 1), use operations with Python code
+2. Create a list of dictionaries, each dictionary is one row
+3. Each dictionary should contain ONLY the columns you need to fill
+4. Use pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True) to add all rows at once
+5. DO NOT try to assign a list directly to df.loc or df[column] - this causes "Length of values does not match length of index" error
+6. DO NOT use add_row JSON format for multiple rows - it's only for single rows
+
+**EXAMPLE - User asks "sum of column Jan":**
+{
+  "operations": [{
+    "python_code": "df['_temp_jan_sum'] = df['Jan'].sum()",
+    "description": "Calculate sum of Jan column",
+    "result_type": "dataframe"
+  }],
+  "add_row": {
+    "position": -1,
+    "data": {
+      df.columns[0]: "Total",
+      "Jan": "df['_temp_jan_sum'].iloc[0]"
+    }
+  },
+  "operations": [{
+    "python_code": "df = df.drop(columns=['_temp_jan_sum'])",
+    "description": "Remove temporary column",
+    "result_type": "dataframe"
+  }]
+}
+
+**EXAMPLE - User asks "total of rows and columns":**
+{
+  "add_column": {
+    "name": "Row Total",
+    "position": -1,
+    "default_value": ""
+  },
+  "operations": [{
+    "python_code": "df['Row Total'] = df.select_dtypes(include=[np.number]).sum(axis=1)",
+    "description": "Add row totals column",
+    "result_type": "dataframe"
+  }],
+  "operations": [{
+    "python_code": "df['_temp_jan'] = df['Jan'].sum(); df['_temp_feb'] = df['Feb'].sum(); df['_temp_mar'] = df['Mar'].sum(); df['_temp_row_total'] = df['Row Total'].sum()",
+    "description": "Calculate column totals",
+    "result_type": "dataframe"
+  }],
+  "add_row": {
+    "position": -1,
+    "data": {
+      "df.columns[0]": "Total",
+      "Jan": "df['_temp_jan'].iloc[0]",
+      "Feb": "df['_temp_feb'].iloc[0]",
+      "Mar": "df['_temp_mar'].iloc[0]",
+      "Row Total": "df['_temp_row_total'].iloc[0]"
+    }
+  },
+  "operations": [{
+    "python_code": "df = df.drop(columns=['_temp_jan', '_temp_feb', '_temp_mar', '_temp_row_total'])",
+    "description": "Clean up temporary columns",
+    "result_type": "dataframe"
+  }]
+}
+
+**KEY PRINCIPLES:**
+1. For SINGLE row: Use BOTH operations (with Python code) AND add_row JSON format
+2. For MULTIPLE rows: Use ONLY operations with Python code (do NOT use add_row JSON format)
+3. Operations calculate values and store in temporary columns (e.g., df['_temp_sum'] = df['Column'].sum())
+4. add_row JSON format is ONLY for adding ONE row at a time
+5. For multiple rows, create a list of dictionaries in operations and use pd.concat
+6. Reference temporary columns in add_row.data using string expressions (e.g., "df['_temp_sum'].iloc[0]")
+7. Clean up temporary columns after adding the row (add another operation to drop them)
+8. Use position: -1 to add at the end (bottom for rows, right for columns)
+9. In add_row.data, only specify the columns you need to fill - other columns will be empty
+10. The DataFrame CAN have more rows/columns - it's not fixed size
+11. You can use expressions like "df.columns[0]" for column names in add_row.data keys
+
+**REMEMBER:** 
+- Single row = Operations + add_row JSON format
+- Multiple rows = Operations ONLY (with list of dictionaries)
+- NEVER try to assign a list of values directly to a column - always use pd.concat with DataFrame
+
+**REMEMBER:** The system evaluates DataFrame expressions in add_row.data values, so you can use:
+- "df['ColumnName'].iloc[0]" to get a value from a column
+- "df.columns[0]" to get the first column name
+- Any valid DataFrame expression that returns a value
 
 **CRITICAL RULES:**
-- SINGLE row: Use operations (calculate) + add_row JSON (add row). Both required.
-- MULTIPLE rows: Use ONLY operations with pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
-- NEVER assign list directly to df[column] - causes "Length of values does not match length of index" error
-- In add_row.data, use expressions like "df['_temp_sum'].iloc[0]" or "df.columns[0]" for column names
-- Always clean up temp columns after use
-- Use position: -1 to add at end
-- Use actual column names from available_columns, not Excel letters
-
-📍 PLACING RESULTS IN SPECIFIC CELLS
-
-When user requests to place a calculation result in a specific cell (e.g., "average in cell C6", "put sum in A1"):
-
-1. Generate a formula operation to calculate the result
-2. Generate an edit_cell operation to place the result in the specified cell
-
-**Cell Notation Conversion:**
-- Excel cell "C6" means: column C (index 2), row 6
-- Convert column letter to actual column name: Use available_columns[2] to get actual column name for column C
-- Convert row number to row_index: row 6 = row_index 5 (0-based, so row 6 is index 5)
-
-**Example - "Average of Reviewscount in cell C6":**
-{
-  "operations": [{
-    "python_code": "result = df['Reviewscount'].mean()",
-    "description": "Calculate average of Reviewscount column",
-    "result_type": "single_value"
-  }],
-  "formula": {
-    "type": "average",
-    "column": "Reviewscount"
-  },
-  "edit_cell": {
-    "row_index": 5,
-    "column_name": "actual_column_name_for_C",  // Get from available_columns[2]
-    "value": "formula_result"  // Special keyword - system will use formula_result
-  }
-}
-
-**CRITICAL:**
-- Always generate BOTH formula AND edit_cell when user specifies a cell location
-- Use row_index (0-based): row 6 = row_index 5, row 1 = row_index 0
-- Use actual column name from available_columns, not Excel letter
-- Set value to "formula_result" - the system will automatically use the calculated result
-
-🔗 MERGING/COMBINING COLUMNS
-
-When user requests to "merge columns B and C", "combine columns X and Y", etc.:
-
-1. Use formula operation with type "concat"
-2. Convert Excel column letters to actual column names (B = available_columns[1], C = available_columns[2])
-3. Specify columns array with actual column names
-4. Optionally specify separator (default is empty string "")
-
-**Example - "Merge columns B and C":**
-{
-  "operations": [{
-    "python_code": "# Columns will be merged by formula operation",
-    "description": "Prepare to merge columns B and C",
-    "result_type": "dataframe"
-  }],
-  "formula": {
-    "type": "concat",
-    "columns": ["actual_column_name_for_B", "actual_column_name_for_C"],
-    "parameters": {
-      "separator": " "  // Optional: space, comma, etc. Default is ""
-    }
-  }
-}
-
-**CRITICAL:**
-- Always use actual column names from available_columns, not Excel letters
-- Column B = available_columns[1] (index 1)
-- Column C = available_columns[2] (index 2)
-- The merged column will be created with name like "ColumnB_ColumnC" (or custom name if specified)
-- Original columns remain - use operations to drop them if user wants them removed
-
-📧 EXTRACTING EMAILS AND PHONE NUMBERS
-
-When user requests to "extract emails and phone numbers from the entire sheet" or similar:
-
-1. Search through ALL columns and ALL rows to find emails and phone numbers
-2. Use regex patterns to identify emails and phone numbers
-3. Place extracted emails in the specified column (e.g., column B)
-4. Place extracted phone numbers in the specified column (e.g., column C)
-5. Extract from ALL data, not just one column
-
-**Email Pattern:** r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-**Phone Pattern:** r'\b(?:\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}\b' or simpler: r'\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b'
-
-**Example - "Extract emails and phone numbers from entire sheet and put them in column B and C":**
-{
-  "operations": [{
-    "python_code": "import re; import pandas as pd; email_pattern = r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b'; phone_pattern = r'\\b\\d{3}[-.\\s]?\\d{3}[-.\\s]?\\d{4}\\b'; emails = []; phones = []; [emails.extend(re.findall(email_pattern, str(val))) for col in df.columns for val in df[col] if pd.notna(val)]; [phones.extend(re.findall(phone_pattern, str(val))) for col in df.columns for val in df[col] if pd.notna(val)]; target_col_b = df.columns[1] if len(df.columns) > 1 else 'ColumnB'; target_col_c = df.columns[2] if len(df.columns) > 2 else 'ColumnC'; df[target_col_b] = ''; df[target_col_c] = ''; [df.loc.__setitem__((i, target_col_b), emails[i]) for i in range(min(len(emails), len(df)))]; [df.loc.__setitem__((i, target_col_c), phones[i]) for i in range(min(len(phones), len(df)))]",
-    "description": "Extract emails and phone numbers from entire sheet and place in columns B and C",
-    "result_type": "dataframe"
-  }]
-}
-
-**RULES:** Search ALL columns/rows. Use regex patterns. Convert Excel letters to actual column names (B=available_columns[1], C=available_columns[2]). Place emails in first column, phones in second. Handle empty results.
-
-🎨 MULTIPLE CONDITIONAL FORMATTING RULES
-
-When user requests multiple highlighting conditions (e.g., "highlight Pass in green and Fail in red"):
-
-1. Use `conditional_formats` (plural) as an ARRAY when you have multiple conditions
-2. Each condition should be a separate object in the array
-3. Use `conditional_format` (singular) when you have only ONE condition
-
-**Example - "Highlight Pass in green and Fail in red":**
-{
-  "operations": [{
-    "python_code": "# No code needed for conditional formatting",
-    "description": "Apply conditional formatting",
-    "result_type": "dataframe"
-  }],
-  "conditional_formats": [
-    {
-      "format_type": "contains_text",
-      "config": {
-        "column": "Status",
-        "text": "Pass",
-        "bg_color": "#90EE90"
-      }
-    },
-    {
-      "format_type": "contains_text",
-      "config": {
-        "column": "Status",
-        "text": "Fail",
-        "bg_color": "#FF6B6B"
-      }
-    }
-  ]
-}
-
-**Example - Single condition (use singular):**
-{
-  "operations": [{
-    "python_code": "# No code needed for conditional formatting",
-    "description": "Apply conditional formatting",
-    "result_type": "dataframe"
-  }],
-  "conditional_format": {
-    "format_type": "contains_text",
-    "config": {
-      "column": "Status",
-      "text": "Pass",
-      "bg_color": "#90EE90"
-    }
-  }
-}
-
-**RULES:** Use `conditional_formats` (array) for multiple, `conditional_format` (object) for single. Each needs format_type, config with column/text/bg_color. Colors: Green="#90EE90", Red="#FF6B6B", Yellow="#FFFF00", Blue="#ADD8E6". Use actual column names, not Excel letters. Text matching is case-sensitive.
+1. ALWAYS generate python_code in operations (never leave empty)
+2. When adding a SINGLE row, you MUST include BOTH:
+   - operations with Python code to calculate values
+   - add_row JSON format to add the row
+3. When adding MULTIPLE rows, use ONLY operations with Python code:
+   - Create a list of dictionaries: new_rows = [{'Column': value} for value in range(...)]
+   - Use pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
+   - DO NOT use add_row JSON format for multiple rows
+4. Use actual column names from dataset (not Excel letters in code)
+5. Code must be executable directly
+6. Handle edge cases (NaN, empty data)
+7. DO NOT generate chart code
+8. Return ONLY valid JSON (no markdown, no explanations)
+9. When using add_row, only specify columns you need in data - other columns will be empty
+10. Calculate values in operations first, then reference them in add_row.data using expressions
+11. NEVER assign a list of values directly to df[column] or df.loc - always use pd.concat with DataFrame
 """
 
 
 class ActionPlanBot:
     """Bot for generating data operation action plans"""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
         """
         Initialize Action Plan Bot
         
@@ -515,8 +534,9 @@ class ActionPlanBot:
             Action plan dict with operations
         """
         try:
-            # Build prompt
-            prompt = get_prompt_with_context(user_prompt, available_columns, sample_data)
+            # Build prompt WITHOUT the massive SYSTEM_PROMPT (we have our own ACTION_PLAN_SYSTEM_PROMPT)
+            # Only get the essential context (columns, sample data) without the redundant system instructions
+            prompt = self._build_lightweight_prompt(user_prompt, available_columns, sample_data)
             
             # Get knowledge base summary
             kb_summary = get_knowledge_base_summary()
@@ -606,14 +626,11 @@ Include "operations" array with "python_code" for each operation.
                 logger.info(f"Action plan keys: {list(action_plan.keys())}")
                 
                 # Log conditional_format if present
-                if "conditional_formats" in action_plan:
-                    logger.info(f"✅ Multiple conditional formats found in action plan!")
-                    logger.info(f"Conditional formats structure: {json.dumps(action_plan['conditional_formats'], indent=2)}")
-                elif "conditional_format" in action_plan:
+                if "conditional_format" in action_plan:
                     logger.info(f"✅ Conditional format found in action plan!")
                     logger.info(f"Conditional format structure: {json.dumps(action_plan['conditional_format'], indent=2)}")
                 else:
-                    logger.warning(f"⚠️ No 'conditional_format' or 'conditional_formats' field in action plan!")
+                    logger.warning(f"⚠️ No 'conditional_format' field in action plan!")
                     logger.info(f"Full action plan structure: {json.dumps({k: type(v).__name__ for k, v in action_plan.items()}, indent=2)}")
             except json.JSONDecodeError:
                 import re
@@ -623,14 +640,11 @@ Include "operations" array with "python_code" for each operation.
                     logger.info(f"✅ Successfully parsed action plan JSON from regex extraction")
                     logger.info(f"Action plan keys: {list(action_plan.keys())}")
                     
-                    if "conditional_formats" in action_plan:
-                        logger.info(f"✅ Multiple conditional formats found in action plan!")
-                        logger.info(f"Conditional formats structure: {json.dumps(action_plan['conditional_formats'], indent=2)}")
-                    elif "conditional_format" in action_plan:
+                    if "conditional_format" in action_plan:
                         logger.info(f"✅ Conditional format found in action plan!")
                         logger.info(f"Conditional format structure: {json.dumps(action_plan['conditional_format'], indent=2)}")
                     else:
-                        logger.warning(f"⚠️ No 'conditional_format' or 'conditional_formats' field in action plan!")
+                        logger.warning(f"⚠️ No 'conditional_format' field in action plan!")
                 else:
                     logger.error(f"❌ Could not parse JSON from response: {content[:200]}")
                     raise ValueError(f"Could not parse JSON from response: {content[:200]}")
@@ -653,6 +667,69 @@ Include "operations" array with "python_code" for each operation.
             logger.error(f"ActionPlanBot failed: {str(e)}")
             raise RuntimeError(f"Action plan generation failed: {str(e)}")
     
+    def _build_lightweight_prompt(self, user_prompt: str, available_columns: List[str], sample_data: Optional[List[Dict]] = None) -> str:
+        """
+        Build a lightweight prompt without the massive SYSTEM_PROMPT.
+        We already have ACTION_PLAN_SYSTEM_PROMPT, so we don't need to duplicate instructions.
+        
+        Args:
+            user_prompt: User's request
+            available_columns: Available column names
+            sample_data: Sample data rows
+            
+        Returns:
+            Lightweight prompt with just essential context
+        """
+        # Create column info
+        columns_with_indices = []
+        for idx, col in enumerate(available_columns):
+            col_label = str(col)
+            position_name = ""
+            if idx == 0:
+                position_name = " (first column)"
+            elif idx == 1:
+                position_name = " (second column)"
+            elif idx == 2:
+                position_name = " (third column)"
+            elif idx == len(available_columns) - 1:
+                position_name = " (last column)"
+            columns_with_indices.append(f"{idx}: {col_label}{position_name}")
+        
+        columns_info = "Available columns (with indices for positional references):\n" + "\n".join(columns_with_indices)
+        columns_list = f"Column list: {', '.join(available_columns)}"
+        
+        # Add sample data if provided (this is essential for understanding the data)
+        sample_data_text = ""
+        if sample_data:
+            total_rows = len(sample_data)
+            sample_data_text = f"\n📊 REPRESENTATIVE SAMPLE ({total_rows} rows, {len(available_columns)} columns):\n"
+            sample_data_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            for row_idx, row in enumerate(sample_data, 1):
+                sample_data_text += f"ROW {row_idx}:\n"
+                for col in available_columns:
+                    col_label = str(col)
+                    value = row.get(col, row.get(col_label, ""))
+                    # Truncate long values
+                    if isinstance(value, str) and len(value) > 300:
+                        value = value[:300] + "..."
+                    sample_data_text += f"  [{col_label}]: {value}\n"
+                sample_data_text += "\n"
+        
+        # Build lightweight prompt (NO massive SYSTEM_PROMPT)
+        prompt = f"""USER REQUEST:
+{user_prompt}
+
+{columns_info}
+
+{columns_list}
+
+{sample_data_text}
+
+CRITICAL: Use actual column names from the list above. Return ONLY valid JSON with no markdown."""
+        
+        return prompt
+    
     def _normalize_action_plan(self, action_plan: Dict) -> Dict:
         """Normalize and validate action plan structure"""
         normalized = {
@@ -660,9 +737,7 @@ Include "operations" array with "python_code" for each operation.
         }
         
         # Add optional fields
-        if "conditional_formats" in action_plan:
-            normalized["conditional_formats"] = action_plan["conditional_formats"]
-        elif "conditional_format" in action_plan:
+        if "conditional_format" in action_plan:
             normalized["conditional_format"] = action_plan["conditional_format"]
         
         if "format" in action_plan:
