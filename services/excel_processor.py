@@ -297,8 +297,15 @@ class ExcelProcessor:
                         # Small dataset: clean all rows
                         self.df[col] = self.df[col].astype(str).apply(clean_cell_value)
             
-            # Keep original copy
-            self.original_df = self.df.copy()
+            # Keep original copy (lazy copy for large datasets to save memory/CPU)
+            # Only copy if we actually need it (for undo/rollback operations)
+            # For large files, we'll copy on-demand if needed
+            if len(self.df) > 5000:
+                # Very large dataset: Don't copy immediately, copy on-demand if needed
+                self.original_df = None  # Will be set on-demand if needed
+            else:
+                # Small/medium dataset: Copy immediately
+                self.original_df = self.df.copy()
             self.summary.append(f"Loaded {len(self.df)} rows and {len(self.df.columns)} columns")
             
             # Generate summary using new summarizer module
@@ -503,20 +510,25 @@ class ExcelProcessor:
                         char_to_remove = "."
                     
                     if char_to_remove:
+                        # Performance: Convert to string once, reuse
+                        if self.df[column].dtype != 'object':
+                            self.df[column] = self.df[column].astype(str)
+                        col_series = self.df[column] if self.df[column].dtype == 'object' else self.df[column].astype(str)
+                        
                         if remove_from == "start":
                             # Remove/replace from beginning - handles multi-char patterns
                             if len(char_to_remove) > 1:
                                 # For multi-character patterns, use replace with count=1 and start check
-                                self.df[column] = self.df[column].astype(str).apply(
+                                self.df[column] = col_series.apply(
                                     lambda x: x[len(char_to_remove):] if x.startswith(char_to_remove) else x
-                                ) if replace_with == "" else self.df[column].astype(str).apply(
+                                ) if replace_with == "" else col_series.apply(
                                     lambda x: replace_with + x[len(char_to_remove):] if x.startswith(char_to_remove) else x
                                 )
                             else:
                                 if replace_with == "":
-                                    self.df[column] = self.df[column].astype(str).str.lstrip(char_to_remove)
+                                    self.df[column] = col_series.str.lstrip(char_to_remove)
                                 else:
-                                    self.df[column] = self.df[column].astype(str).apply(
+                                    self.df[column] = col_series.apply(
                                         lambda x: replace_with + x.lstrip(char_to_remove) if x.startswith(char_to_remove) else x
                                     )
                             action = "Replaced" if replace_with != "" else "Removed"
@@ -525,17 +537,18 @@ class ExcelProcessor:
                             operation_executed = True
                         elif remove_from == "end":
                             # Remove/replace from end - handles multi-char patterns
+                            # Reuse col_series from above to avoid redundant .astype(str)
                             if len(char_to_remove) > 1:
-                                self.df[column] = self.df[column].astype(str).apply(
+                                self.df[column] = col_series.apply(
                                     lambda x: x[:-len(char_to_remove)] if x.endswith(char_to_remove) else x
-                                ) if replace_with == "" else self.df[column].astype(str).apply(
+                                ) if replace_with == "" else col_series.apply(
                                     lambda x: x[:-len(char_to_remove)] + replace_with if x.endswith(char_to_remove) else x
                                 )
                             else:
                                 if replace_with == "":
-                                    self.df[column] = self.df[column].astype(str).str.rstrip(char_to_remove)
+                                    self.df[column] = col_series.str.rstrip(char_to_remove)
                                 else:
-                                    self.df[column] = self.df[column].astype(str).apply(
+                                    self.df[column] = col_series.apply(
                                         lambda x: x.rstrip(char_to_remove) + replace_with if x.endswith(char_to_remove) else x
                                     )
                             action = "Replaced" if replace_with != "" else "Removed"
@@ -544,7 +557,8 @@ class ExcelProcessor:
                             operation_executed = True
                         else:
                             # Remove/replace all occurrences - works for both single and multi-char patterns
-                            self.df[column] = self.df[column].astype(str).str.replace(char_to_remove, replace_with, regex=False)
+                            # Reuse col_series to avoid redundant .astype(str)
+                            self.df[column] = col_series.str.replace(char_to_remove, replace_with, regex=False)
                             action = "Replaced" if replace_with != "" else "Removed"
                             replacement_text = f" with '{replace_with}'" if replace_with != "" else ""
                             self.summary.append(f"{action} all '{char_to_remove}' from '{column}' column{replacement_text}")

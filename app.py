@@ -597,10 +597,17 @@ async def process_data(
                 x = general_ansi_pattern.sub('', x)
             return x
         
+        # Performance optimization: For large datasets in chat, limit cleaning to first 1000 rows
+        # This matches the file upload optimization
         for col in df.columns:
             if df[col].dtype == 'object':  # Only process string columns
-                # Single apply operation instead of 3 separate ones (66% reduction in operations)
-                df[col] = df[col].astype(str).apply(clean_cell_value)
+                if len(df) > 1000:
+                    # Large dataset: clean first 1000 rows only
+                    df[col] = df[col].astype(str)
+                    df.loc[:999, col] = df.loc[:999, col].apply(clean_cell_value)
+                else:
+                    # Small dataset: clean all rows
+                    df[col] = df[col].astype(str).apply(clean_cell_value)
         
         # Ensure columns match
         if set(df.columns) != set(request.columns):
