@@ -41,6 +41,19 @@ class SampleSelector:
         if df.empty:
             return SampleResult(df.copy(), "Dataset is empty. Returning empty sample.", {})
 
+        # Performance optimization: For small datasets, skip complex selection
+        if len(df) <= self.max_rows * 2:
+            sample_df = df.head(self.max_rows).copy()
+            return SampleResult(
+                sample_df,
+                f"Small dataset ({len(df)} rows); returning first {len(sample_df)} rows.",
+                {
+                    "total_rows": len(df),
+                    "sample_rows": len(sample_df),
+                    "strategy": "simple_head"
+                }
+            )
+
         if len(df) <= self.min_rows:
             return SampleResult(df.copy(), f"Dataset contains <= {self.min_rows} rows; returning all rows.", {
                 "total_rows": len(df),
@@ -154,7 +167,7 @@ class SampleSelector:
         
         # Strategy 5: Outlier detection for numeric columns
         if numeric_cols:
-            for col in numeric_cols[:2]:  # Check first 2 numeric cols for faster processing
+            for col in numeric_cols[:3]:  # Check first 3 numeric cols
                 col_data = df[col].dropna()
                 if len(col_data) < 4:
                     continue

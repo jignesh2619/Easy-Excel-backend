@@ -389,18 +389,23 @@ async def process_file(
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
         
         # 12. Convert processed dataframe to JSON for preview
-        # Limit to first 1000 rows for preview to avoid large responses
+        # Limit to first 500 rows for preview to improve performance (reduced from 1000)
         import pandas as pd
         import numpy as np
-        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
+        preview_df = processed_df.head(500) if len(processed_df) > 500 else processed_df
         # Replace NaN/None values with null for proper JSON serialization
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
         columns = list(processed_df.columns)
         row_count = len(processed_df)
         
         # 12a. Get formatting metadata for preview display
-        formatting_metadata = processor.get_formatting_metadata(preview_df)
-        logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
+        # Only generate if formatting rules exist (performance optimization)
+        if processor.formatting_rules:
+            formatting_metadata = processor.get_formatting_metadata(preview_df)
+            logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
+        else:
+            formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
+            logger.info("📊 No formatting rules, skipping metadata generation")
         
         # 12b. Add formatting info directly to each cell in processed_data for easier frontend rendering
         if formatting_metadata.get("cell_formats"):
@@ -756,14 +761,20 @@ async def process_data(
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
         
         # 12. Convert processed dataframe to JSON for preview
-        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
+        # Limit to first 500 rows for preview to improve performance (reduced from 1000)
+        preview_df = processed_df.head(500) if len(processed_df) > 500 else processed_df
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
         columns = list(processed_df.columns)
         row_count = len(processed_df)
         
         # 13. Get formatting metadata
-        formatting_metadata = processor.get_formatting_metadata(preview_df)
-        logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
+        # Only generate if formatting rules exist (performance optimization)
+        if processor.formatting_rules:
+            formatting_metadata = processor.get_formatting_metadata(preview_df)
+            logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
+        else:
+            formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
+            logger.info("📊 No formatting rules, skipping metadata generation")
         
         # 14. Add formatting info to each cell
         if formatting_metadata.get("cell_formats"):

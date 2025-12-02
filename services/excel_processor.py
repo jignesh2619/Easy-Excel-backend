@@ -1585,6 +1585,14 @@ class ExcelProcessor:
         import logging
         logger = logging.getLogger(__name__)
         
+        # Performance optimization: Early exit if no formatting rules
+        if not self.formatting_rules:
+            logger.info("📊 No formatting rules, returning empty metadata")
+            return {
+                "conditional_formatting": [],
+                "cell_formats": {}
+            }
+        
         formatting_metadata = {
             "conditional_formatting": [],
             "cell_formats": {}
