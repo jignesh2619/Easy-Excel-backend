@@ -303,21 +303,13 @@ async def process_file(
         action_plan["user_prompt"] = prompt
         
         # Get actual token usage from OpenAI API (includes prompt + data + response)
-        # CRITICAL: Always use actual OpenAI tokens, never fall back to estimates
-        actual_tokens_used = llm_result.get("tokens_used")
+        actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)
         
-        if actual_tokens_used is None:
-            logger.error(f"⚠️ WARNING: tokens_used not found in LLM result! Keys: {list(llm_result.keys())}")
-            logger.error(f"⚠️ This should never happen - all LLM services must return tokens_used")
-            # Use 0 instead of estimate to avoid incorrect billing
-            actual_tokens_used = 0
-            logger.warning(f"⚠️ Token usage set to 0 (missing from LLM result). Estimated would have been: {estimated_tokens}")
+        # Log actual vs estimated for monitoring
+        if actual_tokens_used != estimated_tokens:
+            logger.info(f"Token usage: estimated={estimated_tokens}, actual={actual_tokens_used}, difference={actual_tokens_used - estimated_tokens}")
         else:
-            # Log actual vs estimated for monitoring
-            if actual_tokens_used != estimated_tokens:
-                logger.info(f"Token usage: estimated={estimated_tokens}, actual={actual_tokens_used}, difference={actual_tokens_used - estimated_tokens}")
-            else:
-                logger.info(f"Token usage: {actual_tokens_used} tokens (actual from OpenAI API)")
+            logger.info(f"Token usage: {actual_tokens_used} tokens (used estimate as fallback)")
         
         # 8. Validate required columns exist
         columns_needed = action_plan.get("columns_needed", [])
@@ -574,6 +566,16 @@ async def process_data(
         
         df = pd.DataFrame(request.data)
         
+        # Clean cell values - remove formatting metadata patterns like "||48,5,10mPass||0m" -> "Pass"
+        # This handles cases where Excel rich text formatting gets embedded in cell values
+        import re
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                # Pattern: ||numbers,numbers,numbersmText||numbersm -> extract Text
+                df[col] = df[col].astype(str).apply(
+                    lambda x: re.sub(r'\|\|\d+[,\d]*m([^|]+)\|\|\d+m', r'\1', str(x)) if pd.notna(x) and '||' in str(x) and 'm' in str(x) else x
+                )
+        
         # Ensure columns match
         if set(df.columns) != set(request.columns):
             # Reorder columns to match request
@@ -666,18 +668,7 @@ async def process_data(
         action_plan = llm_result.get("action_plan", {})
         action_plan["user_prompt"] = request.prompt
         
-        # Get actual token usage from OpenAI API
-        # CRITICAL: Always use actual OpenAI tokens, never fall back to estimates
-        actual_tokens_used = llm_result.get("tokens_used")
-        
-        if actual_tokens_used is None:
-            logger.error(f"⚠️ WARNING: tokens_used not found in LLM result! Keys: {list(llm_result.keys())}")
-            logger.error(f"⚠️ This should never happen - all LLM services must return tokens_used")
-            # Use 0 instead of estimate to avoid incorrect billing
-            actual_tokens_used = 0
-            logger.warning(f"⚠️ Token usage set to 0 (missing from LLM result). Estimated would have been: {estimated_tokens}")
-        else:
-            logger.info(f"Token usage: {actual_tokens_used} tokens (actual from OpenAI API)")
+        actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)
         
         # 7. Validate required columns
         columns_needed = action_plan.get("columns_needed", [])

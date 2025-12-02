@@ -251,6 +251,16 @@ class ExcelProcessor:
                     else:
                         raise RuntimeError(f"Failed to read Excel file. The file may be corrupted. Error: {str(e)}")
                 
+                # Clean cell values - remove formatting metadata patterns like "||48,5,10mPass||0m" -> "Pass"
+                # This handles cases where Excel rich text formatting gets embedded in cell values
+                import re
+                for col in loaded_data.columns:
+                    if loaded_data[col].dtype == 'object':
+                        # Pattern: ||numbers,numbers,numbersmText||numbersm -> extract Text
+                        loaded_data[col] = loaded_data[col].astype(str).apply(
+                            lambda x: re.sub(r'\|\|\d+[,\d]*m([^|]+)\|\|\d+m', r'\1', str(x)) if pd.notna(x) and '||' in str(x) and 'm' in str(x) else x
+                        )
+                
                 # Check if we got a dict (shouldn't happen with sheet_name specified, but double-check)
                 if isinstance(loaded_data, dict):
                     # If it's a dict, get the first sheet
