@@ -481,6 +481,116 @@ If column name is "Id" or "ColumnB" or similar:
 9. When using add_row, only specify columns you need in data - other columns will be empty
 10. Calculate values in operations first, then reference them in add_row.data using expressions
 11. NEVER assign a list of values directly to df[column] or df.loc - always use pd.concat with DataFrame
+
+═══════════════════════════════════════════════════════════════════════════════
+📍 PLACING RESULTS IN SPECIFIC CELLS
+═══════════════════════════════════════════════════════════════════════════════
+
+When user requests to place a calculation result in a specific cell (e.g., "average in cell C6", "put sum in A1"):
+
+1. Generate a formula operation to calculate the result
+2. Generate an edit_cell operation to place the result in the specified cell
+
+**Cell Notation Conversion:**
+- Excel cell "C6" means: column C (index 2), row 6
+- Convert column letter to actual column name: Use available_columns[2] to get actual column name for column C
+- Convert row number to row_index: row 6 = row_index 5 (0-based, so row 6 is index 5)
+
+**Example - "Average of Reviewscount in cell C6":**
+{
+  "operations": [{
+    "python_code": "result = df['Reviewscount'].mean()",
+    "description": "Calculate average of Reviewscount column",
+    "result_type": "single_value"
+  }],
+  "formula": {
+    "type": "average",
+    "column": "Reviewscount"
+  },
+  "edit_cell": {
+    "row_index": 5,
+    "column_name": "actual_column_name_for_C",  // Get from available_columns[2]
+    "value": "formula_result"  // Special keyword - system will use formula_result
+  }
+}
+
+**CRITICAL:**
+- Always generate BOTH formula AND edit_cell when user specifies a cell location
+- Use row_index (0-based): row 6 = row_index 5, row 1 = row_index 0
+- Use actual column name from available_columns, not Excel letter
+- Set value to "formula_result" - the system will automatically use the calculated result
+
+═══════════════════════════════════════════════════════════════════════════════
+🔗 MERGING/COMBINING COLUMNS
+═══════════════════════════════════════════════════════════════════════════════
+
+When user requests to "merge columns B and C", "combine columns X and Y", etc.:
+
+1. Use formula operation with type "concat"
+2. Convert Excel column letters to actual column names (B = available_columns[1], C = available_columns[2])
+3. Specify columns array with actual column names
+4. Optionally specify separator (default is empty string "")
+
+**Example - "Merge columns B and C":**
+{
+  "operations": [{
+    "python_code": "# Columns will be merged by formula operation",
+    "description": "Prepare to merge columns B and C",
+    "result_type": "dataframe"
+  }],
+  "formula": {
+    "type": "concat",
+    "columns": ["actual_column_name_for_B", "actual_column_name_for_C"],
+    "parameters": {
+      "separator": " "  // Optional: space, comma, etc. Default is ""
+    }
+  }
+}
+
+**CRITICAL:**
+- Always use actual column names from available_columns, not Excel letters
+- Column B = available_columns[1] (index 1)
+- Column C = available_columns[2] (index 2)
+- The merged column will be created with name like "ColumnB_ColumnC" (or custom name if specified)
+- Original columns remain - use operations to drop them if user wants them removed
+
+═══════════════════════════════════════════════════════════════════════════════
+📧 EXTRACTING EMAILS AND PHONE NUMBERS FROM ENTIRE SHEET
+═══════════════════════════════════════════════════════════════════════════════
+
+When user requests to "extract emails and phone numbers from the entire sheet" or similar:
+
+1. Search through ALL columns and ALL rows to find emails and phone numbers
+2. Use regex patterns to identify emails and phone numbers
+3. Place extracted emails in the specified column (e.g., column B)
+4. Place extracted phone numbers in the specified column (e.g., column C)
+5. Extract from ALL data, not just one column
+
+**Email Pattern:** r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+**Phone Pattern:** r'\b(?:\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}\b' or simpler: r'\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b'
+
+**Example - "Extract emails and phone numbers from entire sheet and put them in column B and C":**
+{
+  "operations": [{
+    "python_code": "import re; import pandas as pd; email_pattern = r'\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b'; phone_pattern = r'\\b\\d{3}[-.\\s]?\\d{3}[-.\\s]?\\d{4}\\b'; emails = []; phones = []; [emails.extend(re.findall(email_pattern, str(val))) for col in df.columns for val in df[col] if pd.notna(val)]; [phones.extend(re.findall(phone_pattern, str(val))) for col in df.columns for val in df[col] if pd.notna(val)]; target_col_b = df.columns[1] if len(df.columns) > 1 else 'ColumnB'; target_col_c = df.columns[2] if len(df.columns) > 2 else 'ColumnC'; df[target_col_b] = ''; df[target_col_c] = ''; [df.loc.__setitem__((i, target_col_b), emails[i]) for i in range(min(len(emails), len(df)))]; [df.loc.__setitem__((i, target_col_c), phones[i]) for i in range(min(len(phones), len(df)))]",
+    "description": "Extract emails and phone numbers from entire sheet and place in columns B and C",
+    "result_type": "dataframe"
+  }]
+}
+
+**CRITICAL RULES:**
+1. Search through ALL columns (df.columns) and ALL rows
+2. Use regex patterns to find emails and phone numbers
+3. Convert Excel column letters to actual column names:
+   - Column B = available_columns[1] (index 1)
+   - Column C = available_columns[2] (index 2)
+4. If target columns don't exist, create them or use existing columns
+5. Extract from ALL data in the sheet, not just one column
+6. Handle cases where extracted data might be longer than existing rows
+7. Place emails in the first specified column, phones in the second
+8. If no emails/phones found, leave cells empty
+9. Use list comprehension or loops to search through all cells
+10. Store extracted values in lists first, then assign to columns
 """
 
 
@@ -651,20 +761,9 @@ Include "operations" array with "python_code" for each operation.
             # Normalize action plan
             normalized_plan = self._normalize_action_plan(action_plan)
             
-            # Extract token usage from OpenAI API response
-            # CRITICAL: Only count OpenAI tokens, ensure usage object exists
-            if response.usage is None:
-                logger.error("⚠️ WARNING: OpenAI response.usage is None - cannot calculate tokens!")
-                prompt_tokens = 0
-                completion_tokens = 0
-                tokens_used = 0
-            else:
-                prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
-                completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
-                tokens_used = prompt_tokens + completion_tokens
-                
-                if tokens_used == 0:
-                    logger.warning("⚠️ WARNING: Token count is 0 - OpenAI API may not have returned usage info")
+            prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
+            tokens_used = prompt_tokens + completion_tokens
             
             logger.info(f"ActionPlanBot tokens: prompt={prompt_tokens}, completion={completion_tokens}, total={tokens_used}")
             
