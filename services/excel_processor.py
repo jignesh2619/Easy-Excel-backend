@@ -1761,12 +1761,15 @@ class ExcelProcessor:
                                     logger.info(f"🔍 Sample matches for '{word}': {sample_matches}")
                         
                         # Build cell format map: "row_col" -> format info
-                        # Performance optimization: Limit to first 500 matches to prevent CPU spikes
-                        # Use iloc position (0-based) instead of DataFrame index to match frontend enumeration
+                        # Accuracy: Format ALL matches within preview rows (first 500 rows)
+                        # This maintains accuracy for displayed data while preventing CPU spikes
+                        preview_limit = min(len(df), 500)  # Match preview size
                         match_mask = matches[matches]
-                        match_positions = df.index.get_indexer(match_mask.index[:500])  # Get 0-based positions
+                        # Filter matches to only those within preview rows
+                        match_indices = [idx for idx in match_mask.index if 0 <= df.index.get_loc(idx) < preview_limit]
+                        match_positions = df.index.get_indexer(match_indices)  # Get 0-based positions
                         for pos in match_positions:
-                            if pos >= 0:  # Valid position
+                            if pos >= 0 and pos < preview_limit:  # Valid position within preview
                                 cell_key = f"{pos}_{column}"
                                 formatting_metadata["cell_formats"][cell_key] = {
                                     "bg_color": bg_color,
@@ -1798,12 +1801,15 @@ class ExcelProcessor:
                         
                         logger.info(f"🔍 Found {match_count} exact matches for text '{text}' in column '{column}'")
                         
-                        # Performance optimization: Limit to first 500 matches to prevent CPU spikes
-                        # Use iloc position (0-based) instead of DataFrame index to match frontend enumeration
+                        # Accuracy: Format ALL matches within preview rows (first 500 rows)
+                        # This maintains accuracy for displayed data while preventing CPU spikes
+                        preview_limit = min(len(df), 500)  # Match preview size
                         match_mask = matches[matches]
-                        match_positions = df.index.get_indexer(match_mask.index[:500])  # Get 0-based positions
+                        # Filter matches to only those within preview rows
+                        match_indices = [idx for idx in match_mask.index if 0 <= df.index.get_loc(idx) < preview_limit]
+                        match_positions = df.index.get_indexer(match_indices)  # Get 0-based positions
                         for pos in match_positions:
-                            if pos >= 0:  # Valid position
+                            if pos >= 0 and pos < preview_limit:  # Valid position within preview
                                 cell_key = f"{pos}_{column}"
                                 formatting_metadata["cell_formats"][cell_key] = {
                                     "bg_color": bg_color,
