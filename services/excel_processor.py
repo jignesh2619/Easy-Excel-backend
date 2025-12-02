@@ -1736,15 +1736,18 @@ class ExcelProcessor:
                         
                         # Build cell format map: "row_col" -> format info
                         # Performance optimization: Limit to first 500 matches to prevent CPU spikes
-                        match_indices = matches[matches].index[:500]  # Limit to 500 matches
-                        for row_idx in match_indices:
-                            cell_key = f"{row_idx}_{column}"
-                            formatting_metadata["cell_formats"][cell_key] = {
-                                "bg_color": bg_color,
-                                "text_color": config.get("text_color") or config.get("font_color"),
-                                "bold": config.get("bold", False),
-                                "italic": config.get("italic", False)
-                            }
+                        # Use iloc position (0-based) instead of DataFrame index to match frontend enumeration
+                        match_mask = matches[matches]
+                        match_positions = df.index.get_indexer(match_mask.index[:500])  # Get 0-based positions
+                        for pos in match_positions:
+                            if pos >= 0:  # Valid position
+                                cell_key = f"{pos}_{column}"
+                                formatting_metadata["cell_formats"][cell_key] = {
+                                    "bg_color": bg_color,
+                                    "text_color": config.get("text_color") or config.get("font_color"),
+                                    "bold": config.get("bold", False),
+                                    "italic": config.get("italic", False)
+                                }
                         
                         formatting_metadata["conditional_formatting"].append({
                             "type": format_type,
@@ -1770,15 +1773,18 @@ class ExcelProcessor:
                         logger.info(f"🔍 Found {match_count} exact matches for text '{text}' in column '{column}'")
                         
                         # Performance optimization: Limit to first 500 matches to prevent CPU spikes
-                        match_indices = matches[matches].index[:500]  # Limit to 500 matches
-                        for row_idx in match_indices:
-                            cell_key = f"{row_idx}_{column}"
-                            formatting_metadata["cell_formats"][cell_key] = {
-                                "bg_color": bg_color,
-                                "text_color": config.get("text_color") or config.get("font_color"),
-                                "bold": config.get("bold", False),
-                                "italic": config.get("italic", False)
-                            }
+                        # Use iloc position (0-based) instead of DataFrame index to match frontend enumeration
+                        match_mask = matches[matches]
+                        match_positions = df.index.get_indexer(match_mask.index[:500])  # Get 0-based positions
+                        for pos in match_positions:
+                            if pos >= 0:  # Valid position
+                                cell_key = f"{pos}_{column}"
+                                formatting_metadata["cell_formats"][cell_key] = {
+                                    "bg_color": bg_color,
+                                    "text_color": config.get("text_color") or config.get("font_color"),
+                                    "bold": config.get("bold", False),
+                                    "italic": config.get("italic", False)
+                                }
                     else:
                         logger.warning(f"⚠️ Column '{column}' not found in DataFrame columns: {list(df.columns)}")
         
