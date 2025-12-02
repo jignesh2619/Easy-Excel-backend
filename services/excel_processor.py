@@ -1035,21 +1035,22 @@ class ExcelProcessor:
                         else:  # regex_match
                             matches = series.str.contains(pattern, na=False, regex=True)
                         
-                        match_count = 0
-                        for row_idx, match in enumerate(matches):
-                            if match:
-                                excel_row = row_idx + 1  # +1 for header row
-                                cell_value = self.df.iloc[row_idx, col_idx]
-                                
-                                # Determine value type and write accordingly
-                                if pd.isna(cell_value):
-                                    worksheet.write_blank(excel_row, col_idx, cell_format)
-                                elif isinstance(cell_value, (int, float)):
-                                    worksheet.write_number(excel_row, col_idx, cell_value, cell_format)
-                                elif isinstance(cell_value, bool):
-                                    worksheet.write_boolean(excel_row, col_idx, cell_value, cell_format)
-                                else:
-                                    worksheet.write_string(excel_row, col_idx, str(cell_value), cell_format)
+                        # Performance optimization: Limit to first 500 matches to prevent CPU spikes
+                        match_indices = matches[matches].index[:500] if isinstance(matches, pd.Series) else []
+                        match_count = len(match_indices)
+                        for row_idx in match_indices:
+                            excel_row = row_idx + 1  # +1 for header row
+                            cell_value = self.df.iloc[row_idx, col_idx]
+                            
+                            # Determine value type and write accordingly
+                            if pd.isna(cell_value):
+                                worksheet.write_blank(excel_row, col_idx, cell_format)
+                            elif isinstance(cell_value, (int, float)):
+                                worksheet.write_number(excel_row, col_idx, cell_value, cell_format)
+                            elif isinstance(cell_value, bool):
+                                worksheet.write_boolean(excel_row, col_idx, cell_value, cell_format)
+                            else:
+                                worksheet.write_string(excel_row, col_idx, str(cell_value), cell_format)
                                 
                                 match_count += 1
                         
