@@ -303,13 +303,21 @@ async def process_file(
         action_plan["user_prompt"] = prompt
         
         # Get actual token usage from OpenAI API (includes prompt + data + response)
-        actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)
+        # CRITICAL: Only use actual tokens from OpenAI API, never estimates
+        actual_tokens_used = llm_result.get("tokens_used", 0)
+        
+        # Validate token count is reasonable (sanity check)
+        if actual_tokens_used == 0:
+            logger.warning(f"⚠️ No tokens_used in LLM result, using estimate as fallback: {estimated_tokens}")
+            actual_tokens_used = estimated_tokens
+        elif actual_tokens_used > estimated_tokens * 2:
+            logger.warning(f"⚠️ Actual tokens ({actual_tokens_used}) is more than 2x estimate ({estimated_tokens}). This might indicate an issue.")
         
         # Log actual vs estimated for monitoring
         if actual_tokens_used != estimated_tokens:
             logger.info(f"Token usage: estimated={estimated_tokens}, actual={actual_tokens_used}, difference={actual_tokens_used - estimated_tokens}")
         else:
-            logger.info(f"Token usage: {actual_tokens_used} tokens (used estimate as fallback)")
+            logger.info(f"Token usage: {actual_tokens_used} tokens")
         
         # 8. Validate required columns exist
         columns_needed = action_plan.get("columns_needed", [])
@@ -566,16 +574,6 @@ async def process_data(
         
         df = pd.DataFrame(request.data)
         
-        # Clean cell values - remove formatting metadata patterns like "||48,5,10mPass||0m" -> "Pass"
-        # This handles cases where Excel rich text formatting gets embedded in cell values
-        import re
-        for col in df.columns:
-            if df[col].dtype == 'object':
-                # Pattern: ||numbers,numbers,numbersmText||numbersm -> extract Text
-                df[col] = df[col].astype(str).apply(
-                    lambda x: re.sub(r'\|\|\d+[,\d]*m([^|]+)\|\|\d+m', r'\1', str(x)) if pd.notna(x) and '||' in str(x) and 'm' in str(x) else x
-                )
-        
         # Ensure columns match
         if set(df.columns) != set(request.columns):
             # Reorder columns to match request
@@ -668,7 +666,16 @@ async def process_data(
         action_plan = llm_result.get("action_plan", {})
         action_plan["user_prompt"] = request.prompt
         
-        actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)
+        # Get actual token usage from OpenAI API
+        # CRITICAL: Only use actual tokens from OpenAI API, never estimates
+        actual_tokens_used = llm_result.get("tokens_used", 0)
+        
+        # Validate token count is reasonable (sanity check)
+        if actual_tokens_used == 0:
+            logger.warning(f"⚠️ No tokens_used in LLM result, using estimate as fallback: {estimated_tokens}")
+            actual_tokens_used = estimated_tokens
+        elif actual_tokens_used > estimated_tokens * 2:
+            logger.warning(f"⚠️ Actual tokens ({actual_tokens_used}) is more than 2x estimate ({estimated_tokens}). This might indicate an issue.")
         
         # 7. Validate required columns
         columns_needed = action_plan.get("columns_needed", [])

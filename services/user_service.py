@@ -489,14 +489,23 @@ class UserService:
         
         Args:
             user_id: User ID
-            tokens_used: Number of tokens used
+            tokens_used: Number of tokens used (ONLY OpenAI API tokens, not backend operations)
             operation: Type of operation
         """
         if not self.supabase:
             logger.warning("Supabase not configured. Token usage not recorded.")
             return
         
+        # Validate token count is reasonable (sanity check)
+        if tokens_used < 0:
+            logger.error(f"❌ Invalid token count: {tokens_used}. Not recording.")
+            return
+        if tokens_used > 100000:
+            logger.warning(f"⚠️ Suspiciously high token count: {tokens_used} for operation {operation}. Recording anyway but please investigate.")
+        
         try:
+            logger.info(f"📊 Recording token usage: user_id={user_id}, tokens={tokens_used}, operation={operation}")
+            
             # Record usage in token_usage table
             usage_data = {
                 "user_id": user_id,
@@ -518,11 +527,15 @@ class UserService:
                 current_tokens = subscription.get("tokens_used", 0) or 0
                 new_tokens = current_tokens + tokens_used
                 
+                logger.info(f"📊 Token usage update: current={current_tokens}, adding={tokens_used}, new_total={new_tokens}")
+                
                 # Update the specific subscription
                 self.supabase.table("subscriptions").update({
                     "tokens_used": new_tokens,
                     "updated_at": datetime.now().isoformat()
                 }).eq("id", subscription_id).execute()
+            else:
+                logger.warning(f"⚠️ No active subscription found for user {user_id}. Token usage recorded in audit table but not in subscription.")
                 
         except Exception as e:
             logger.error(f"Error recording token usage: {e}")
