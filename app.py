@@ -1083,6 +1083,38 @@ async def get_current_user_info(user: Dict[str, Any] = Depends(get_current_user)
     })
 
 
+@app.get("/api/users/token-usage")
+async def get_token_usage_analytics(
+    user: Dict[str, Any] = Depends(get_current_user),
+    days: int = 30
+):
+    """
+    Get token usage analytics for the current user.
+    
+    Args:
+        user: Current authenticated user (from dependency)
+        days: Number of days to look back (default: 30, max: 90)
+    
+    Returns:
+        Token usage statistics including:
+        - Total tokens used in the period
+        - Current usage and limit
+        - Breakdown by operation type
+        - Daily usage breakdown
+        - Recent usage history
+    """
+    # Limit days to prevent abuse
+    days = min(max(1, days), 90)
+    
+    analytics = user_service.get_token_usage_analytics(user["user_id"], days=days)
+    
+    return JSONResponse(content={
+        "status": "success",
+        "analytics": analytics,
+        "period_days": days
+    })
+
+
 # PayPal Payment Endpoints
 @app.post("/api/payments/create-subscription")
 async def create_subscription(

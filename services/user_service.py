@@ -540,6 +540,113 @@ class UserService:
         except Exception as e:
             logger.error(f"Error recording token usage: {e}")
     
+    def get_token_usage_analytics(self, user_id: str, days: int = 30) -> Dict[str, Any]:
+        """
+        Get token usage analytics for a user.
+        
+        Args:
+            user_id: User ID
+            days: Number of days to look back (default: 30)
+            
+        Returns:
+            Dictionary with token usage statistics
+        """
+        if not self.supabase:
+            logger.warning("Supabase not configured. Cannot get token analytics.")
+            return {
+                "total_tokens": 0,
+                "operations": {},
+                "daily_breakdown": [],
+                "recent_usage": []
+            }
+        
+        try:
+            from datetime import datetime, timedelta
+            cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
+            
+            # Get all token usage records for the user
+            result = self.supabase.table("token_usage").select("*").eq(
+                "user_id", user_id
+            ).gte("created_at", cutoff_date).order("created_at", desc=True).execute()
+            
+            records = result.data if result.data else []
+            
+            # Calculate statistics
+            total_tokens = sum(int(r.get("tokens_used", 0) or 0) for r in records)
+            
+            # Group by operation type
+            operations = {}
+            for record in records:
+                op = record.get("operation", "unknown")
+                tokens = int(record.get("tokens_used", 0) or 0)
+                if op not in operations:
+                    operations[op] = {"count": 0, "total_tokens": 0, "avg_tokens": 0}
+                operations[op]["count"] += 1
+                operations[op]["total_tokens"] += tokens
+            
+            # Calculate averages
+            for op in operations:
+                operations[op]["avg_tokens"] = operations[op]["total_tokens"] // operations[op]["count"] if operations[op]["count"] > 0 else 0
+            
+            # Daily breakdown
+            daily_breakdown = {}
+            for record in records:
+                date_str = record.get("created_at", "")[:10]  # Get YYYY-MM-DD
+                if date_str:
+                    if date_str not in daily_breakdown:
+                        daily_breakdown[date_str] = {"count": 0, "tokens": 0}
+                    daily_breakdown[date_str]["count"] += 1
+                    daily_breakdown[date_str]["tokens"] += int(record.get("tokens_used", 0) or 0)
+            
+            # Convert to list and sort by date
+            daily_list = [
+                {"date": date, "count": data["count"], "tokens": data["tokens"]}
+                for date, data in sorted(daily_breakdown.items(), reverse=True)
+            ]
+            
+            # Recent usage (last 10 records)
+            recent_usage = [
+                {
+                    "operation": r.get("operation", "unknown"),
+                    "tokens": int(r.get("tokens_used", 0) or 0),
+                    "created_at": r.get("created_at", "")
+                }
+                for r in records[:10]
+            ]
+            
+            # Get current subscription info
+            subscription_result = self.supabase.table("subscriptions").select("tokens_used, tokens_limit").eq(
+                "user_id", user_id
+            ).eq("status", "active").order("created_at", desc=True).limit(1).execute()
+            
+            current_usage = 0
+            token_limit = 0
+            if subscription_result.data:
+                sub = subscription_result.data[0]
+                current_usage = sub.get("tokens_used", 0) or 0
+                token_limit = sub.get("tokens_limit", 0) or 0
+            
+            return {
+                "total_tokens_last_30_days": total_tokens,
+                "current_usage": current_usage,
+                "token_limit": token_limit,
+                "tokens_remaining": max(0, token_limit - current_usage),
+                "operations": operations,
+                "daily_breakdown": daily_list,
+                "recent_usage": recent_usage,
+                "total_operations": len(records)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting token usage analytics: {e}")
+            return {
+                "total_tokens": 0,
+                "operations": {},
+                "daily_breakdown": [],
+                "recent_usage": [],
+                "error": str(e)
+            }
+    
     def refresh_free_user_tokens(self) -> int:
         """
         Refresh tokens for free users whose subscription is 30+ days old.
