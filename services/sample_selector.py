@@ -32,7 +32,7 @@ class SampleSelector:
         - Captures edge cases and outliers
     """
 
-    def __init__(self, max_rows: int = 15, min_rows: int = 8):
+    def __init__(self, max_rows: int = 20, min_rows: int = 10):
         self.max_rows = max_rows
         self.min_rows = min_rows
 
@@ -99,7 +99,7 @@ class SampleSelector:
         # Strategy 1: Quantile-based sampling for numeric columns (ensures distribution)
         if numeric_cols:
             # Use percentiles: 0%, 25%, 50%, 75%, 100% for each numeric column
-            for col in numeric_cols[:3]:  # Limit to first 3 numeric cols for faster processing
+            for col in numeric_cols[:5]:  # Limit to first 5 numeric cols to avoid too many selections
                 col_data = df[col].dropna()
                 if len(col_data) < 2:
                     continue
@@ -114,11 +114,11 @@ class SampleSelector:
         
         # Strategy 2: Categorical diversity - one row per unique value (up to reasonable limit)
         if categorical_cols:
-            for col in categorical_cols[:2]:  # Limit to first 2 categorical cols for faster processing
+            for col in categorical_cols[:3]:  # Limit to first 3 categorical cols
                 unique_values = df[col].fillna("<NULL>").unique()
-                # Limit to top 5 most common categories to avoid explosion
+                # Limit to top 10 most common categories to avoid explosion
                 value_counts = df[col].fillna("<NULL>").value_counts()
-                top_values = value_counts.head(5).index.tolist()
+                top_values = value_counts.head(10).index.tolist()
                 
                 for val in top_values:
                     matching_rows = df[df[col].fillna("<NULL>") == val].index
