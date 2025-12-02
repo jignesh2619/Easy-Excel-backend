@@ -580,24 +580,27 @@ async def process_data(
         df = pd.DataFrame(request.data)
         
         # Clean cell values: Remove ANSI escape codes and rich text formatting metadata
+        # Performance optimization: Combine all cleaning operations into single pass
         # Pattern 1: [48;5;10mText[0m (ANSI escape codes)
         # Pattern 2: ||48,5,10mText||0m (old format with pipes)
         import re
         ansi_pattern = re.compile(r'\[48;5;10m(.*?)\[0m', re.DOTALL)
         old_format_pattern = re.compile(r'\|\|48,5,10m(.*?)\|\|0m', re.DOTALL)
+        general_ansi_pattern = re.compile(r'\[\d+(?:;\d+)*m', re.DOTALL)
+        
+        def clean_cell_value(x):
+            """Clean cell value in single pass - removes all ANSI codes and formatting metadata"""
+            if pd.notna(x) and isinstance(x, str):
+                # Apply all cleaning patterns in sequence
+                x = ansi_pattern.sub(r'\1', x)
+                x = old_format_pattern.sub(r'\1', x)
+                x = general_ansi_pattern.sub('', x)
+            return x
         
         for col in df.columns:
             if df[col].dtype == 'object':  # Only process string columns
-                df[col] = df[col].astype(str).apply(
-                    lambda x: ansi_pattern.sub(r'\1', x) if pd.notna(x) and isinstance(x, str) else x
-                )
-                df[col] = df[col].astype(str).apply(
-                    lambda x: old_format_pattern.sub(r'\1', x) if pd.notna(x) and isinstance(x, str) else x
-                )
-                # Also handle any remaining ANSI escape codes (general pattern)
-                df[col] = df[col].astype(str).apply(
-                    lambda x: re.sub(r'\[\d+(?:;\d+)*m', '', x) if pd.notna(x) and isinstance(x, str) else x
-                )
+                # Single apply operation instead of 3 separate ones (66% reduction in operations)
+                df[col] = df[col].astype(str).apply(clean_cell_value)
         
         # Ensure columns match
         if set(df.columns) != set(request.columns):
