@@ -268,23 +268,26 @@ class ExcelProcessor:
                 raise ValueError(f"Expected DataFrame, got {type(self.df)}")
             
             # Clean cell values: Remove ANSI escape codes and rich text formatting metadata
+            # Performance optimization: Combine all cleaning operations into single pass
             # Pattern 1: [48;5;10mText[0m (ANSI escape codes)
             # Pattern 2: ||48,5,10mText||0m (old format with pipes)
             ansi_pattern = re.compile(r'\[48;5;10m(.*?)\[0m', re.DOTALL)
             old_format_pattern = re.compile(r'\|\|48,5,10m(.*?)\|\|0m', re.DOTALL)
+            general_ansi_pattern = re.compile(r'\[\d+(?:;\d+)*m', re.DOTALL)
+            
+            def clean_cell_value(x):
+                """Clean cell value in single pass - removes all ANSI codes and formatting metadata"""
+                if pd.notna(x) and isinstance(x, str):
+                    # Apply all cleaning patterns in sequence
+                    x = ansi_pattern.sub(r'\1', x)
+                    x = old_format_pattern.sub(r'\1', x)
+                    x = general_ansi_pattern.sub('', x)
+                return x
             
             for col in self.df.columns:
                 if self.df[col].dtype == 'object':  # Only process string columns
-                    self.df[col] = self.df[col].astype(str).apply(
-                        lambda x: ansi_pattern.sub(r'\1', x) if pd.notna(x) and isinstance(x, str) else x
-                    )
-                    self.df[col] = self.df[col].astype(str).apply(
-                        lambda x: old_format_pattern.sub(r'\1', x) if pd.notna(x) and isinstance(x, str) else x
-                    )
-                    # Also handle any remaining ANSI escape codes (general pattern)
-                    self.df[col] = self.df[col].astype(str).apply(
-                        lambda x: re.sub(r'\[\d+(?:;\d+)*m', '', x) if pd.notna(x) and isinstance(x, str) else x
-                    )
+                    # Single apply operation instead of 3 separate ones (66% reduction in operations)
+                    self.df[col] = self.df[col].astype(str).apply(clean_cell_value)
             
             # Keep original copy
             self.original_df = self.df.copy()
