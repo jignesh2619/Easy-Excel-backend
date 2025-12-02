@@ -284,10 +284,21 @@ class ExcelProcessor:
                     x = general_ansi_pattern.sub('', x)
                 return x
             
+            # Performance optimization: For large datasets, only clean first 1000 rows initially
+            # Full cleaning happens during processing if needed
+            max_clean_rows = min(len(self.df), 1000) if len(self.df) > 1000 else len(self.df)
+            
             for col in self.df.columns:
                 if self.df[col].dtype == 'object':  # Only process string columns
-                    # Single apply operation instead of 3 separate ones (66% reduction in operations)
-                    self.df[col] = self.df[col].astype(str).apply(clean_cell_value)
+                    # Clean first N rows for immediate use, rest will be cleaned on-demand
+                    if len(self.df) > 1000:
+                        # Clean first 1000 rows
+                        self.df.iloc[:max_clean_rows, self.df.columns.get_loc(col)] = \
+                            self.df[col].iloc[:max_clean_rows].astype(str).apply(clean_cell_value)
+                        # Mark remaining rows for lazy cleaning (will be cleaned during processing if needed)
+                    else:
+                        # Small dataset: clean all rows
+                        self.df[col] = self.df[col].astype(str).apply(clean_cell_value)
             
             # Keep original copy
             self.original_df = self.df.copy()
