@@ -360,8 +360,25 @@ class ExcelProcessor:
                             self.formula_result = result["result"]
                             break
             
+            # Handle formula operations (sets formula_result)
+            if "formula" in action_plan:
+                self._execute_formula(action_plan)
+            
+            # Handle edit_cell (must be after formula to use formula_result)
+            if "edit_cell" in action_plan:
+                self._execute_edit_cell(action_plan)
+            
             # Handle conditional formatting (still needs special handling)
-            if "conditional_format" in action_plan:
+            # Support both single conditional_format and multiple conditional_formats
+            if "conditional_formats" in action_plan:
+                # Handle multiple conditional formatting rules
+                conditional_formats = action_plan.get("conditional_formats", [])
+                if isinstance(conditional_formats, list):
+                    for cf in conditional_formats:
+                        temp_action_plan = {"conditional_format": cf}
+                        self._execute_conditional_format(temp_action_plan)
+            elif "conditional_format" in action_plan:
+                # Handle single conditional formatting rule
                 self._execute_conditional_format(action_plan)
             
             # Handle formatting (still needs special handling)
@@ -1281,6 +1298,13 @@ class ExcelProcessor:
         if row_index < 0 or row_index >= len(self.df):
             raise ValueError(f"Row index {row_index} is out of range (0 to {len(self.df) - 1})")
         
+        # If value is "formula_result" or None and we have a formula_result, use it
+        if (value == "formula_result" or value is None) and self.formula_result is not None:
+            value = self.formula_result
+        
+        if value is None:
+            raise ValueError("No value specified for cell edit and no formula_result available")
+        
         old_value = self.df.at[row_index, column_name]
         self.df.at[row_index, column_name] = value
         self.summary.append(f"Edited cell at row {row_index + 1}, column '{column_name}': '{old_value}' -> '{value}'")
@@ -1831,8 +1855,10 @@ class ExcelProcessor:
                 if not columns:
                     raise ValueError("Columns required for CONCAT")
                 separator = params.get("separator", "")
-                self.df = FormulaEngine.CONCAT(self.df, columns, separator)
-                self.summary.append(f"CONCAT({', '.join(columns)}) applied")
+                new_column_name = params.get("new_column_name")
+                self.df = FormulaEngine.CONCAT(self.df, columns, separator, new_column_name)
+                merged_col_name = new_column_name if new_column_name else "_".join(columns)
+                self.summary.append(f"Merged columns {', '.join(columns)} into '{merged_col_name}'")
             
             elif formula_type == "textjoin":
                 if not columns:

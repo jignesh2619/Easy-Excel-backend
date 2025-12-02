@@ -65,6 +65,24 @@ You MUST generate Python code for ALL operations. The backend executes your code
       "bg_color": "#FFFF00"
     }
   },
+  "conditional_formats": [
+    {
+      "format_type": "contains_text",
+      "config": {
+        "column": "ColumnName",
+        "text": "Pass",
+        "bg_color": "#90EE90"
+      }
+    },
+    {
+      "format_type": "contains_text",
+      "config": {
+        "column": "ColumnName",
+        "text": "Fail",
+        "bg_color": "#FF6B6B"
+      }
+    }
+  ],
   "format": {
     "range": {"column": "ColumnName"},
     "bold": true
@@ -591,6 +609,72 @@ When user requests to "extract emails and phone numbers from the entire sheet" o
 8. If no emails/phones found, leave cells empty
 9. Use list comprehension or loops to search through all cells
 10. Store extracted values in lists first, then assign to columns
+
+═══════════════════════════════════════════════════════════════════════════════
+🎨 MULTIPLE CONDITIONAL FORMATTING RULES
+═══════════════════════════════════════════════════════════════════════════════
+
+When user requests multiple highlighting conditions (e.g., "highlight Pass in green and Fail in red"):
+
+1. Use `conditional_formats` (plural) as an ARRAY when you have multiple conditions
+2. Each condition should be a separate object in the array
+3. Use `conditional_format` (singular) when you have only ONE condition
+
+**Example - "Highlight Pass in green and Fail in red":**
+{
+  "operations": [{
+    "python_code": "# No code needed for conditional formatting",
+    "description": "Apply conditional formatting",
+    "result_type": "dataframe"
+  }],
+  "conditional_formats": [
+    {
+      "format_type": "contains_text",
+      "config": {
+        "column": "Status",
+        "text": "Pass",
+        "bg_color": "#90EE90"
+      }
+    },
+    {
+      "format_type": "contains_text",
+      "config": {
+        "column": "Status",
+        "text": "Fail",
+        "bg_color": "#FF6B6B"
+      }
+    }
+  ]
+}
+
+**Example - Single condition (use singular):**
+{
+  "operations": [{
+    "python_code": "# No code needed for conditional formatting",
+    "description": "Apply conditional formatting",
+    "result_type": "dataframe"
+  }],
+  "conditional_format": {
+    "format_type": "contains_text",
+    "config": {
+      "column": "Status",
+      "text": "Pass",
+      "bg_color": "#90EE90"
+    }
+  }
+}
+
+**CRITICAL RULES:**
+1. Use `conditional_formats` (array) for MULTIPLE conditions
+2. Use `conditional_format` (object) for SINGLE condition
+3. Each condition must have: format_type, config with column, text, and bg_color
+4. Common colors:
+   - Green: "#90EE90" or "#00FF00"
+   - Red: "#FF6B6B" or "#FF0000"
+   - Yellow: "#FFFF00" or "#FFD700"
+   - Blue: "#ADD8E6" or "#0000FF"
+5. Always use actual column names from available_columns, not Excel letters
+6. The text in config.text should match exactly what the user wants to highlight (case-sensitive)
 """
 
 
@@ -735,11 +819,14 @@ Include "operations" array with "python_code" for each operation.
                 logger.info(f"Action plan keys: {list(action_plan.keys())}")
                 
                 # Log conditional_format if present
-                if "conditional_format" in action_plan:
+                if "conditional_formats" in action_plan:
+                    logger.info(f"✅ Multiple conditional formats found in action plan!")
+                    logger.info(f"Conditional formats structure: {json.dumps(action_plan['conditional_formats'], indent=2)}")
+                elif "conditional_format" in action_plan:
                     logger.info(f"✅ Conditional format found in action plan!")
                     logger.info(f"Conditional format structure: {json.dumps(action_plan['conditional_format'], indent=2)}")
                 else:
-                    logger.warning(f"⚠️ No 'conditional_format' field in action plan!")
+                    logger.warning(f"⚠️ No 'conditional_format' or 'conditional_formats' field in action plan!")
                     logger.info(f"Full action plan structure: {json.dumps({k: type(v).__name__ for k, v in action_plan.items()}, indent=2)}")
             except json.JSONDecodeError:
                 import re
@@ -749,11 +836,14 @@ Include "operations" array with "python_code" for each operation.
                     logger.info(f"✅ Successfully parsed action plan JSON from regex extraction")
                     logger.info(f"Action plan keys: {list(action_plan.keys())}")
                     
-                    if "conditional_format" in action_plan:
+                    if "conditional_formats" in action_plan:
+                        logger.info(f"✅ Multiple conditional formats found in action plan!")
+                        logger.info(f"Conditional formats structure: {json.dumps(action_plan['conditional_formats'], indent=2)}")
+                    elif "conditional_format" in action_plan:
                         logger.info(f"✅ Conditional format found in action plan!")
                         logger.info(f"Conditional format structure: {json.dumps(action_plan['conditional_format'], indent=2)}")
                     else:
-                        logger.warning(f"⚠️ No 'conditional_format' field in action plan!")
+                        logger.warning(f"⚠️ No 'conditional_format' or 'conditional_formats' field in action plan!")
                 else:
                     logger.error(f"❌ Could not parse JSON from response: {content[:200]}")
                     raise ValueError(f"Could not parse JSON from response: {content[:200]}")
@@ -783,7 +873,9 @@ Include "operations" array with "python_code" for each operation.
         }
         
         # Add optional fields
-        if "conditional_format" in action_plan:
+        if "conditional_formats" in action_plan:
+            normalized["conditional_formats"] = action_plan["conditional_formats"]
+        elif "conditional_format" in action_plan:
             normalized["conditional_format"] = action_plan["conditional_format"]
         
         if "format" in action_plan:

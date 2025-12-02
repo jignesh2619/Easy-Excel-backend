@@ -392,7 +392,9 @@ Include "operations" array with "execution_instructions" for each operation."""
         if "format" in action_plan:
             normalized["format"] = action_plan["format"]
         
-        if "conditional_format" in action_plan:
+        if "conditional_formats" in action_plan:
+            normalized["conditional_formats"] = action_plan["conditional_formats"]
+        elif "conditional_format" in action_plan:
             normalized["conditional_format"] = action_plan["conditional_format"]
         
         # Add formula operation field if present
