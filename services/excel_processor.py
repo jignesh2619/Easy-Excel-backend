@@ -1060,10 +1060,22 @@ class ExcelProcessor:
                         else:  # regex_match
                             matches = series.str.contains(pattern, na=False, regex=True)
                         
-                        # Format ALL matches in exported file (no limit for accuracy)
-                        # Preview is already limited to 500 rows, but exported file should have all matches
-                        match_indices = matches[matches].index if isinstance(matches, pd.Series) else []
-                        match_count = len(match_indices)
+                        # Format matches in exported file with reasonable limit to prevent CPU spikes
+                        # Preview is limited to 500 rows with all matches, export limits to 2000 matches per column per rule
+                        # This prevents CPU spikes while still formatting a large number of cells
+                        all_match_indices = matches[matches].index if isinstance(matches, pd.Series) else []
+                        match_count = len(all_match_indices)
+                        
+                        # Limit to 2000 matches per column per rule to prevent CPU spikes
+                        # This is still much more than preview (500 rows) but prevents system overload
+                        max_export_matches = 2000
+                        match_indices = all_match_indices[:max_export_matches] if len(all_match_indices) > max_export_matches else all_match_indices
+                        
+                        if len(all_match_indices) > max_export_matches:
+                            import logging
+                            logger = logging.getLogger(__name__)
+                            logger.warning(f"Limiting formatting to {max_export_matches} matches (out of {match_count} total) in column '{column}' to prevent CPU spikes")
+                        
                         for row_idx in match_indices:
                             excel_row = row_idx + 1  # +1 for header row
                             cell_value = self.df.iloc[row_idx, col_idx]
@@ -1077,8 +1089,6 @@ class ExcelProcessor:
                                 worksheet.write_boolean(excel_row, col_idx, cell_value, cell_format)
                             else:
                                 worksheet.write_string(excel_row, col_idx, str(cell_value), cell_format)
-                                
-                                match_count += 1
                         
                         # Log how many cells were formatted
                         import logging
