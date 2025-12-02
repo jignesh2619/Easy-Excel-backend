@@ -669,8 +669,8 @@ Include "operations" array with "python_code" for each operation.
     
     def _build_lightweight_prompt(self, user_prompt: str, available_columns: List[str], sample_data: Optional[List[Dict]] = None) -> str:
         """
-        Build a lightweight prompt without the massive SYSTEM_PROMPT.
-        We already have ACTION_PLAN_SYSTEM_PROMPT, so we don't need to duplicate instructions.
+        Build a lightweight prompt with essential accuracy-critical instructions.
+        Includes column mapping rules without the massive redundant SYSTEM_PROMPT.
         
         Args:
             user_prompt: User's request
@@ -678,9 +678,9 @@ Include "operations" array with "python_code" for each operation.
             sample_data: Sample data rows
             
         Returns:
-            Lightweight prompt with just essential context
+            Lightweight prompt with essential context and accuracy instructions
         """
-        # Create column info
+        # Create column info with positional references (CRITICAL for accuracy)
         columns_with_indices = []
         for idx, col in enumerate(available_columns):
             col_label = str(col)
@@ -698,11 +698,21 @@ Include "operations" array with "python_code" for each operation.
         columns_info = "Available columns (with indices for positional references):\n" + "\n".join(columns_with_indices)
         columns_list = f"Column list: {', '.join(available_columns)}"
         
-        # Add sample data if provided (this is essential for understanding the data)
+        # Build Excel column letter mapping (CRITICAL for accuracy)
+        excel_mapping = []
+        for idx, col_name in enumerate(available_columns[:26]):  # First 26 columns (A-Z)
+            excel_letter = chr(ord('A') + idx)
+            excel_mapping.append(f"  Column {excel_letter} (index {idx}): '{col_name}'")
+        excel_mapping_text = "\n".join(excel_mapping) if excel_mapping else ""
+        
+        # Add sample data if provided (ESSENTIAL for understanding data structure and content)
         sample_data_text = ""
         if sample_data:
             total_rows = len(sample_data)
             sample_data_text = f"\n📊 REPRESENTATIVE SAMPLE ({total_rows} rows, {len(available_columns)} columns):\n"
+            sample_data_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            sample_data_text += "IMPORTANT: Search through ALL rows below to find which columns contain specific text/values.\n"
+            sample_data_text += "Use this data to identify actual column names when user mentions content (e.g., 'phone column').\n"
             sample_data_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             
             for row_idx, row in enumerate(sample_data, 1):
@@ -716,17 +726,57 @@ Include "operations" array with "python_code" for each operation.
                     sample_data_text += f"  [{col_label}]: {value}\n"
                 sample_data_text += "\n"
         
-        # Build lightweight prompt (NO massive SYSTEM_PROMPT)
+        # Build lightweight prompt with CRITICAL accuracy instructions
         prompt = f"""USER REQUEST:
 {user_prompt}
 
+═══════════════════════════════════════════════════════════════════════════════
+📊 AVAILABLE COLUMNS (with positional indices):
+═══════════════════════════════════════════════════════════════════════════════
 {columns_info}
 
-{columns_list}
+Column List: {columns_list}
 
+{f'📋 EXCEL COLUMN LETTER MAPPING:\n{excel_mapping_text}\n' if excel_mapping_text else ''}
 {sample_data_text}
+═══════════════════════════════════════════════════════════════════════════════
+🎯 CRITICAL ACCURACY RULES (MANDATORY):
+═══════════════════════════════════════════════════════════════════════════════
 
-CRITICAL: Use actual column names from the list above. Return ONLY valid JSON with no markdown."""
+**POSITIONAL REFERENCES:**
+- "first column" = index 0 = {available_columns[0] if available_columns else 'N/A'}
+- "second column" = index 1 = {available_columns[1] if len(available_columns) > 1 else 'N/A'}
+- "third column" = index 2 = {available_columns[2] if len(available_columns) > 2 else 'N/A'}
+- "last column" = index {len(available_columns) - 1 if available_columns else 0} = {available_columns[-1] if available_columns else 'N/A'}
+
+**EXCEL COLUMN LETTERS:**
+- Column A = index 0 = {available_columns[0] if available_columns else 'N/A'}
+- Column B = index 1 = {available_columns[1] if len(available_columns) > 1 else 'N/A'}
+- Column C = index 2 = {available_columns[2] if len(available_columns) > 2 else 'N/A'}
+- When user says "column A", "column B", etc., FIRST check if a column with that name exists
+- If NO column named "A" exists, interpret as Excel letter and use the column at that index
+
+**TEXT-BASED SEARCH:**
+- If user says "highlight cells with X" or "column with X":
+  → Search through ALL {len(sample_data) if sample_data else 0} sample rows above
+  → Find which column(s) contain the text "X"
+  → Use the ACTUAL column name from available_columns list
+  → Example: If "X" appears in column "{available_columns[0] if available_columns else 'ColumnName'}", use "{available_columns[0] if available_columns else 'ColumnName'}" in your JSON
+
+**COLUMN NAME MATCHING:**
+- Column names are case-sensitive: "{available_columns[0] if available_columns else 'Name'}" ≠ "{available_columns[0].lower() if available_columns else 'name'}"
+- Use EXACT column names from available_columns list in your Python code
+- NEVER use positional references ("2nd", "second") or Excel letters ("C", "column C") in JSON
+- ALWAYS use actual column names: {', '.join(available_columns[:3]) if len(available_columns) >= 3 else ', '.join(available_columns)}
+
+**EXAMPLES:**
+- User: "delete second column" → Use column at index 1: "{available_columns[1] if len(available_columns) > 1 else 'ColumnName'}"
+- User: "remove column C" → Check if column named "C" exists, if not use index 2: "{available_columns[2] if len(available_columns) > 2 else 'ColumnName'}"
+- User: "highlight cells with 'text'" → Search sample data, find column containing "text", use that actual column name
+
+═══════════════════════════════════════════════════════════════════════════════
+
+Return ONLY valid JSON with actual column names from the list above. NO markdown, NO explanations."""
         
         return prompt
     
