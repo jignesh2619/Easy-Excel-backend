@@ -1729,7 +1729,11 @@ class ExcelProcessor:
                     
                     if column and column in df.columns:
                         # Find matching rows
-                        series = df[column].astype(str)
+                        # Performance: Only convert to string if not already string type
+                        if df[column].dtype == 'object':
+                            series = df[column]
+                        else:
+                            series = df[column].astype(str)
                         
                         # Debug: Show sample values from the column
                         sample_values = series[series.notna()].head(10).tolist()
