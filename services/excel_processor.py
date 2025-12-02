@@ -251,16 +251,6 @@ class ExcelProcessor:
                     else:
                         raise RuntimeError(f"Failed to read Excel file. The file may be corrupted. Error: {str(e)}")
                 
-                # Clean cell values - remove formatting metadata patterns like "||48,5,10mPass||0m" -> "Pass"
-                # This handles cases where Excel rich text formatting gets embedded in cell values
-                import re
-                for col in loaded_data.columns:
-                    if loaded_data[col].dtype == 'object':
-                        # Pattern: ||numbers,numbers,numbersmText||numbersm -> extract Text
-                        loaded_data[col] = loaded_data[col].astype(str).apply(
-                            lambda x: re.sub(r'\|\|\d+[,\d]*m([^|]+)\|\|\d+m', r'\1', str(x)) if pd.notna(x) and '||' in str(x) and 'm' in str(x) else x
-                        )
-                
                 # Check if we got a dict (shouldn't happen with sheet_name specified, but double-check)
                 if isinstance(loaded_data, dict):
                     # If it's a dict, get the first sheet
@@ -276,6 +266,25 @@ class ExcelProcessor:
             # Ensure we have a DataFrame
             if not isinstance(self.df, pd.DataFrame):
                 raise ValueError(f"Expected DataFrame, got {type(self.df)}")
+            
+            # Clean cell values: Remove ANSI escape codes and rich text formatting metadata
+            # Pattern 1: [48;5;10mText[0m (ANSI escape codes)
+            # Pattern 2: ||48,5,10mText||0m (old format with pipes)
+            ansi_pattern = re.compile(r'\[48;5;10m(.*?)\[0m', re.DOTALL)
+            old_format_pattern = re.compile(r'\|\|48,5,10m(.*?)\|\|0m', re.DOTALL)
+            
+            for col in self.df.columns:
+                if self.df[col].dtype == 'object':  # Only process string columns
+                    self.df[col] = self.df[col].astype(str).apply(
+                        lambda x: ansi_pattern.sub(r'\1', x) if pd.notna(x) and isinstance(x, str) else x
+                    )
+                    self.df[col] = self.df[col].astype(str).apply(
+                        lambda x: old_format_pattern.sub(r'\1', x) if pd.notna(x) and isinstance(x, str) else x
+                    )
+                    # Also handle any remaining ANSI escape codes (general pattern)
+                    self.df[col] = self.df[col].astype(str).apply(
+                        lambda x: re.sub(r'\[\d+(?:;\d+)*m', '', x) if pd.notna(x) and isinstance(x, str) else x
+                    )
             
             # Keep original copy
             self.original_df = self.df.copy()
@@ -379,16 +388,7 @@ class ExcelProcessor:
                 self._execute_edit_cell(action_plan)
             
             # Handle conditional formatting (still needs special handling)
-            # Support both single conditional_format and multiple conditional_formats
-            if "conditional_formats" in action_plan:
-                # Handle multiple conditional formatting rules
-                conditional_formats = action_plan.get("conditional_formats", [])
-                if isinstance(conditional_formats, list):
-                    for cf in conditional_formats:
-                        temp_action_plan = {"conditional_format": cf}
-                        self._execute_conditional_format(temp_action_plan)
-            elif "conditional_format" in action_plan:
-                # Handle single conditional formatting rule
+            if "conditional_format" in action_plan:
                 self._execute_conditional_format(action_plan)
             
             # Handle formatting (still needs special handling)

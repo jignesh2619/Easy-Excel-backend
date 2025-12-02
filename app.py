@@ -574,6 +574,26 @@ async def process_data(
         
         df = pd.DataFrame(request.data)
         
+        # Clean cell values: Remove ANSI escape codes and rich text formatting metadata
+        # Pattern 1: [48;5;10mText[0m (ANSI escape codes)
+        # Pattern 2: ||48,5,10mText||0m (old format with pipes)
+        import re
+        ansi_pattern = re.compile(r'\[48;5;10m(.*?)\[0m', re.DOTALL)
+        old_format_pattern = re.compile(r'\|\|48,5,10m(.*?)\|\|0m', re.DOTALL)
+        
+        for col in df.columns:
+            if df[col].dtype == 'object':  # Only process string columns
+                df[col] = df[col].astype(str).apply(
+                    lambda x: ansi_pattern.sub(r'\1', x) if pd.notna(x) and isinstance(x, str) else x
+                )
+                df[col] = df[col].astype(str).apply(
+                    lambda x: old_format_pattern.sub(r'\1', x) if pd.notna(x) and isinstance(x, str) else x
+                )
+                # Also handle any remaining ANSI escape codes (general pattern)
+                df[col] = df[col].astype(str).apply(
+                    lambda x: re.sub(r'\[\d+(?:;\d+)*m', '', x) if pd.notna(x) and isinstance(x, str) else x
+                )
+        
         # Ensure columns match
         if set(df.columns) != set(request.columns):
             # Reorder columns to match request
