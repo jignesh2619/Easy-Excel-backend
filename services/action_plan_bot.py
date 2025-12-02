@@ -597,7 +597,7 @@ When user requests to "extract emails and phone numbers from the entire sheet" o
 class ActionPlanBot:
     """Bot for generating data operation action plans"""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
         """
         Initialize Action Plan Bot
         

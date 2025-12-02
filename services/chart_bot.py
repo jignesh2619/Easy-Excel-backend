@@ -165,7 +165,7 @@ When user mentions "column C", "column A", etc.:
 class ChartBot:
     """Bot for generating chart configurations"""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
         """
         Initialize Chart Bot
         
@@ -310,20 +310,9 @@ class ChartBot:
                 # Single chart - validate normally
                 chart_config = self._validate_chart_config(chart_config, available_columns)
             
-            # Extract token usage from OpenAI API response
-            # CRITICAL: Only count OpenAI tokens, ensure usage object exists
-            if response.usage is None:
-                logger.error("⚠️ WARNING: OpenAI response.usage is None - cannot calculate tokens!")
-                prompt_tokens = 0
-                completion_tokens = 0
-                tokens_used = 0
-            else:
-                prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
-                completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
-                tokens_used = prompt_tokens + completion_tokens
-                
-                if tokens_used == 0:
-                    logger.warning("⚠️ WARNING: Token count is 0 - OpenAI API may not have returned usage info")
+            prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
+            tokens_used = prompt_tokens + completion_tokens
             
             logger.info(f"ChartBot tokens: prompt={prompt_tokens}, completion={completion_tokens}, total={tokens_used}")
             

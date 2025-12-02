@@ -89,13 +89,13 @@ SYSTEM_MESSAGE = (
 class LLMAgent:
     """Handles LLM interpretation of user prompts using OpenAI GPT-4"""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
         """
         Initialize LLM Agent with OpenAI GPT-4
         
         Args:
             api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
-            model: Model to use (default: gpt-4o)
+            model: Model to use (default: gpt-4o-mini)
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
@@ -296,21 +296,9 @@ Include "operations" array with "execution_instructions" for each operation."""
             
             content = (response.choices[0].message.content or "").strip()
             
-            # Extract token usage from OpenAI API response
-            # CRITICAL: Only count OpenAI tokens, ensure usage object exists
-            if response.usage is None:
-                logger.error("⚠️ WARNING: OpenAI response.usage is None - cannot calculate tokens!")
-                prompt_tokens = 0
-                completion_tokens = 0
-                tokens_used = 0
-            else:
-                prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
-                completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
-                tokens_used = prompt_tokens + completion_tokens
-                
-                if tokens_used == 0:
-                    logger.warning("⚠️ WARNING: Token count is 0 - OpenAI API may not have returned usage info")
-            
+            prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
+            tokens_used = prompt_tokens + completion_tokens
             logger.info(
                 "OpenAI token usage: prompt=%s, completion=%s, total=%s",
                 prompt_tokens,
