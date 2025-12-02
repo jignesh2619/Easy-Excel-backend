@@ -160,12 +160,25 @@ async def health():
 
 
 @app.options("/{full_path:path}")
-async def options_handler(full_path: str):
+async def options_handler(full_path: str, request: Request):
     """Handle OPTIONS requests for CORS preflight"""
+    origin = request.headers.get("origin")
+    allowed_origins = [
+        "https://www.easyexcel.in",
+        "https://easyexcel.in",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ]
+    
+    # Return the origin if it's allowed, otherwise return the first allowed origin
+    allow_origin = origin if origin in allowed_origins else allowed_origins[0]
+    
     return JSONResponse(
         content={},
         headers={
-            "Access-Control-Allow-Origin": "https://www.easyexcel.in",
+            "Access-Control-Allow-Origin": allow_origin,
             "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
             "Access-Control-Allow-Headers": "*",
             "Access-Control-Allow-Credentials": "true",
