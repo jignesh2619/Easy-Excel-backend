@@ -1060,8 +1060,9 @@ class ExcelProcessor:
                         else:  # regex_match
                             matches = series.str.contains(pattern, na=False, regex=True)
                         
-                        # Performance optimization: Limit to first 500 matches to prevent CPU spikes
-                        match_indices = matches[matches].index[:500] if isinstance(matches, pd.Series) else []
+                        # Format ALL matches in exported file (no limit for accuracy)
+                        # Preview is already limited to 500 rows, but exported file should have all matches
+                        match_indices = matches[matches].index if isinstance(matches, pd.Series) else []
                         match_count = len(match_indices)
                         for row_idx in match_indices:
                             excel_row = row_idx + 1  # +1 for header row
