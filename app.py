@@ -172,10 +172,14 @@ class ProcessFileResponse(BaseModel):
     summary: list
     action_plan: Optional[dict] = None
     message: Optional[str] = None
-    processed_data: Optional[List[Dict[str, Any]]] = None  # JSON representation of processed dataframe (list of row dicts)
+    processed_data: Optional[List[Any]] = None  # JSON representation of processed dataframe (list of row dicts) - using Any to allow flexible key types
     columns: Optional[List[str]] = None  # Column names
     row_count: Optional[int] = None  # Number of rows
     formatting_metadata: Optional[Dict[str, Any]] = None  # Formatting metadata for preview display
+    
+    class Config:
+        # Allow arbitrary types - FastAPI's jsonable_encoder will handle serialization
+        arbitrary_types_allowed = True
     # Formula engine response format
     type: Optional[str] = None  # "summary" | "table" | "value" | "chart" | "transformation"
     operation: Optional[str] = None  # Operation name (e.g., "sum", "average", "filter", etc.)
@@ -304,8 +308,7 @@ async def process_file(
             sample_df = sample_result.dataframe
             sample_explanation = sample_result.explanation
             sample_data = sample_df.to_dict("records")
-            # Convert all non-JSON-serializable types (optimized - processes entire list once)
-            sample_data = make_json_serializable(sample_data)
+            # FastAPI's jsonable_encoder will handle serialization automatically
             
             import json
             data_json = json.dumps(sample_data)
@@ -448,33 +451,11 @@ async def process_file(
         # Limit to first 1000 rows for preview to improve performance
         import pandas as pd
         import numpy as np
-        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df.copy()
-        # Convert all column names to strings (Pydantic requires string keys in Dict[str, Any])
+        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
+        # Only convert column names to strings (fast operation)
         preview_df.columns = [str(col) for col in preview_df.columns]
-        
-        # Convert all problematic types at DataFrame level (much faster than row-by-row)
-        for col in preview_df.columns:
-            col_data = preview_df[col]
-            # Convert datetime columns to strings
-            if pd.api.types.is_datetime64_any_dtype(col_data):
-                preview_df[col] = col_data.dt.strftime('%Y-%m-%d %H:%M:%S').replace('NaT', None)
-            # Convert numpy integer/float types to Python native types
-            elif pd.api.types.is_integer_dtype(col_data) and col_data.dtype.name.startswith('int'):
-                preview_df[col] = col_data.astype('Int64')  # Nullable integer
-            elif pd.api.types.is_float_dtype(col_data) and col_data.dtype.name.startswith('float'):
-                preview_df[col] = col_data.astype('float64')
-            # Handle object columns that might contain datetime or other problematic types
-            elif pd.api.types.is_object_dtype(col_data):
-                # Only process if we detect datetime objects (to avoid unnecessary processing)
-                sample_val = col_data.dropna().iloc[0] if len(col_data.dropna()) > 0 else None
-                if sample_val is not None and isinstance(sample_val, (pd.Timestamp, datetime)):
-                    preview_df[col] = col_data.apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, (pd.Timestamp, datetime)) and pd.notna(x) else x)
-        
-        # Replace NaN/None values with null for proper JSON serialization
+        # Replace NaN/None values - FastAPI's jsonable_encoder will handle datetime and other types automatically
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
-        # Only apply make_json_serializable as a final safety net (optimized - only processes if needed)
-        # Most conversions already done at DataFrame level, so this should be fast
-        processed_data = make_json_serializable(processed_data)
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
@@ -730,8 +711,7 @@ async def process_data(
             sample_df = sample_result.dataframe
             sample_explanation = sample_result.explanation
             sample_data = sample_df.to_dict("records")
-            # Convert all non-JSON-serializable types (optimized - processes entire list once)
-            sample_data = make_json_serializable(sample_data)
+            # FastAPI's jsonable_encoder will handle serialization automatically
             
             import json
             data_json = json.dumps(sample_data)
@@ -854,32 +834,11 @@ async def process_data(
         
         # 12. Convert processed dataframe to JSON for preview
         # Limit to first 1000 rows for preview to improve performance
-        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df.copy()
-        # Convert all column names to strings (Pydantic requires string keys in Dict[str, Any])
+        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
+        # Only convert column names to strings (fast operation)
         preview_df.columns = [str(col) for col in preview_df.columns]
-        
-        # Convert all problematic types at DataFrame level (much faster than row-by-row)
-        for col in preview_df.columns:
-            col_data = preview_df[col]
-            # Convert datetime columns to strings (vectorized - much faster)
-            if pd.api.types.is_datetime64_any_dtype(col_data):
-                preview_df[col] = col_data.dt.strftime('%Y-%m-%d %H:%M:%S').replace('NaT', None)
-            # Convert numpy integer/float types to Python native types
-            elif pd.api.types.is_integer_dtype(col_data) and col_data.dtype.name.startswith('int'):
-                preview_df[col] = col_data.astype('Int64')  # Nullable integer
-            elif pd.api.types.is_float_dtype(col_data) and col_data.dtype.name.startswith('float'):
-                preview_df[col] = col_data.astype('float64')
-            # Handle object columns that might contain datetime or other problematic types
-            elif pd.api.types.is_object_dtype(col_data):
-                # Only process if we detect datetime objects (to avoid unnecessary processing)
-                sample_val = col_data.dropna().iloc[0] if len(col_data.dropna()) > 0 else None
-                if sample_val is not None and isinstance(sample_val, (pd.Timestamp, datetime)):
-                    preview_df[col] = col_data.apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, (pd.Timestamp, datetime)) and pd.notna(x) else x)
-        
-        # Replace NaN/None values with null for proper JSON serialization
+        # Replace NaN/None values - FastAPI's jsonable_encoder will handle datetime and other types automatically
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
-        # Only apply make_json_serializable as a final safety net (optimized - processes entire list once)
-        processed_data = make_json_serializable(processed_data)
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
