@@ -828,7 +828,7 @@ Include "operations" array with "python_code" for each operation.
             columns_with_indices.append(f"{idx}: {col_label}{position_name}")
         
         columns_info = "Available columns (with indices for positional references):\n" + "\n".join(columns_with_indices)
-        columns_list = f"Column list: {', '.join(available_columns)}"
+        columns_list = f"Column list: {', '.join(str(col) for col in available_columns)}"
         
         # Build Excel column letter mapping (CRITICAL for accuracy)
         excel_mapping = []
@@ -899,7 +899,7 @@ Column List: {columns_list}
 - Column names are case-sensitive: "{available_columns[0] if available_columns else 'Name'}" ≠ "{available_columns[0].lower() if available_columns else 'name'}"
 - Use EXACT column names from available_columns list in your Python code
 - NEVER use positional references ("2nd", "second") or Excel letters ("C", "column C") in JSON
-- ALWAYS use actual column names: {', '.join(available_columns[:3]) if len(available_columns) >= 3 else ', '.join(available_columns)}
+- ALWAYS use actual column names: {', '.join(str(col) for col in available_columns[:3]) if len(available_columns) >= 3 else ', '.join(str(col) for col in available_columns)}
 
 **EXAMPLES:**
 - User: "delete second column" → Use column at index 1: "{available_columns[1] if len(available_columns) > 1 else 'ColumnName'}"
