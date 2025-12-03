@@ -1,0 +1,29 @@
+name: Deploy to DigitalOcean
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Droplet
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          script: |
+            cd /opt/easyexcel-backend
+            git pull origin main
+            source venv/bin/activate
+            pip install -r requirements.txt --quiet
+            systemctl restart easyexcel-backend
+            sleep 5
+            systemctl status easyexcel-backend --no-pager
+
