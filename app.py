@@ -459,24 +459,38 @@ async def process_file(
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
-        # 12a. Get formatting metadata for preview display
-        # Only generate if formatting rules exist (performance optimization)
-        if processor.formatting_rules:
-            formatting_metadata = processor.get_formatting_metadata(preview_df)
-            logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
+        # 12a. Get formatting metadata for preview display (skip for performance - can be slow)
+        # Only generate if formatting rules exist AND dataset is small (< 100 rows)
+        if processor.formatting_rules and len(preview_df) < 100:
+            try:
+                formatting_metadata = processor.get_formatting_metadata(preview_df)
+                logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
+                
+                # 12b. Add formatting info directly to each cell (optimized - only process cells that have formatting)
+                cell_formats = formatting_metadata.get("cell_formats", {})
+                if cell_formats:
+                    # Pre-build column name set for faster lookup
+                    columns_set = set(columns)
+                    for cell_key, cell_format in cell_formats.items():
+                        # Parse cell_key format: "row_idx_col_name"
+                        parts = cell_key.split('_', 1)
+                        if len(parts) == 2:
+                            try:
+                                row_idx = int(parts[0])
+                                col_name = parts[1]
+                                if row_idx < len(processed_data) and col_name in columns_set:
+                                    processed_data[row_idx][f"{col_name}_format"] = cell_format
+                            except (ValueError, IndexError, KeyError):
+                                continue  # Skip invalid keys
+            except Exception as e:
+                logger.warning(f"Failed to generate formatting metadata: {e}")
+                formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
         else:
             formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
-            logger.info("📊 No formatting rules, skipping metadata generation")
-        
-        # 12b. Add formatting info directly to each cell in processed_data for easier frontend rendering
-        if formatting_metadata.get("cell_formats"):
-            for row_idx, row_data in enumerate(processed_data):
-                for col_name in columns:
-                    cell_key = f"{row_idx}_{col_name}"
-                    if cell_key in formatting_metadata["cell_formats"]:
-                        cell_format = formatting_metadata["cell_formats"][cell_key]
-                        # Add _format suffix to avoid conflicts with actual data
-                        row_data[f"{col_name}_format"] = cell_format
+            if processor.formatting_rules and len(preview_df) >= 100:
+                logger.info("📊 Skipping formatting metadata generation for large dataset (performance)")
+            else:
+                logger.info("📊 No formatting rules, skipping metadata generation")
         
         # 13. Determine response type and format for formula engine
         response_type = "table"  # Default
@@ -842,23 +856,38 @@ async def process_data(
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
-        # 13. Get formatting metadata
-        # Only generate if formatting rules exist (performance optimization)
-        if processor.formatting_rules:
-            formatting_metadata = processor.get_formatting_metadata(preview_df)
-            logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
+        # 13. Get formatting metadata (skip for performance - can be slow)
+        # Only generate if formatting rules exist AND dataset is small (< 100 rows)
+        if processor.formatting_rules and len(preview_df) < 100:
+            try:
+                formatting_metadata = processor.get_formatting_metadata(preview_df)
+                logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
+                
+                # 14. Add formatting info to each cell (optimized - only process cells that have formatting)
+                cell_formats = formatting_metadata.get("cell_formats", {})
+                if cell_formats:
+                    # Pre-build column name set for faster lookup
+                    columns_set = set(columns)
+                    for cell_key, cell_format in cell_formats.items():
+                        # Parse cell_key format: "row_idx_col_name"
+                        parts = cell_key.split('_', 1)
+                        if len(parts) == 2:
+                            try:
+                                row_idx = int(parts[0])
+                                col_name = parts[1]
+                                if row_idx < len(processed_data) and col_name in columns_set:
+                                    processed_data[row_idx][f"{col_name}_format"] = cell_format
+                            except (ValueError, IndexError, KeyError):
+                                continue  # Skip invalid keys
+            except Exception as e:
+                logger.warning(f"Failed to generate formatting metadata: {e}")
+                formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
         else:
             formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
-            logger.info("📊 No formatting rules, skipping metadata generation")
-        
-        # 14. Add formatting info to each cell
-        if formatting_metadata.get("cell_formats"):
-            for row_idx, row_data in enumerate(processed_data):
-                for col_name in columns:
-                    cell_key = f"{row_idx}_{col_name}"
-                    if cell_key in formatting_metadata["cell_formats"]:
-                        cell_format = formatting_metadata["cell_formats"][cell_key]
-                        row_data[f"{col_name}_format"] = cell_format
+            if processor.formatting_rules and len(preview_df) >= 100:
+                logger.info("📊 Skipping formatting metadata generation for large dataset (performance)")
+            else:
+                logger.info("📊 No formatting rules, skipping metadata generation")
         
         # 15. Determine response type
         response_type = "table"
