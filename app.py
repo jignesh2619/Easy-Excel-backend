@@ -210,25 +210,35 @@ async def process_file(
     processed_file_path = None
     chart_path = None
     
+    import time
+    start_time = time.time()
+    logger.info(f"🚀 [TIMING] Process started at {time.time()}")
+    
     try:
         # 1. Validate file
+        step_start = time.time()
         is_valid, error = validator.validate_file_format(file.filename)
+        logger.info(f"⏱️ [TIMING] Step 1 (validate file format): {time.time() - step_start:.2f}s")
         if not is_valid:
             raise HTTPException(status_code=400, detail=error)
         
         # 2. Save uploaded file
+        step_start = time.time()
         try:
             file_content = await file.read()
             if not file_content or len(file_content) == 0:
                 raise HTTPException(status_code=400, detail="Uploaded file is empty")
             temp_file_path = file_manager.save_uploaded_file(file_content, file.filename)
+            logger.info(f"⏱️ [TIMING] Step 2 (save uploaded file): {time.time() - step_start:.2f}s")
         except Exception as e:
             logger.error(f"Error saving uploaded file: {str(e)}")
             raise HTTPException(status_code=400, detail=f"Failed to save uploaded file: {str(e)}")
         
         # 3. Validate file content
+        step_start = time.time()
         try:
             is_valid, error, df = validator.validate_complete_file(temp_file_path, file.filename)
+            logger.info(f"⏱️ [TIMING] Step 3 (validate file content): {time.time() - step_start:.2f}s, rows: {len(df)}, cols: {len(df.columns)}")
             if not is_valid:
                 file_manager.delete_file(temp_file_path)
                 logger.error(f"File validation failed: {error}")
@@ -241,7 +251,9 @@ async def process_file(
             raise HTTPException(status_code=400, detail=f"Error reading file: {str(e)}. Please ensure the file is not corrupted.")
         
         # 4. Get available columns
+        step_start = time.time()
         available_columns = list(df.columns)
+        logger.info(f"⏱️ [TIMING] Step 4 (get columns): {time.time() - step_start:.2f}s, columns: {len(available_columns)}")
         
         # 5. Get user authentication before processing
         user = None
@@ -259,6 +271,7 @@ async def process_file(
                 user = user_service.get_user_by_api_key(token)
         
         # 6. Prepare representative sample data for LLM context
+        step_start = time.time()
         sample_data = None
         sample_explanation = ""
         data_size_estimate = 0
@@ -270,7 +283,9 @@ async def process_file(
             # FastAPI's jsonable_encoder will handle serialization automatically
             
             import json
+            json_start = time.time()
             data_json = json.dumps(sample_data)
+            logger.info(f"⏱️ [TIMING] JSON dumps for sample: {time.time() - json_start:.2f}s")
             data_size_estimate = len(data_json) // 4
             logger.info(
                 "✅ Sample prepared for LLM: %s rows selected from %s total, explanation: %s",
@@ -278,6 +293,7 @@ async def process_file(
                 len(df),
                 sample_explanation
             )
+        logger.info(f"⏱️ [TIMING] Step 6 (prepare sample data): {time.time() - step_start:.2f}s")
         
         # 7. Check token limits before LLM call (account for full Excel data)
         # Estimate includes: user prompt + system prompt + Excel data + response
@@ -299,6 +315,7 @@ async def process_file(
                 )
         
         # 8. Interpret prompt with LLM
+        step_start = time.time()
         if llm_agent is None:
             raise HTTPException(
                 status_code=500, 
@@ -308,6 +325,7 @@ async def process_file(
         # Get user_id for feedback tracking
         user_id = user["user_id"] if user else None
         
+        logger.info(f"⏱️ [TIMING] About to call LLM at {time.time() - start_time:.2f}s total elapsed")
         llm_result = llm_agent.interpret_prompt(
             prompt,
             available_columns,
@@ -316,6 +334,7 @@ async def process_file(
             sample_explanation=sample_explanation,
             df=df  # Pass DataFrame for chart analysis
         )
+        logger.info(f"⏱️ [TIMING] Step 8 (LLM call): {time.time() - step_start:.2f}s")
         action_plan = llm_result.get("action_plan", {})
         # Add user prompt to action plan so processors can check what user explicitly requested
         action_plan["user_prompt"] = prompt
@@ -346,8 +365,10 @@ async def process_file(
                 raise HTTPException(status_code=400, detail=error)
         
         # 7. Process file
+        step_start = time.time()
         processor = ExcelProcessor(temp_file_path)
         processor.load_data()
+        logger.info(f"⏱️ [TIMING] Step 7 (load data): {time.time() - step_start:.2f}s")
         
         # Check if user mentioned cleaning operations in prompt
         cleaning_keywords = ['remove duplicates', 'clean', 'fix formatting', 'handle missing', 'duplicate', 'remove empty', 'normalize']
@@ -373,18 +394,23 @@ async def process_file(
         # If user wants visualization but task is summarize (and no cleaning), that's fine
         # But if cleaning is involved, we already set it to "clean" above
         
+        step_start = time.time()
+        logger.info(f"⏱️ [TIMING] About to execute action plan at {time.time() - start_time:.2f}s total elapsed")
         result = processor.execute_action_plan(action_plan)
+        logger.info(f"⏱️ [TIMING] Action plan execution: {time.time() - step_start:.2f}s")
         
         # Double-check: If task ended up as "summarize" but user wanted cleaning, 
         # we need to reload and re-execute with clean task
         final_task = result.get("task", original_task)
         if final_task == "summarize" and user_wants_cleaning:
             # This shouldn't happen if override worked, but just in case:
+            step_start = time.time()
             processor.load_data()  # Reload original data
             action_plan["task"] = "clean"
             if user_wants_chart and action_plan.get("chart_type") == "none":
                 action_plan["chart_type"] = "bar"
             result = processor.execute_action_plan(action_plan)
+            logger.info(f"⏱️ [TIMING] Re-execute action plan: {time.time() - step_start:.2f}s")
         
         processed_df = result["df"]
         summary = result["summary"]
@@ -395,9 +421,11 @@ async def process_file(
         task = result.get("task", "summarize")
         
         # 8. Save processed file
+        step_start = time.time()
         output_filename = f"processed_{Path(file.filename).stem}.xlsx"
         output_path = file_manager.output_dir / output_filename
         processed_file_path = processor.save_processed_file(str(output_path))
+        logger.info(f"⏱️ [TIMING] Step 8 (save processed file): {time.time() - step_start:.2f}s")
         
         # 10. Clean up temp file
         file_manager.delete_file(temp_file_path)
