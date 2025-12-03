@@ -449,13 +449,11 @@ async def process_file(
         
         # 12. Convert processed dataframe to JSON for preview
         # Limit to first 1000 rows for preview to improve performance
-        import pandas as pd
-        import numpy as np
         preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
         # Only convert column names to strings (fast operation)
         preview_df.columns = [str(col) for col in preview_df.columns]
-        # Replace NaN/None values - FastAPI's jsonable_encoder will handle datetime and other types automatically
-        processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
+        # Convert to dict - FastAPI's jsonable_encoder will handle NaN, datetime, and all other types automatically
+        processed_data = preview_df.to_dict(orient='records')
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
@@ -849,8 +847,8 @@ async def process_data(
         preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
         # Only convert column names to strings (fast operation)
         preview_df.columns = [str(col) for col in preview_df.columns]
-        # Replace NaN/None values - FastAPI's jsonable_encoder will handle datetime and other types automatically
-        processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
+        # Convert to dict - FastAPI's jsonable_encoder will handle NaN, datetime, and all other types automatically
+        processed_data = preview_df.to_dict(orient='records')
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
