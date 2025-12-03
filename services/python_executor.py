@@ -115,7 +115,12 @@ class PythonExecutor:
             }
             
         except NameError as e:
-            error_msg = self._handle_name_error(e, python_code)
+            error_str = str(e)
+            # Handle specific 'bold' variable error
+            if "bold" in error_str.lower() and ("not defined" in error_str.lower() or "not associated" in error_str.lower()):
+                error_msg = "Execution failed: Cannot use 'bold' as a variable name. For bold formatting, use the 'format' JSON structure in the action plan with 'bold': true, NOT Python code. Example: Use 'format' in action plan, not Python code like 'df[col] = bold'."
+            else:
+                error_msg = self._handle_name_error(e, python_code)
             self.errors.append(error_msg)
             self.execution_log.append(f"✗ {description}: {error_msg}")
             raise RuntimeError(error_msg)

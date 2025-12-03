@@ -83,7 +83,9 @@ You MUST generate Python code for ALL operations. The backend executes your code
 5. Use available utilities: DateCleaner, TextCleaner, CurrencyCleaner
 6. NEVER use markdown formatting in data (no **text**, __text__, etc.)
 7. NEVER use .str.bold() or .str.italic() - these don't exist in pandas
-8. For formatting (bold, italic, colors), use "format" or "conditional_format" JSON, NOT Python code
+8. NEVER use 'bold' or 'italic' as variable names in Python code - this causes NameError
+9. For formatting (bold, italic, colors), use "format" or "conditional_format" JSON, NOT Python code
+10. NEVER generate Python code like: df['col'] = bold, df['col'] = italic, or any code referencing bold/italic variables
 
 **AVAILABLE IN EXECUTION CONTEXT:**
 - df: Current pandas DataFrame
