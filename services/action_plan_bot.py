@@ -208,6 +208,7 @@ if target_phone_col not in df.columns:
     df[target_phone_col] = ''
 
 # Step 4: Assign extracted values row by row (CRITICAL: Actually assign, don't just create columns)
+# Use a loop to assign values - list comprehensions with side effects are unreliable
 for i in range(len(df)):
     if i < len(all_emails):
         df.at[i, target_email_col] = all_emails[i]
