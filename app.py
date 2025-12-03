@@ -76,6 +76,45 @@ sample_selector = SampleSelector()
 # Security
 security = HTTPBearer(auto_error=False)
 
+def make_json_serializable(obj):
+    """
+    Recursively convert all non-JSON-serializable types to strings or JSON-compatible types.
+    Handles: datetime, Timestamp, numpy types, complex numbers, and any other problematic types.
+    """
+    import json
+    import numpy as np
+    import pandas as pd
+    from datetime import datetime
+    
+    if obj is None:
+        return None
+    elif isinstance(obj, (pd.Timestamp, datetime)):
+        try:
+            return obj.strftime('%Y-%m-%d %H:%M:%S') if pd.notna(obj) else None
+        except (AttributeError, ValueError):
+            return str(obj) if obj is not None else None
+    elif isinstance(obj, (np.integer, np.floating)):
+        return obj.item()  # Convert numpy scalar to Python native type
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (np.bool_, bool)):
+        return bool(obj)
+    elif isinstance(obj, (int, float, str, bool)):
+        return obj
+    elif isinstance(obj, dict):
+        return {str(k): make_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [make_json_serializable(item) for item in obj]
+    elif isinstance(obj, (complex,)):
+        return str(obj)
+    else:
+        # Convert any other type to string as fallback
+        try:
+            json.dumps(obj)
+            return obj
+        except (TypeError, ValueError):
+            return str(obj)
+
 def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Dict[str, Any]:
     """
     Get current user from Supabase Auth token or API key.
@@ -263,6 +302,8 @@ async def process_file(
             sample_df = sample_result.dataframe
             sample_explanation = sample_result.explanation
             sample_data = sample_df.to_dict("records")
+            # Convert all non-JSON-serializable types to strings or compatible types
+            sample_data = [make_json_serializable(row) for row in sample_data]
             
             import json
             data_json = json.dumps(sample_data)
@@ -417,6 +458,8 @@ async def process_file(
                 preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, (pd.Timestamp, datetime)) and pd.notna(x) else x)
         # Replace NaN/None values with null for proper JSON serialization
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
+        # Convert all non-JSON-serializable types to strings or compatible types
+        processed_data = [make_json_serializable(row) for row in processed_data]
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
@@ -672,6 +715,8 @@ async def process_data(
             sample_df = sample_result.dataframe
             sample_explanation = sample_result.explanation
             sample_data = sample_df.to_dict("records")
+            # Convert all non-JSON-serializable types to strings or compatible types
+            sample_data = [make_json_serializable(row) for row in sample_data]
             
             import json
             data_json = json.dumps(sample_data)
@@ -805,6 +850,8 @@ async def process_data(
                 # Check if object column contains datetime objects
                 preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, (pd.Timestamp, datetime)) and pd.notna(x) else x)
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
+        # Convert all non-JSON-serializable types to strings or compatible types
+        processed_data = [make_json_serializable(row) for row in processed_data]
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
