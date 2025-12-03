@@ -1775,8 +1775,8 @@ class ExcelProcessor:
                     # Performance optimization: Use vectorized operations instead of row-by-row iteration
                     col_name = range_info["column"]
                     if col_name in df.columns:
-                        # Limit to preview rows only (max 500) to prevent CPU spikes
-                        max_rows = min(len(df), 500)
+                        # Limit to preview rows only (max 1000) to prevent CPU spikes
+                        max_rows = min(len(df), 1000)
                         for row_idx in range(max_rows):
                             cell_key = f"{row_idx}_{col_name}"
                             cell_format = {}
@@ -1836,9 +1836,9 @@ class ExcelProcessor:
                         match_count = matches.sum()
                         
                         # Build cell format map: "row_col" -> format info
-                        # Accuracy: Format ALL matches within preview rows (first 500 rows)
+                        # Accuracy: Format ALL matches within preview rows (first 1000 rows)
                         # Performance optimization: Use vectorized operations instead of list comprehension with get_loc
-                        preview_limit = min(len(df), 500)  # Match preview size
+                        preview_limit = min(len(df), 1000)  # Match preview size
                         
                         # Get matches and filter to preview rows using numpy (much faster)
                         import numpy as np
@@ -1876,9 +1876,9 @@ class ExcelProcessor:
                         series = df[column].fillna('').astype(str)
                         matches = series.str.lower() == str(text).lower()
                         
-                        # Accuracy: Format ALL matches within preview rows (first 500 rows)
+                        # Accuracy: Format ALL matches within preview rows (first 1000 rows)
                         # Performance optimization: Use vectorized operations
-                        preview_limit = min(len(df), 500)  # Match preview size
+                        preview_limit = min(len(df), 1000)  # Match preview size
                         
                         # Get 0-based positions directly using numpy where (much faster)
                         import numpy as np

@@ -402,10 +402,10 @@ async def process_file(
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
         
         # 12. Convert processed dataframe to JSON for preview
-        # Limit to first 500 rows for preview to improve performance (reduced from 1000)
+        # Limit to first 1000 rows for preview to improve performance
         import pandas as pd
         import numpy as np
-        preview_df = processed_df.head(500) if len(processed_df) > 500 else processed_df
+        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
         # Replace NaN/None values with null for proper JSON serialization
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
         columns = list(processed_df.columns)
@@ -785,7 +785,7 @@ async def process_data(
         
         # 12. Convert processed dataframe to JSON for preview
         # Limit to first 500 rows for preview to improve performance (reduced from 1000)
-        preview_df = processed_df.head(500) if len(processed_df) > 500 else processed_df
+        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
         columns = list(processed_df.columns)
         row_count = len(processed_df)
