@@ -211,8 +211,12 @@ if target_phone_col not in df.columns:
 for i in range(len(df)):
     if i < len(all_emails):
         df.at[i, target_email_col] = all_emails[i]
+    else:
+        df.at[i, target_email_col] = ''
     if i < len(all_phones):
         df.at[i, target_phone_col] = all_phones[i]
+    else:
+        df.at[i, target_phone_col] = ''
 ```
 
 **COMMON MISTAKES TO AVOID:**
