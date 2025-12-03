@@ -436,11 +436,15 @@ async def process_file(
         
         # 12. Convert processed dataframe to JSON for preview
         # Limit to first 1000 rows for preview to improve performance
-        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
+        # Limit to first 100 rows for preview to save memory (OOM fix - was 1000)
+        preview_limit = 100
+        preview_df = processed_df.head(preview_limit) if len(processed_df) > preview_limit else processed_df
         # Only convert column names to strings (fast operation)
         preview_df.columns = [str(col) for col in preview_df.columns]
         # Convert to dict - FastAPI's jsonable_encoder will handle NaN, datetime, and all other types automatically
         processed_data = preview_df.to_dict(orient='records')
+        # Clear preview_df from memory immediately to prevent OOM
+        del preview_df
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
@@ -805,11 +809,15 @@ async def process_data(
         
         # 12. Convert processed dataframe to JSON for preview
         # Limit to first 1000 rows for preview to improve performance
-        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
+        # Limit to first 100 rows for preview to save memory (OOM fix - was 1000)
+        preview_limit = 100
+        preview_df = processed_df.head(preview_limit) if len(processed_df) > preview_limit else processed_df
         # Only convert column names to strings (fast operation)
         preview_df.columns = [str(col) for col in preview_df.columns]
         # Convert to dict - FastAPI's jsonable_encoder will handle NaN, datetime, and all other types automatically
         processed_data = preview_df.to_dict(orient='records')
+        # Clear preview_df from memory immediately to prevent OOM
+        del preview_df
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
