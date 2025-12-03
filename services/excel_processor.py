@@ -284,28 +284,37 @@ class ExcelProcessor:
                     x = general_ansi_pattern.sub('', x)
                 return x
             
-            # Performance optimization: For large datasets (>1000 rows), only clean first 1000 rows
-            # Remaining rows will be cleaned on-demand during processing if needed
+            # Store cleaning function for on-demand use
+            self._clean_cell_value = clean_cell_value
+            
+            # Performance optimization: For large datasets (>1000 rows), only clean first 1000 rows initially
+            # Remaining rows will be cleaned on-demand during processing operations to ensure accuracy
             for col in self.df.columns:
                 if self.df[col].dtype == 'object':  # Only process string columns
                     if len(self.df) > 1000:
-                        # Large dataset: clean first 1000 rows only
+                        # Large dataset: clean first 1000 rows initially for preview
                         self.df[col] = self.df[col].astype(str)
                         self.df.loc[:999, col] = self.df.loc[:999, col].apply(clean_cell_value)
-                        # Remaining rows keep original values (will be cleaned during processing if needed)
+                        # Mark column as partially cleaned (for on-demand cleaning)
+                        if not hasattr(self, '_partially_cleaned_cols'):
+                            self._partially_cleaned_cols = set()
+                        self._partially_cleaned_cols.add(col)
                     else:
-                        # Small dataset: clean all rows
+                        # Small dataset: clean all rows immediately
                         self.df[col] = self.df[col].astype(str).apply(clean_cell_value)
             
             # Keep original copy (lazy copy for large datasets to save memory/CPU)
-            # Only copy if we actually need it (for undo/rollback operations)
-            # For large files, we'll copy on-demand if needed
+            # For undo/rollback operations, we need a copy but can defer for very large files
+            # Accuracy: Ensure we can always rollback if needed, but optimize for large files
             if len(self.df) > 5000:
-                # Very large dataset: Don't copy immediately, copy on-demand if needed
-                self.original_df = None  # Will be set on-demand if needed
+                # Very large dataset: Use shallow copy initially (saves memory/CPU)
+                # Will create deep copy on-demand if actual modifications are needed
+                self.original_df = self.df.copy(deep=False)  # Shallow copy - shares data but not index
+                self._needs_deep_copy = True  # Flag to create deep copy if needed
             else:
-                # Small/medium dataset: Copy immediately
+                # Small/medium dataset: Copy immediately (full deep copy for safety)
                 self.original_df = self.df.copy()
+                self._needs_deep_copy = False
             self.summary.append(f"Loaded {len(self.df)} rows and {len(self.df.columns)} columns")
             
             # Generate summary using new summarizer module
@@ -493,6 +502,16 @@ class ExcelProcessor:
                         column = matching_column
                 
                 if column and column in self.df.columns:
+                    # Accuracy: Clean remaining rows on-demand if this column was partially cleaned
+                    if hasattr(self, '_partially_cleaned_cols') and column in self._partially_cleaned_cols:
+                        # Clean remaining rows (>1000) to ensure accuracy during processing
+                        if len(self.df) > 1000 and self.df[column].dtype == 'object':
+                            remaining_rows = self.df.loc[1000:, column]
+                            if len(remaining_rows) > 0:
+                                self.df.loc[1000:, column] = remaining_rows.apply(self._clean_cell_value)
+                                # Mark as fully cleaned
+                                self._partially_cleaned_cols.discard(column)
+                    
                     # Get the character/pattern to remove or replace
                     char_to_remove = params.get("character") or params.get("pattern") or params.get("value") or params.get("old") or ""
                     # Get replacement value (empty string for "remove", space for "replace with space", or specified value)
@@ -1073,14 +1092,14 @@ class ExcelProcessor:
                             matches = series.str.contains(pattern, na=False, regex=True)
                         
                         # Format matches in exported file with reasonable limit to prevent CPU spikes
-                        # Preview is limited to 500 rows with all matches, export limits to 2000 matches per column per rule
-                        # This prevents CPU spikes while still formatting a large number of cells
+                        # Preview is limited to 500 rows with all matches, export limits to 5000 matches per column per rule
+                        # Increased from 2000 to 5000 to improve accuracy while still preventing CPU spikes
                         all_match_indices = matches[matches].index if isinstance(matches, pd.Series) else []
                         match_count = len(all_match_indices)
                         
-                        # Limit to 2000 matches per column per rule to prevent CPU spikes
-                        # This is still much more than preview (500 rows) but prevents system overload
-                        max_export_matches = 2000
+                        # Limit to 5000 matches per column per rule to prevent CPU spikes
+                        # Increased from 2000 to 5000 for better accuracy (still prevents system overload)
+                        max_export_matches = 5000
                         match_indices = all_match_indices[:max_export_matches] if len(all_match_indices) > max_export_matches else all_match_indices
                         
                         if len(all_match_indices) > max_export_matches:
