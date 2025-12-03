@@ -1,5 +1,22 @@
 # Deployment Commands - Quick Reference
 
+## ⚠️ If Git Pull Fails (TLS/Connection Errors)
+
+**Quick Fix:**
+```bash
+# Fix DNS first
+echo "nameserver 8.8.8.8" | sudo tee -a /etc/resolv.conf
+echo "nameserver 8.8.4.4" | sudo tee -a /etc/resolv.conf
+sudo chattr +i /etc/resolv.conf 2>/dev/null || true
+
+# Make deploy.sh executable
+cd /opt/easyexcel-backend
+chmod +x deploy.sh
+
+# Retry
+git pull origin main
+```
+
 ## 🚀 Standard Deployment (Most Common)
 
 ### Step 1: Connect to Droplet
