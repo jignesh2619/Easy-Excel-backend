@@ -89,13 +89,13 @@ SYSTEM_MESSAGE = (
 class LLMAgent:
     """Handles LLM interpretation of user prompts using OpenAI GPT-4"""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
         """
         Initialize LLM Agent with OpenAI GPT-4
         
         Args:
             api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
-            model: Model to use (default: gpt-4o-mini)
+            model: Model to use (default: gpt-4o)
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
@@ -274,7 +274,7 @@ KNOWLEDGE BASE CONTEXT:
 
 TASK DECISION HINT (use as guidance, not strict rule):
 Based on the user prompt, the suggested task is: {task_suggestions.get('suggested_task', 'auto-detect')}
-Reasoning: {', '.join(task_suggestions.get('reasoning', []))}
+Reasoning: {', '.join(str(r) for r in task_suggestions.get('reasoning', []))}
 Confidence: {task_suggestions.get('confidence', 0)}
 {similar_examples_text}
 {sample_explanation_text}
@@ -392,9 +392,7 @@ Include "operations" array with "execution_instructions" for each operation."""
         if "format" in action_plan:
             normalized["format"] = action_plan["format"]
         
-        if "conditional_formats" in action_plan:
-            normalized["conditional_formats"] = action_plan["conditional_formats"]
-        elif "conditional_format" in action_plan:
+        if "conditional_format" in action_plan:
             normalized["conditional_format"] = action_plan["conditional_format"]
         
         # Add formula operation field if present
