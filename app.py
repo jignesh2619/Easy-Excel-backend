@@ -78,42 +78,44 @@ security = HTTPBearer(auto_error=False)
 
 def make_json_serializable(obj):
     """
-    Recursively convert all non-JSON-serializable types to strings or JSON-compatible types.
-    Handles: datetime, Timestamp, numpy types, complex numbers, and any other problematic types.
+    Optimized function to convert non-JSON-serializable types. 
+    Most conversions should be done at DataFrame level - this is a safety net.
     """
-    import json
     import numpy as np
     import pandas as pd
     from datetime import datetime
     
-    if obj is None:
-        return None
-    elif isinstance(obj, (pd.Timestamp, datetime)):
+    # Fast path for common types
+    if obj is None or isinstance(obj, (int, float, str, bool)):
+        return obj
+    
+    # Handle numpy types (should be rare after DataFrame-level conversion)
+    if isinstance(obj, (np.integer, np.floating)):
+        return obj.item()
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    
+    # Handle datetime (should be rare after DataFrame-level conversion)
+    if isinstance(obj, (pd.Timestamp, datetime)):
         try:
             return obj.strftime('%Y-%m-%d %H:%M:%S') if pd.notna(obj) else None
         except (AttributeError, ValueError):
             return str(obj) if obj is not None else None
-    elif isinstance(obj, (np.integer, np.floating)):
-        return obj.item()  # Convert numpy scalar to Python native type
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, (np.bool_, bool)):
-        return bool(obj)
-    elif isinstance(obj, (int, float, str, bool)):
-        return obj
-    elif isinstance(obj, dict):
-        return {str(k): make_json_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, (list, tuple)):
-        return [make_json_serializable(item) for item in obj]
-    elif isinstance(obj, (complex,)):
+    
+    # Handle complex numbers
+    if isinstance(obj, complex):
         return str(obj)
-    else:
-        # Convert any other type to string as fallback
-        try:
-            json.dumps(obj)
-            return obj
-        except (TypeError, ValueError):
-            return str(obj)
+    
+    # Handle collections (only recurse if necessary)
+    if isinstance(obj, dict):
+        return {str(k): make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [make_json_serializable(item) for item in obj]
+    
+    # Fallback: convert to string (avoid expensive json.dumps check)
+    return str(obj)
 
 def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Dict[str, Any]:
     """
@@ -302,8 +304,8 @@ async def process_file(
             sample_df = sample_result.dataframe
             sample_explanation = sample_result.explanation
             sample_data = sample_df.to_dict("records")
-            # Convert all non-JSON-serializable types to strings or compatible types
-            sample_data = [make_json_serializable(row) for row in sample_data]
+            # Convert all non-JSON-serializable types (optimized - processes entire list once)
+            sample_data = make_json_serializable(sample_data)
             
             import json
             data_json = json.dumps(sample_data)
@@ -446,20 +448,33 @@ async def process_file(
         # Limit to first 1000 rows for preview to improve performance
         import pandas as pd
         import numpy as np
-        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
+        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df.copy()
         # Convert all column names to strings (Pydantic requires string keys in Dict[str, Any])
         preview_df.columns = [str(col) for col in preview_df.columns]
-        # Convert datetime columns to strings for JSON serialization
+        
+        # Convert all problematic types at DataFrame level (much faster than row-by-row)
         for col in preview_df.columns:
-            if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
-                preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if pd.notna(x) else None)
-            elif pd.api.types.is_object_dtype(preview_df[col]):
-                # Check if object column contains datetime objects
-                preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, (pd.Timestamp, datetime)) and pd.notna(x) else x)
+            col_data = preview_df[col]
+            # Convert datetime columns to strings
+            if pd.api.types.is_datetime64_any_dtype(col_data):
+                preview_df[col] = col_data.dt.strftime('%Y-%m-%d %H:%M:%S').replace('NaT', None)
+            # Convert numpy integer/float types to Python native types
+            elif pd.api.types.is_integer_dtype(col_data) and col_data.dtype.name.startswith('int'):
+                preview_df[col] = col_data.astype('Int64')  # Nullable integer
+            elif pd.api.types.is_float_dtype(col_data) and col_data.dtype.name.startswith('float'):
+                preview_df[col] = col_data.astype('float64')
+            # Handle object columns that might contain datetime or other problematic types
+            elif pd.api.types.is_object_dtype(col_data):
+                # Only process if we detect datetime objects (to avoid unnecessary processing)
+                sample_val = col_data.dropna().iloc[0] if len(col_data.dropna()) > 0 else None
+                if sample_val is not None and isinstance(sample_val, (pd.Timestamp, datetime)):
+                    preview_df[col] = col_data.apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, (pd.Timestamp, datetime)) and pd.notna(x) else x)
+        
         # Replace NaN/None values with null for proper JSON serialization
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
-        # Convert all non-JSON-serializable types to strings or compatible types
-        processed_data = [make_json_serializable(row) for row in processed_data]
+        # Only apply make_json_serializable as a final safety net (optimized - only processes if needed)
+        # Most conversions already done at DataFrame level, so this should be fast
+        processed_data = make_json_serializable(processed_data)
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
@@ -715,8 +730,8 @@ async def process_data(
             sample_df = sample_result.dataframe
             sample_explanation = sample_result.explanation
             sample_data = sample_df.to_dict("records")
-            # Convert all non-JSON-serializable types to strings or compatible types
-            sample_data = [make_json_serializable(row) for row in sample_data]
+            # Convert all non-JSON-serializable types (optimized - processes entire list once)
+            sample_data = make_json_serializable(sample_data)
             
             import json
             data_json = json.dumps(sample_data)
@@ -839,19 +854,32 @@ async def process_data(
         
         # 12. Convert processed dataframe to JSON for preview
         # Limit to first 1000 rows for preview to improve performance
-        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
+        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df.copy()
         # Convert all column names to strings (Pydantic requires string keys in Dict[str, Any])
         preview_df.columns = [str(col) for col in preview_df.columns]
-        # Convert datetime columns to strings for JSON serialization
+        
+        # Convert all problematic types at DataFrame level (much faster than row-by-row)
         for col in preview_df.columns:
-            if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
-                preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if pd.notna(x) else None)
-            elif pd.api.types.is_object_dtype(preview_df[col]):
-                # Check if object column contains datetime objects
-                preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, (pd.Timestamp, datetime)) and pd.notna(x) else x)
+            col_data = preview_df[col]
+            # Convert datetime columns to strings (vectorized - much faster)
+            if pd.api.types.is_datetime64_any_dtype(col_data):
+                preview_df[col] = col_data.dt.strftime('%Y-%m-%d %H:%M:%S').replace('NaT', None)
+            # Convert numpy integer/float types to Python native types
+            elif pd.api.types.is_integer_dtype(col_data) and col_data.dtype.name.startswith('int'):
+                preview_df[col] = col_data.astype('Int64')  # Nullable integer
+            elif pd.api.types.is_float_dtype(col_data) and col_data.dtype.name.startswith('float'):
+                preview_df[col] = col_data.astype('float64')
+            # Handle object columns that might contain datetime or other problematic types
+            elif pd.api.types.is_object_dtype(col_data):
+                # Only process if we detect datetime objects (to avoid unnecessary processing)
+                sample_val = col_data.dropna().iloc[0] if len(col_data.dropna()) > 0 else None
+                if sample_val is not None and isinstance(sample_val, (pd.Timestamp, datetime)):
+                    preview_df[col] = col_data.apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, (pd.Timestamp, datetime)) and pd.notna(x) else x)
+        
+        # Replace NaN/None values with null for proper JSON serialization
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
-        # Convert all non-JSON-serializable types to strings or compatible types
-        processed_data = [make_json_serializable(row) for row in processed_data]
+        # Only apply make_json_serializable as a final safety net (optimized - processes entire list once)
+        processed_data = make_json_serializable(processed_data)
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
