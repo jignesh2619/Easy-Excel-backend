@@ -326,13 +326,14 @@ async def process_file(
         user_id = user["user_id"] if user else None
         
         logger.info(f"⏱️ [TIMING] About to call LLM at {time.time() - start_time:.2f}s total elapsed")
+        # Don't pass full DataFrame to LLM to save memory - only pass sample_data
         llm_result = llm_agent.interpret_prompt(
             prompt,
             available_columns,
             user_id=user_id,
             sample_data=sample_data,
             sample_explanation=sample_explanation,
-            df=df  # Pass DataFrame for chart analysis
+            df=None  # Don't pass full DataFrame - save memory
         )
         logger.info(f"⏱️ [TIMING] Step 8 (LLM call): {time.time() - step_start:.2f}s")
         action_plan = llm_result.get("action_plan", {})
@@ -685,12 +686,18 @@ async def process_data(
             sample_result = sample_selector.build_sample(df)
             sample_df = sample_result.dataframe
             sample_explanation = sample_result.explanation
+            # Limit sample to max 50 rows to save memory
+            max_sample_rows = 50
+            if len(sample_df) > max_sample_rows:
+                sample_df = sample_df.head(max_sample_rows)
             sample_data = sample_df.to_dict("records")
             # FastAPI's jsonable_encoder will handle serialization automatically
             
             import json
             data_json = json.dumps(sample_data)
             data_size_estimate = len(data_json) // 4
+            # Clear sample_df from memory
+            del sample_df
             logger.info(
                 "✅ Sample prepared for LLM: %s rows selected from %s total, explanation: %s",
                 len(sample_df),
