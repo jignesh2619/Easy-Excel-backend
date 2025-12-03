@@ -76,47 +76,6 @@ sample_selector = SampleSelector()
 # Security
 security = HTTPBearer(auto_error=False)
 
-def make_json_serializable(obj):
-    """
-    Optimized function to convert non-JSON-serializable types. 
-    Most conversions should be done at DataFrame level - this is a safety net.
-    """
-    import numpy as np
-    import pandas as pd
-    from datetime import datetime
-    
-    # Fast path for common types
-    if obj is None or isinstance(obj, (int, float, str, bool)):
-        return obj
-    
-    # Handle numpy types (should be rare after DataFrame-level conversion)
-    if isinstance(obj, (np.integer, np.floating)):
-        return obj.item()
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    if isinstance(obj, np.bool_):
-        return bool(obj)
-    
-    # Handle datetime (should be rare after DataFrame-level conversion)
-    if isinstance(obj, (pd.Timestamp, datetime)):
-        try:
-            return obj.strftime('%Y-%m-%d %H:%M:%S') if pd.notna(obj) else None
-        except (AttributeError, ValueError):
-            return str(obj) if obj is not None else None
-    
-    # Handle complex numbers
-    if isinstance(obj, complex):
-        return str(obj)
-    
-    # Handle collections (only recurse if necessary)
-    if isinstance(obj, dict):
-        return {str(k): make_json_serializable(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [make_json_serializable(item) for item in obj]
-    
-    # Fallback: convert to string (avoid expensive json.dumps check)
-    return str(obj)
-
 def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Dict[str, Any]:
     """
     Get current user from Supabase Auth token or API key.
@@ -457,36 +416,10 @@ async def process_file(
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
-        # 12a. Get formatting metadata for preview display
-        # For large datasets, we still generate formatting but only for the preview rows (first 1000)
-        # The actual Excel file will have full formatting applied regardless of size
-        if processor.formatting_rules:
-            try:
-                formatting_metadata = processor.get_formatting_metadata(preview_df)
-                logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
-                
-                # 12b. Add formatting info directly to each cell (optimized - only process cells that have formatting)
-                cell_formats = formatting_metadata.get("cell_formats", {})
-                if cell_formats:
-                    # Pre-build column name set for faster lookup
-                    columns_set = set(columns)
-                    for cell_key, cell_format in cell_formats.items():
-                        # Parse cell_key format: "row_idx_col_name"
-                        parts = cell_key.split('_', 1)
-                        if len(parts) == 2:
-                            try:
-                                row_idx = int(parts[0])
-                                col_name = parts[1]
-                                if row_idx < len(processed_data) and col_name in columns_set:
-                                    processed_data[row_idx][f"{col_name}_format"] = cell_format
-                            except (ValueError, IndexError, KeyError):
-                                continue  # Skip invalid keys
-            except Exception as e:
-                logger.warning(f"Failed to generate formatting metadata: {e}")
-                formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
-        else:
-            formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
-            logger.info("📊 No formatting rules, skipping metadata generation")
+        # 12a. Skip formatting metadata for preview (performance optimization)
+        # Formatting is still applied to the saved Excel file, but we skip preview metadata to improve speed
+        # This can be re-enabled later if needed, but it was causing significant slowdowns
+        formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
         
         # 13. Determine response type and format for formula engine
         response_type = "table"  # Default
@@ -852,36 +785,9 @@ async def process_data(
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
-        # 13. Get formatting metadata for preview display
-        # Note: Formatting is ALWAYS applied to the saved Excel file regardless of dataset size
-        # This metadata is only for showing formatting in the web preview (limited to first 1000 rows)
-        if processor.formatting_rules:
-            try:
-                formatting_metadata = processor.get_formatting_metadata(preview_df)
-                logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
-                
-                # 14. Add formatting info to each cell (optimized - only process cells that have formatting)
-                cell_formats = formatting_metadata.get("cell_formats", {})
-                if cell_formats:
-                    # Pre-build column name set for faster lookup
-                    columns_set = set(columns)
-                    for cell_key, cell_format in cell_formats.items():
-                        # Parse cell_key format: "row_idx_col_name"
-                        parts = cell_key.split('_', 1)
-                        if len(parts) == 2:
-                            try:
-                                row_idx = int(parts[0])
-                                col_name = parts[1]
-                                if row_idx < len(processed_data) and col_name in columns_set:
-                                    processed_data[row_idx][f"{col_name}_format"] = cell_format
-                            except (ValueError, IndexError, KeyError):
-                                continue  # Skip invalid keys
-            except Exception as e:
-                logger.warning(f"Failed to generate formatting metadata: {e}")
-                formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
-        else:
-            formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
-            logger.info("📊 No formatting rules, skipping metadata generation")
+        # 13. Skip formatting metadata for preview (performance optimization)
+        # Formatting is still applied to the saved Excel file, but we skip preview metadata to improve speed
+        formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
         
         # 15. Determine response type
         response_type = "table"
