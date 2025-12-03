@@ -488,6 +488,54 @@ If column name is "Id" or "ColumnB" or similar:
 9. When using add_row, only specify columns you need in data - other columns will be empty
 10. Calculate values in operations first, then reference them in add_row.data using expressions
 11. NEVER assign a list of values directly to df[column] or df.loc - always use pd.concat with DataFrame
+
+═══════════════════════════════════════════════════════════════════════════════
+🎨 FORMATTING OPERATIONS - CRITICAL RULES
+═══════════════════════════════════════════════════════════════════════════════
+
+**NEVER USE MARKDOWN IN DATA:**
+- DO NOT add **text** or __text__ to cell values
+- DO NOT use markdown formatting in Python code
+- DO NOT modify cell text to include formatting characters
+- Cell values must be plain text only
+
+**FOR BOLD/ITALIC/COLORS - USE JSON FORMAT, NOT PYTHON CODE:**
+- ❌ WRONG: df['Column'].str.bold()  (doesn't exist)
+- ❌ WRONG: df['Column'] = '**' + df['Column'] + '**'  (markdown in data)
+- ✅ CORRECT: Use "format" JSON with "bold": true
+- ✅ CORRECT: Use "conditional_format" JSON for highlighting
+
+**FORMATTING EXAMPLES:**
+
+Example: "Make all text bold"
+{
+  "format": {
+    "range": {"column": "ColumnName"},
+    "bold": true
+  }
+}
+
+Example: "Highlight cells containing 'car detailing service'"
+{
+  "conditional_format": {
+    "format_type": "contains_text",
+    "config": {
+      "column": "ColumnName",
+      "text": "car detailing service",
+      "bg_color": "#FFFF00"
+    }
+  }
+}
+
+Example: "Rename all columns to descriptive names"
+{
+  "rename_column": {
+    "columns": [
+      {"old_name": "hfpxzc href", "new_name": "Business URL"},
+      {"old_name": "qBF1Pd", "new_name": "Business Name"}
+    ]
+  }
+}
 """
 
 
