@@ -1108,7 +1108,7 @@ class ExcelProcessor:
                             matches = series.str.contains(pattern, na=False, regex=True)
                         
                         # Format matches in exported file with reasonable limit to prevent CPU spikes
-                        # Preview is limited to 500 rows with all matches, export limits to 5000 matches per column per rule
+                        # Preview is limited to 1000 rows with all matches, export limits to 5000 matches per column per rule
                         # Increased from 2000 to 5000 to improve accuracy while still preventing CPU spikes
                         all_match_indices = matches[matches].index if isinstance(matches, pd.Series) else []
                         match_count = len(all_match_indices)

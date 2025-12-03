@@ -784,7 +784,7 @@ async def process_data(
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
         
         # 12. Convert processed dataframe to JSON for preview
-        # Limit to first 500 rows for preview to improve performance (reduced from 1000)
+        # Limit to first 1000 rows for preview to improve performance
         preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
         columns = list(processed_df.columns)
