@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import xlsxwriter
 from datetime import datetime
+import logging
 from services.formula_engine import FormulaEngine
 # New modular imports
 from services.excel_writer.write_xlsx import XlsxWriter
@@ -22,6 +23,8 @@ from services.cleaning.text import TextCleaner
 from services.dflib import default_engine, DataFrameWrapper
 from services.python_executor import PythonExecutor
 from services.chart_executor import ChartExecutor
+
+logger = logging.getLogger(__name__)
 
 
 class ExcelProcessor:
@@ -353,9 +356,6 @@ class ExcelProcessor:
         try:
             # Handle chart requests (single or multiple)
             if task == "chart" or "chart_config" in action_plan or "chart_configs" in action_plan:
-                import logging
-                logger = logging.getLogger(__name__)
-                
                 chart_executor = ChartExecutor(self.df)
                 
                 # Check for multiple charts (generic requests like "create dashboard")
@@ -921,9 +921,6 @@ class ExcelProcessor:
             raise ValueError("No data to save")
         
         try:
-            import logging
-            logger = logging.getLogger(__name__)
-            
             logger.info(f"💾 Saving processed file to: {output_path}")
             logger.info(f"💾 Formatting rules: {len(self.formatting_rules)} total")
             
@@ -948,8 +945,6 @@ class ExcelProcessor:
             return output_path
             
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.error(f"❌ Failed to save processed file: {str(e)}", exc_info=True)
             raise RuntimeError(f"Failed to save processed file: {str(e)}")
     
@@ -1051,8 +1046,6 @@ class ExcelProcessor:
             config = rule.get("config", {})
             
             # Debug: Log what we're trying to apply
-            import logging
-            logger = logging.getLogger(__name__)
             logger.info(f"Applying conditional formatting: type={format_type}, config={config}")
             
             if format_type == "duplicates":
@@ -1142,8 +1135,6 @@ class ExcelProcessor:
                         match_indices = all_match_indices[:max_export_matches] if len(all_match_indices) > max_export_matches else all_match_indices
                         
                         if len(all_match_indices) > max_export_matches:
-                            import logging
-                            logger = logging.getLogger(__name__)
                             logger.warning(f"Limiting formatting to {max_export_matches} matches (out of {match_count} total) in column '{column}' to prevent CPU spikes")
                         
                         for row_idx in match_indices:
@@ -1161,13 +1152,9 @@ class ExcelProcessor:
                                 worksheet.write_string(excel_row, col_idx, str(cell_value), cell_format)
                         
                         # Log how many cells were formatted
-                        import logging
-                        logger = logging.getLogger(__name__)
                         logger.info(f"Formatted {match_count} cells in column '{column}' with text '{target_text}'")
                     except Exception as e:
                         # Log error but continue
-                        import logging
-                        logger = logging.getLogger(__name__)
                         logger.error(f"Error applying conditional formatting to column '{column}': {str(e)}")
                         import traceback
                         logger.error(traceback.format_exc())
@@ -1668,9 +1655,6 @@ class ExcelProcessor:
     
     def _execute_conditional_format(self, action_plan: Dict):
         """Execute conditional format operation - store conditional formatting rules"""
-        import logging
-        logger = logging.getLogger(__name__)
-        
         logger.info(f"🔍 _execute_conditional_format called with action_plan keys: {list(action_plan.keys())}")
         conditional_format = action_plan.get("conditional_format", {})
         
@@ -1733,9 +1717,6 @@ class ExcelProcessor:
     
     def get_formatting_metadata(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Extract formatting metadata for preview display"""
-        import logging
-        logger = logging.getLogger(__name__)
-        
         # Performance optimization: Early exit if no formatting rules
         if not self.formatting_rules:
             logger.info("📊 No formatting rules, returning empty metadata")
