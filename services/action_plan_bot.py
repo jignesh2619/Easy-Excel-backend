@@ -163,6 +163,65 @@ Example 7: "Total of rows and columns" (user wants both row and column totals)
   }]
 }
 
+Example 8: "Extract emails and phone numbers from entire sheet and put them in column B and C respectively"
+{
+  "operations": [{
+    "python_code": "import re; email_pattern = r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}'; phone_pattern = r'(?:\\+?1[-.]?)?\\(?([0-9]{3})\\)?[-.]?([0-9]{3})[-.]?([0-9]{4})'; all_emails = []; all_phones = []; [all_emails.extend(re.findall(email_pattern, str(val))) for col in df.columns for val in df[col].astype(str)]; [all_phones.extend(re.findall(phone_pattern, str(val))) for col in df.columns for val in df[col].astype(str)]; target_email_col = df.columns[1] if len(df.columns) > 1 else 'Email'; target_phone_col = df.columns[2] if len(df.columns) > 2 else 'Phone'; df[target_email_col] = ''; df[target_phone_col] = ''; [df.at[i, target_email_col] for i in range(min(len(all_emails), len(df)))]; [df.at[i, target_phone_col] for i in range(min(len(all_phones), len(df)))]; [df.at[i, target_email_col] for i in range(min(len(all_emails), len(df)))]; [df.at[i, target_phone_col] for i in range(min(len(all_phones), len(df)))]",
+    "description": "Extract emails and phones from all columns and add to columns B and C",
+    "result_type": "dataframe"
+  }]
+}
+
+**CRITICAL FOR EXTRACTION OPERATIONS:**
+When extracting data (emails, phones, numbers, etc.) from multiple columns:
+1. Search ALL columns, not just one
+2. Use regex patterns to find matches
+3. Collect ALL matches from ALL columns first into lists
+4. Then assign to target columns (one per row)
+5. If user says "column B" or "column C", use the actual column name at that position: df.columns[1] for B, df.columns[2] for C
+6. If target columns don't exist, create them with empty strings first
+7. Assign values row by row using df.at[i, column_name] = value
+8. IMPORTANT: Make sure to actually assign values, not just create empty columns
+
+**CORRECT EMAIL/PHONE EXTRACTION PATTERN:**
+```python
+import re
+email_pattern = r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}'
+phone_pattern = r'(?:\\+?1[-.]?)?\\(?([0-9]{3})\\)?[-.]?([0-9]{3})[-.]?([0-9]{4})'
+
+# Step 1: Collect all emails and phones from ALL columns
+all_emails = []
+all_phones = []
+for col in df.columns:
+    for val in df[col].astype(str):
+        all_emails.extend(re.findall(email_pattern, val))
+        all_phones.extend(re.findall(phone_pattern, val))
+
+# Step 2: Get target column names (B = index 1, C = index 2)
+target_email_col = df.columns[1] if len(df.columns) > 1 else 'Email'
+target_phone_col = df.columns[2] if len(df.columns) > 2 else 'Phone'
+
+# Step 3: Create columns if they don't exist, initialize with empty strings
+if target_email_col not in df.columns:
+    df[target_email_col] = ''
+if target_phone_col not in df.columns:
+    df[target_phone_col] = ''
+
+# Step 4: Assign extracted values row by row (CRITICAL: Actually assign, don't just create columns)
+for i in range(len(df)):
+    if i < len(all_emails):
+        df.at[i, target_email_col] = all_emails[i]
+    if i < len(all_phones):
+        df.at[i, target_phone_col] = all_phones[i]
+```
+
+**COMMON MISTAKES TO AVOID:**
+- Don't just create empty columns - you must assign values
+- Don't search only one column - search ALL columns
+- Don't forget to import re for regex
+- Don't use df.loc for single cell assignment - use df.at[i, col] = value
+- Make sure to handle cases where extracted list is shorter than dataframe rows
+
 **COLUMN REFERENCE HANDLING:**
 When user mentions "column C", "column A", etc.:
 1. FIRST check if there's a column named "C" or "A" (exact name match)

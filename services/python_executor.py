@@ -70,18 +70,41 @@ class PythonExecutor:
             
             # Step 5: Update dataframe
             if 'df' in exec_globals:
-                self.df = exec_globals['df']
+                new_df = exec_globals['df']
+                # Validate that dataframe was actually modified (for dataframe operations)
+                if result_type == "dataframe":
+                    # Check if dataframe shape or content changed
+                    if new_df.shape == self.df.shape and new_df.equals(self.df):
+                        logger.warning(f"Dataframe operation '{description}' executed but dataframe appears unchanged. This may indicate the operation didn't work as expected.")
+                        # For extraction operations, provide more specific warning
+                        if "extract" in description.lower() or "email" in description.lower() or "phone" in description.lower():
+                            logger.error(f"Extraction operation '{description}' may have failed - no data was extracted. Verify the extraction pattern matches the data.")
+                            self.execution_log.append(f"⚠️ {description} - No data extracted (check if pattern matches data)")
+                        else:
+                            self.execution_log.append(f"⚠️ {description} - Dataframe unchanged (operation may not have worked)")
+                    else:
+                        self.execution_log.append(f"✓ {description}")
+                        logger.info(f"Successfully executed: {description}")
+                else:
+                    self.execution_log.append(f"✓ {description}")
+                    logger.info(f"Successfully executed: {description}")
+                
+                self.df = new_df
                 # Ensure index is reset after operations
                 if not self.df.index.equals(pd.RangeIndex(len(self.df))):
                     self.df = self.df.reset_index(drop=True)
+            else:
+                # No dataframe in result - this is unusual for dataframe operations
+                if result_type == "dataframe":
+                    logger.warning(f"Dataframe operation '{description}' executed but 'df' not found in result. Operation may have failed.")
+                    self.execution_log.append(f"⚠️ {description} - DataFrame not found in result")
+                else:
+                    self.execution_log.append(f"✓ {description}")
+                    logger.info(f"Successfully executed: {description}")
             
             # Step 6: Store result
             if result is not None:
                 self.result = result
-            
-            # Step 7: Log success
-            self.execution_log.append(f"✓ {description}")
-            logger.info(f"Successfully executed: {description}")
             
             return {
                 "success": True,

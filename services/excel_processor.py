@@ -394,10 +394,33 @@ class ExcelProcessor:
             # Handle data operations (Python code execution)
             operations = action_plan.get("operations", [])
             if operations:
+                initial_df_shape = self.df.shape
+                initial_columns = set(self.df.columns)
+                
                 python_executor = PythonExecutor(self.df)
                 execution_result = python_executor.execute_multiple(operations)
                 self.df = python_executor.get_dataframe()
                 self.summary.extend(python_executor.get_execution_log())
+                
+                # Validate that operations actually produced changes
+                final_df_shape = self.df.shape
+                final_columns = set(self.df.columns)
+                
+                # Check if operations actually modified the dataframe
+                operations_changed_data = (
+                    initial_df_shape != final_df_shape or
+                    initial_columns != final_columns or
+                    not self.df.equals(self.df)  # Check if any values changed
+                )
+                
+                # If operations were supposed to modify data but didn't, log warning
+                if not operations_changed_data and any(op.get("result_type") == "dataframe" for op in operations):
+                    logger.warning("Operations executed but dataframe appears unchanged. This may indicate the operations didn't work as expected.")
+                    # Check if this was an extraction operation
+                    extraction_keywords = ["extract", "email", "phone", "number", "find", "search"]
+                    if any(keyword in str(op.get("description", "")).lower() for op in operations for keyword in extraction_keywords):
+                        logger.error("Extraction operation may have failed - no data was extracted. Check if the extraction pattern matched any data.")
+                        self.summary.append("⚠️ Warning: Extraction operation may not have found any matches. Please verify the data contains the expected patterns.")
                 
                 # Store formula result if present
                 if execution_result.get("results"):
