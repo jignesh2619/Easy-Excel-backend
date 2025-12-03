@@ -526,7 +526,7 @@ class ExcelProcessor:
                                 )
                             else:
                                 if replace_with == "":
-                                    self.df[column] = col_series.str.lstrip(char_to_remove)
+                                    self.df[column] = col_series.astype(str).str.lstrip(char_to_remove)
                                 else:
                                     self.df[column] = col_series.apply(
                                         lambda x: replace_with + x.lstrip(char_to_remove) if x.startswith(char_to_remove) else x
@@ -546,7 +546,7 @@ class ExcelProcessor:
                                 )
                             else:
                                 if replace_with == "":
-                                    self.df[column] = col_series.str.rstrip(char_to_remove)
+                                    self.df[column] = col_series.astype(str).str.rstrip(char_to_remove)
                                 else:
                                     self.df[column] = col_series.apply(
                                         lambda x: x.rstrip(char_to_remove) + replace_with if x.endswith(char_to_remove) else x
@@ -558,7 +558,7 @@ class ExcelProcessor:
                         else:
                             # Remove/replace all occurrences - works for both single and multi-char patterns
                             # Reuse col_series to avoid redundant .astype(str)
-                            self.df[column] = col_series.str.replace(char_to_remove, replace_with, regex=False)
+                            self.df[column] = col_series.astype(str).str.replace(char_to_remove, replace_with, regex=False)
                             action = "Replaced" if replace_with != "" else "Removed"
                             replacement_text = f" with '{replace_with}'" if replace_with != "" else ""
                             self.summary.append(f"{action} all '{char_to_remove}' from '{column}' column{replacement_text}")
@@ -1050,7 +1050,9 @@ class ExcelProcessor:
                     if column not in self.df.columns:
                         continue
                     col_idx = list(self.df.columns).index(column)
-                    series = self.df[column].astype(str)
+                    # Always convert to string and handle NaN/None values properly
+                    # This ensures .str accessor works on all data types
+                    series = self.df[column].fillna('').astype(str)
                     
                     try:
                         if format_type == "contains_text":
@@ -1635,12 +1637,12 @@ class ExcelProcessor:
             "cell_formats": {}
         }
         
-        logger.info(f"🔍 get_formatting_metadata called with {len(self.formatting_rules)} formatting rules")
-        logger.info(f"🔍 DataFrame has {len(df)} rows and columns: {list(df.columns)}")
+        # Reduced logging for performance - only log if there are many rules
+        if len(self.formatting_rules) > 5:
+            logger.info(f"🔍 Processing {len(self.formatting_rules)} formatting rules for {len(df)} rows")
         
         for rule_idx, rule in enumerate(self.formatting_rules):
             rule_type = rule.get("type")
-            logger.info(f"🔍 Rule {rule_idx}: type={rule_type}")
             
             if rule_type == "format":
                 # Handle static formatting rules
@@ -1728,66 +1730,42 @@ class ExcelProcessor:
                 format_type = rule.get("format_type")
                 config = rule.get("config", {})
                 
-                logger.info(f"🔍 Conditional rule: format_type={format_type}, config={config}")
-                
                 if format_type == "contains_text":
                     column = config.get("column")
                     text = config.get("text", "")
                     bg_color = config.get("bg_color") or config.get("background_color", "#FFF3CD")
                     
-                    logger.info(f"🔍 contains_text: column='{column}', text='{text}', bg_color='{bg_color}'")
-                    logger.info(f"🔍 Column in df.columns? {column in df.columns if column else False}")
-                    
                     if column and column in df.columns:
                         # Find matching rows
-                        # Performance: Only convert to string if not already string type
-                        if df[column].dtype == 'object':
-                            series = df[column]
-                        else:
-                            series = df[column].astype(str)
-                        
-                        # Debug: Show sample values from the column
-                        sample_values = series[series.notna()].head(10).tolist()
-                        logger.info(f"🔍 Sample values from column '{column}': {sample_values}")
+                        # Always convert to string and handle NaN/None values properly
+                        # This ensures .str accessor works on all data types
+                        series = df[column].fillna('').astype(str)
                         
                         # Try the search
                         search_text = str(text)
                         matches = series.str.contains(search_text, case=False, na=False)
                         match_count = matches.sum()
                         
-                        logger.info(f"🔍 Searching for '{search_text}' (case-insensitive)")
-                        logger.info(f"🔍 Found {match_count} matches for text '{text}' in column '{column}'")
-                        
-                        # If no matches, try to find similar values
-                        if match_count == 0:
-                            # Try to find values that contain any word from the search text
-                            search_words = search_text.lower().split()
-                            logger.info(f"🔍 Search words: {search_words}")
-                            for word in search_words:
-                                word_matches = series.str.contains(word, case=False, na=False)
-                                word_count = word_matches.sum()
-                                if word_count > 0:
-                                    logger.info(f"🔍 Found {word_count} cells containing word '{word}'")
-                                    sample_matches = series[word_matches].head(5).tolist()
-                                    logger.info(f"🔍 Sample matches for '{word}': {sample_matches}")
-                        
                         # Build cell format map: "row_col" -> format info
                         # Accuracy: Format ALL matches within preview rows (first 500 rows)
-                        # This maintains accuracy for displayed data while preventing CPU spikes
+                        # Performance optimization: Use vectorized operations instead of list comprehension with get_loc
                         preview_limit = min(len(df), 500)  # Match preview size
-                        match_mask = matches[matches]
-                        # Filter matches to only those within preview rows
-                        match_indices = [idx for idx in match_mask.index if 0 <= df.index.get_loc(idx) < preview_limit]
-                        match_positions = df.index.get_indexer(match_indices)  # Get 0-based positions
+                        
+                        # Get matches and filter to preview rows using numpy (much faster)
+                        import numpy as np
+                        match_positions = np.where(matches.values)[0] if hasattr(matches, 'values') else np.where(matches)[0]
+                        
+                        # Filter to only positions within preview limit
+                        match_positions = match_positions[match_positions < preview_limit]
+                        
                         for pos in match_positions:
-                            if pos >= 0 and pos < preview_limit:  # Valid position within preview
-                                cell_key = f"{pos}_{column}"
-                                formatting_metadata["cell_formats"][cell_key] = {
-                                    "bg_color": bg_color,
-                                    "text_color": config.get("text_color") or config.get("font_color"),
-                                    "bold": config.get("bold", False),
-                                    "italic": config.get("italic", False)
-                                }
+                            cell_key = f"{pos}_{column}"
+                            formatting_metadata["cell_formats"][cell_key] = {
+                                "bg_color": bg_color,
+                                "text_color": config.get("text_color") or config.get("font_color"),
+                                "bold": config.get("bold", False),
+                                "italic": config.get("italic", False)
+                            }
                         
                         formatting_metadata["conditional_formatting"].append({
                             "type": format_type,
@@ -1803,33 +1781,31 @@ class ExcelProcessor:
                     text = config.get("text", "")
                     bg_color = config.get("bg_color") or config.get("background_color", "#FFF3CD")
                     
-                    logger.info(f"🔍 text_equals: column='{column}', text='{text}', bg_color='{bg_color}'")
-                    
                     if column and column in df.columns:
-                        series = df[column].astype(str)
+                        # Always convert to string and handle NaN/None values properly
+                        # This ensures .str accessor works on all data types
+                        series = df[column].fillna('').astype(str)
                         matches = series.str.lower() == str(text).lower()
-                        match_count = matches.sum()
-                        
-                        logger.info(f"🔍 Found {match_count} exact matches for text '{text}' in column '{column}'")
                         
                         # Accuracy: Format ALL matches within preview rows (first 500 rows)
-                        # This maintains accuracy for displayed data while preventing CPU spikes
+                        # Performance optimization: Use vectorized operations
                         preview_limit = min(len(df), 500)  # Match preview size
-                        match_mask = matches[matches]
-                        # Filter matches to only those within preview rows
-                        match_indices = [idx for idx in match_mask.index if 0 <= df.index.get_loc(idx) < preview_limit]
-                        match_positions = df.index.get_indexer(match_indices)  # Get 0-based positions
+                        
+                        # Get 0-based positions directly using numpy where (much faster)
+                        import numpy as np
+                        match_positions = np.where(matches.values)[0] if hasattr(matches, 'values') else np.where(matches)[0]
+                        
+                        # Filter to only positions within preview limit
+                        match_positions = match_positions[match_positions < preview_limit]
+                        
                         for pos in match_positions:
-                            if pos >= 0 and pos < preview_limit:  # Valid position within preview
-                                cell_key = f"{pos}_{column}"
-                                formatting_metadata["cell_formats"][cell_key] = {
-                                    "bg_color": bg_color,
-                                    "text_color": config.get("text_color") or config.get("font_color"),
-                                    "bold": config.get("bold", False),
-                                    "italic": config.get("italic", False)
-                                }
-                    else:
-                        logger.warning(f"⚠️ Column '{column}' not found in DataFrame columns: {list(df.columns)}")
+                            cell_key = f"{pos}_{column}"
+                            formatting_metadata["cell_formats"][cell_key] = {
+                                "bg_color": bg_color,
+                                "text_color": config.get("text_color") or config.get("font_color"),
+                                "bold": config.get("bold", False),
+                                "italic": config.get("italic", False)
+                            }
         
         total_cells = len(formatting_metadata["cell_formats"])
         logger.info(f"✅ Formatting metadata generated: {total_cells} cells with formatting")
