@@ -815,9 +815,25 @@ class ExcelProcessor:
         elif condition == "!=":
             self.df = self.df[self.df[column] != value]
         elif condition == "contains":
+            # Accuracy: Clean remaining rows on-demand if this column was partially cleaned
+            if hasattr(self, '_partially_cleaned_cols') and column in self._partially_cleaned_cols:
+                if len(self.df) > 1000 and self.df[column].dtype == 'object':
+                    remaining_rows = self.df.loc[1000:, column]
+                    if len(remaining_rows) > 0:
+                        self.df.loc[1000:, column] = remaining_rows.apply(self._clean_cell_value)
+                        self._partially_cleaned_cols.discard(column)
+            
             # Filter rows where column contains the text (case-insensitive)
             self.df = self.df[self.df[column].astype(str).str.contains(str(value), case=False, na=False)]
         elif condition == "not_contains":
+            # Accuracy: Clean remaining rows on-demand if this column was partially cleaned
+            if hasattr(self, '_partially_cleaned_cols') and column in self._partially_cleaned_cols:
+                if len(self.df) > 1000 and self.df[column].dtype == 'object':
+                    remaining_rows = self.df.loc[1000:, column]
+                    if len(remaining_rows) > 0:
+                        self.df.loc[1000:, column] = remaining_rows.apply(self._clean_cell_value)
+                        self._partially_cleaned_cols.discard(column)
+            
             # Filter rows where column does NOT contain the text (case-insensitive)
             self.df = self.df[~self.df[column].astype(str).str.contains(str(value), case=False, na=False)]
         else:
