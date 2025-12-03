@@ -408,6 +408,13 @@ async def process_file(
         preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
         # Convert all column names to strings (Pydantic requires string keys in Dict[str, Any])
         preview_df.columns = [str(col) for col in preview_df.columns]
+        # Convert datetime columns to strings for JSON serialization
+        for col in preview_df.columns:
+            if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
+                preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if pd.notna(x) else None)
+            elif pd.api.types.is_object_dtype(preview_df[col]):
+                # Check if object column contains datetime objects
+                preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, (pd.Timestamp, datetime)) and pd.notna(x) else x)
         # Replace NaN/None values with null for proper JSON serialization
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
@@ -790,6 +797,13 @@ async def process_data(
         preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
         # Convert all column names to strings (Pydantic requires string keys in Dict[str, Any])
         preview_df.columns = [str(col) for col in preview_df.columns]
+        # Convert datetime columns to strings for JSON serialization
+        for col in preview_df.columns:
+            if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
+                preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if pd.notna(x) else None)
+            elif pd.api.types.is_object_dtype(preview_df[col]):
+                # Check if object column contains datetime objects
+                preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, (pd.Timestamp, datetime)) and pd.notna(x) else x)
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
