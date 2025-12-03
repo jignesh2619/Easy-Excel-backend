@@ -510,10 +510,9 @@ class ExcelProcessor:
                         char_to_remove = "."
                     
                     if char_to_remove:
-                        # Performance: Convert to string once, reuse
-                        if self.df[column].dtype != 'object':
-                            self.df[column] = self.df[column].astype(str)
-                        col_series = self.df[column] if self.df[column].dtype == 'object' else self.df[column].astype(str)
+                        # Always convert to string to ensure .str accessor works
+                        # Handle NaN/None values properly before string operations
+                        col_series = self.df[column].fillna('').astype(str)
                         
                         if remove_from == "start":
                             # Remove/replace from beginning - handles multi-char patterns
