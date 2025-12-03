@@ -459,9 +459,10 @@ async def process_file(
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
-        # 12a. Get formatting metadata for preview display (skip for performance - can be slow)
-        # Only generate if formatting rules exist AND dataset is small (< 100 rows)
-        if processor.formatting_rules and len(preview_df) < 100:
+        # 12a. Get formatting metadata for preview display
+        # For large datasets, we still generate formatting but only for the preview rows (first 1000)
+        # The actual Excel file will have full formatting applied regardless of size
+        if processor.formatting_rules:
             try:
                 formatting_metadata = processor.get_formatting_metadata(preview_df)
                 logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
@@ -487,10 +488,7 @@ async def process_file(
                 formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
         else:
             formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
-            if processor.formatting_rules and len(preview_df) >= 100:
-                logger.info("📊 Skipping formatting metadata generation for large dataset (performance)")
-            else:
-                logger.info("📊 No formatting rules, skipping metadata generation")
+            logger.info("📊 No formatting rules, skipping metadata generation")
         
         # 13. Determine response type and format for formula engine
         response_type = "table"  # Default
@@ -856,9 +854,10 @@ async def process_data(
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
-        # 13. Get formatting metadata (skip for performance - can be slow)
-        # Only generate if formatting rules exist AND dataset is small (< 100 rows)
-        if processor.formatting_rules and len(preview_df) < 100:
+        # 13. Get formatting metadata for preview display
+        # Note: Formatting is ALWAYS applied to the saved Excel file regardless of dataset size
+        # This metadata is only for showing formatting in the web preview (limited to first 1000 rows)
+        if processor.formatting_rules:
             try:
                 formatting_metadata = processor.get_formatting_metadata(preview_df)
                 logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
@@ -884,10 +883,7 @@ async def process_data(
                 formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
         else:
             formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
-            if processor.formatting_rules and len(preview_df) >= 100:
-                logger.info("📊 Skipping formatting metadata generation for large dataset (performance)")
-            else:
-                logger.info("📊 No formatting rules, skipping metadata generation")
+            logger.info("📊 No formatting rules, skipping metadata generation")
         
         # 15. Determine response type
         response_type = "table"
