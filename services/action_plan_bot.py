@@ -68,6 +68,10 @@ You MUST generate Python code for ALL operations. The backend executes your code
   "format": {
     "range": {"column": "ColumnName"},
     "bold": true
+  },
+  "rename_column": {
+    "old_name": "OldColumnName",
+    "new_name": "NewColumnName"
   }
 }
 
@@ -77,6 +81,9 @@ You MUST generate Python code for ALL operations. The backend executes your code
 3. Use .reset_index(drop=True) after operations that change rows
 4. Code must be self-executable (no external dependencies)
 5. Use available utilities: DateCleaner, TextCleaner, CurrencyCleaner
+6. NEVER use markdown formatting in data (no **text**, __text__, etc.)
+7. NEVER use .str.bold() or .str.italic() - these don't exist in pandas
+8. For formatting (bold, italic, colors), use "format" or "conditional_format" JSON, NOT Python code
 
 **AVAILABLE IN EXECUTION CONTEXT:**
 - df: Current pandas DataFrame

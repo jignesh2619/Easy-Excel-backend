@@ -413,6 +413,17 @@ class ExcelProcessor:
             if "format" in action_plan:
                 self._execute_format(action_plan)
             
+            # Handle rename column
+            if "rename_column" in action_plan:
+                self._execute_rename_column(action_plan)
+            
+            # Handle add/delete column
+            if "add_column" in action_plan:
+                self._execute_add_column(action_plan)
+            
+            if "delete_column" in action_plan:
+                self._execute_delete_column(action_plan)
+            
             # Extract chart_type for response
             chart_type_for_response = "none"
             if chart_path:
@@ -1230,6 +1241,50 @@ class ExcelProcessor:
                 self.summary.append(f"Added new column '{column_name}' at position {position + 1}")
         
         self.summary.append(f"Total columns: {len(self.df.columns)}")
+    
+    def _execute_rename_column(self, action_plan: Dict):
+        """Execute rename column operation"""
+        rename_config = action_plan.get("rename_column", {})
+        
+        # Support both single rename and multiple renames
+        if isinstance(rename_config, dict):
+            if "old_name" in rename_config and "new_name" in rename_config:
+                # Single rename: {"old_name": "A", "new_name": "B"}
+                rename_config = [rename_config]
+            elif "columns" in rename_config:
+                # Multiple renames: {"columns": [{"old_name": "A", "new_name": "B"}, ...]}
+                rename_config = rename_config.get("columns", [])
+            else:
+                # Try to extract from mapping format
+                rename_mapping = {k: v for k, v in rename_config.items() if k != "columns"}
+                if rename_mapping:
+                    rename_config = [{"old_name": k, "new_name": v} for k, v in rename_mapping.items()]
+                else:
+                    self.summary.append("Rename column: No valid rename configuration found")
+                    return
+        
+        if not isinstance(rename_config, list):
+            self.summary.append("Rename column: Invalid configuration format")
+            return
+        
+        rename_mapping = {}
+        for rename_item in rename_config:
+            old_name = rename_item.get("old_name") or rename_item.get("from") or rename_item.get("column")
+            new_name = rename_item.get("new_name") or rename_item.get("to") or rename_item.get("name")
+            
+            if old_name and new_name and old_name in self.df.columns:
+                rename_mapping[old_name] = new_name
+            else:
+                if old_name not in self.df.columns:
+                    self.summary.append(f"Rename column: Column '{old_name}' not found")
+                continue
+        
+        if rename_mapping:
+            self.df = self.df.rename(columns=rename_mapping)
+            renamed_cols = ", ".join([f"'{old}' → '{new}'" for old, new in rename_mapping.items()])
+            self.summary.append(f"Renamed columns: {renamed_cols}")
+        else:
+            self.summary.append("Rename column: No valid columns to rename")
     
     def _execute_delete_column(self, action_plan: Dict):
         """Execute delete column operation with positional reference fallback"""

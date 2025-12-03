@@ -115,6 +115,20 @@ class PythonExecutor:
             logger.error(f"Execution error: {error_msg}\nCode: {python_code[:200]}")
             raise RuntimeError(error_msg)
             
+        except AttributeError as e:
+            error_str = str(e)
+            # Handle common attribute errors with helpful messages
+            if "'StringMethods' object has no attribute 'bold'" in error_str:
+                error_msg = "Execution failed: Cannot apply bold formatting using .str.bold(). Use conditional formatting or format operations instead. Example: Use 'format' in action plan with 'bold': true, not Python code with .str.bold()"
+            elif "'StringMethods' object has no attribute" in error_str:
+                error_msg = f"Execution failed: {error_str}. String methods (.str) don't support this operation. Check pandas documentation for available .str methods."
+            else:
+                error_msg = f"Execution failed: {error_str}"
+            self.errors.append(error_msg)
+            self.execution_log.append(f"✗ {description}: {error_msg}")
+            logger.error(f"Execution error: {error_msg}\nCode: {python_code[:200]}")
+            raise RuntimeError(error_msg)
+            
         except Exception as e:
             error_msg = f"Execution failed: {str(e)}"
             self.errors.append(error_msg)
