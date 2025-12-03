@@ -262,6 +262,16 @@ class LLMAgent:
             if sample_explanation:
                 sample_explanation_text = f"\n\nDATA SAMPLE SUMMARY:\n{sample_explanation}\n"
             
+            # Safely format reasoning list (handle None, non-list, and non-string items)
+            reasoning_list = []
+            if task_suggestions and isinstance(task_suggestions, dict):
+                raw_reasoning = task_suggestions.get('reasoning', [])
+                if isinstance(raw_reasoning, list):
+                    reasoning_list = [str(r) if r is not None else '' for r in raw_reasoning]
+            reasoning_text = ', '.join(reasoning_list) if reasoning_list else 'No specific reasoning'
+            suggested_task = task_suggestions.get('suggested_task', 'auto-detect') if task_suggestions and isinstance(task_suggestions, dict) else 'auto-detect'
+            confidence = task_suggestions.get('confidence', 0) if task_suggestions and isinstance(task_suggestions, dict) else 0
+            
             full_prompt = f"""You are a data analysis assistant that returns ONLY valid JSON. 
 Do not include any markdown formatting, code blocks, or explanatory text. Return pure JSON only.
 
@@ -273,9 +283,9 @@ KNOWLEDGE BASE CONTEXT:
 {kb_summary}
 
 TASK DECISION HINT (use as guidance, not strict rule):
-Based on the user prompt, the suggested task is: {task_suggestions.get('suggested_task', 'auto-detect')}
-Reasoning: {', '.join(str(r) for r in task_suggestions.get('reasoning', []))}
-Confidence: {task_suggestions.get('confidence', 0)}
+Based on the user prompt, the suggested task is: {suggested_task}
+Reasoning: {reasoning_text}
+Confidence: {confidence}
 {similar_examples_text}
 {sample_explanation_text}
 

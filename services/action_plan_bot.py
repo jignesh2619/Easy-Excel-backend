@@ -703,6 +703,15 @@ class ActionPlanBot:
             # Get column mapping info (Excel letters → actual column names)
             column_mapping = get_column_mapping_info(available_columns)
             
+            # Safely format reasoning list (handle None, non-list, and non-string items)
+            reasoning_list = []
+            if task_suggestions and isinstance(task_suggestions, dict):
+                raw_reasoning = task_suggestions.get('reasoning', [])
+                if isinstance(raw_reasoning, list):
+                    reasoning_list = [str(r) if r is not None else '' for r in raw_reasoning]
+            reasoning_text = ', '.join(reasoning_list) if reasoning_list else 'No specific reasoning'
+            suggested_task = task_suggestions.get('suggested_task', 'auto-detect') if task_suggestions and isinstance(task_suggestions, dict) else 'auto-detect'
+            
             full_prompt = f"""You are a data operations assistant. Return ONLY valid JSON.
 
 CRITICAL: Generate Python code for ALL operations. The backend will execute your code directly.
@@ -711,8 +720,8 @@ KNOWLEDGE BASE CONTEXT:
 {kb_summary}
 
 TASK DECISION HINT:
-Suggested task: {task_suggestions.get('suggested_task', 'auto-detect')}
-Reasoning: {', '.join(str(r) for r in task_suggestions.get('reasoning', []))}
+Suggested task: {suggested_task}
+Reasoning: {reasoning_text}
 {column_mapping}
 {similar_examples_text}
 {sample_explanation_text}
