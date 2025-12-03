@@ -566,7 +566,9 @@ If column name is "Id" or "ColumnB" or similar:
 - Cell values must be plain text only
 
 **FOR BOLD/ITALIC/COLORS - USE JSON FORMAT, NOT PYTHON CODE:**
-- ❌ WRONG: df['Column'].str.bold()  (doesn't exist)
+- ❌ WRONG: df['Column'].str.bold()  (doesn't exist - AttributeError)
+- ❌ WRONG: df['Column'] = bold  (variable 'bold' not defined - NameError)
+- ❌ WRONG: bold = True; df['Column'] = bold  (don't use bold as variable name)
 - ❌ WRONG: df['Column'] = '**' + df['Column'] + '**'  (markdown in data)
 - ✅ CORRECT: Use "format" JSON with "bold": true
 - ✅ CORRECT: Use "conditional_format" JSON for highlighting
