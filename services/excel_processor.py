@@ -1405,7 +1405,8 @@ class ExcelProcessor:
             
             if columns_to_delete:
                 self.df = self.df.drop(columns=columns_to_delete)
-                self.summary.append(f"Deleted columns: {', '.join([f\"'{c}'\" for c in columns_to_delete])}")
+                deleted_list = ', '.join([f"'{c}'" for c in columns_to_delete])
+                self.summary.append(f"Deleted columns: {deleted_list}")
                 self.summary.append(f"Total columns: {len(self.df.columns)}")
             return
         
