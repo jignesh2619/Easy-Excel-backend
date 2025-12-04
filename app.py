@@ -478,8 +478,8 @@ async def process_file(
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
         
         # 12. Convert processed dataframe to JSON for preview
-        # Limit to first 50 rows for preview to save memory (OOM fix - was 100)
-        preview_limit = 50
+        # Limit to first 300 rows for preview
+        preview_limit = 300
         preview_df = processed_df.head(preview_limit) if len(processed_df) > preview_limit else processed_df
         # Only convert column names to strings (fast operation)
         preview_df.columns = [str(col) for col in preview_df.columns]
@@ -920,8 +920,8 @@ async def process_data(
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
         
         # 12. Convert processed dataframe to JSON for preview
-        # Limit to first 25 rows for preview to save memory (OOM fix - reduced from 50)
-        preview_limit = 25
+        # Limit to first 300 rows for preview
+        preview_limit = 300
         preview_df = processed_df.head(preview_limit) if len(processed_df) > preview_limit else processed_df
         # Only convert column names to strings (fast operation)
         preview_df.columns = [str(col) for col in preview_df.columns]
