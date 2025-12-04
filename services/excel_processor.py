@@ -1319,12 +1319,33 @@ class ExcelProcessor:
             old_name = rename_item.get("old_name") or rename_item.get("from") or rename_item.get("column")
             new_name = rename_item.get("new_name") or rename_item.get("to") or rename_item.get("name")
             
-            if old_name and new_name and old_name in self.df.columns:
-                rename_mapping[old_name] = new_name
-            else:
-                if old_name not in self.df.columns:
-                    self.summary.append(f"Rename column: Column '{old_name}' not found")
+            if not old_name or not new_name:
                 continue
+            
+            # Improved column matching: exact match first, then case-insensitive, then partial match
+            matched_column = None
+            if old_name in self.df.columns:
+                matched_column = old_name
+            else:
+                # Try case-insensitive match
+                for col in self.df.columns:
+                    if str(col).lower() == str(old_name).lower():
+                        matched_column = col
+                        break
+                # If still no match, try partial match for "Unnamed: X" patterns
+                if not matched_column:
+                    # Handle "Unnamed: 1" vs "Unnamed:1" variations (normalize spaces)
+                    old_name_normalized = str(old_name).replace(" ", "").lower()
+                    for col in self.df.columns:
+                        col_normalized = str(col).replace(" ", "").lower()
+                        if old_name_normalized == col_normalized:
+                            matched_column = col
+                            break
+            
+            if matched_column:
+                rename_mapping[matched_column] = new_name
+            else:
+                self.summary.append(f"Rename column: Column '{old_name}' not found")
         
         if rename_mapping:
             self.df = self.df.rename(columns=rename_mapping)

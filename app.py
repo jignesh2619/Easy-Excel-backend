@@ -517,13 +517,20 @@ async def process_file(
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
+        # 12a. Generate formatting metadata for preview (optimized - only for preview rows)
+        # Get formatting metadata from processor before deleting processed_df
+        formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
+        try:
+            # Only generate for preview rows (already limited to 300) to keep it fast
+            preview_df_for_metadata = processed_df.head(300) if len(processed_df) > 300 else processed_df
+            formatting_metadata = processor.get_formatting_metadata(preview_df_for_metadata)
+            logger.info(f"✅ Generated formatting metadata: {len(formatting_metadata.get('cell_formats', {}))} cells")
+        except Exception as e:
+            logger.warning(f"Failed to generate formatting metadata: {e}")
+            formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
+        
         # Clear processed_df after we've extracted what we need
         del processed_df
-        
-        # 12a. Skip formatting metadata for preview (performance optimization)
-        # Formatting is still applied to the saved Excel file, but we skip preview metadata to improve speed
-        # This can be re-enabled later if needed, but it was causing significant slowdowns
-        formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
         
         # 13. Determine response type and format for formula engine
         response_type = "table"  # Default
@@ -982,13 +989,21 @@ async def process_data(
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
+        # 13. Generate formatting metadata for preview (optimized - only for preview rows)
+        # Get formatting metadata from processor before deleting processed_df
+        formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
+        try:
+            # Only generate for preview rows (already limited to 300) to keep it fast
+            preview_df_for_metadata = processed_df.head(300) if len(processed_df) > 300 else processed_df
+            formatting_metadata = processor.get_formatting_metadata(preview_df_for_metadata)
+            logger.info(f"✅ Generated formatting metadata: {len(formatting_metadata.get('cell_formats', {}))} cells")
+        except Exception as e:
+            logger.warning(f"Failed to generate formatting metadata: {e}")
+            formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
+        
         # Clear processed_df after we've extracted what we need
         del processed_df
         gc.collect()  # Force garbage collection
-        
-        # 13. Skip formatting metadata for preview (performance optimization)
-        # Formatting is still applied to the saved Excel file, but we skip preview metadata to improve speed
-        formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
         
         # 15. Determine response type
         response_type = "table"
