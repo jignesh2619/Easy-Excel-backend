@@ -1260,9 +1260,34 @@ class ExcelProcessor:
         self.summary.append(f"Total rows: {len(self.df)}")
     
     def _execute_add_column(self, action_plan: Dict):
-        """Execute add column operation"""
+        """Execute add column operation - supports single or multiple columns"""
         add_column = action_plan.get("add_column", {})
         
+        if not add_column:
+            self.summary.append("Add column: No configuration specified")
+            return
+        
+        # Handle both single column (dict) and multiple columns (list)
+        if isinstance(add_column, list):
+            # Multiple columns - process each one
+            for idx, column_config in enumerate(add_column):
+                if isinstance(column_config, dict):
+                    self._process_single_add_column(column_config, idx)
+                else:
+                    logger.warning(f"⚠️ Skipping invalid column config at index {idx}: {column_config}")
+            self.summary.append(f"Total columns: {len(self.df.columns)}")
+            return
+        
+        # Single column (existing logic)
+        if not isinstance(add_column, dict):
+            self.summary.append("Add column: Invalid configuration format")
+            return
+        
+        self._process_single_add_column(add_column, 0)
+        self.summary.append(f"Total columns: {len(self.df.columns)}")
+    
+    def _process_single_add_column(self, add_column: Dict, column_index: int = 0):
+        """Process adding a single column"""
         column_name = add_column.get("name", "NewColumn")
         position = add_column.get("position", -1)  # -1 means append at end
         default_value = add_column.get("default_value", "")
@@ -1286,8 +1311,6 @@ class ExcelProcessor:
                 self.df = self.df.reindex(columns=cols)
                 self.df[column_name] = default_value
                 self.summary.append(f"Added new column '{column_name}' at position {position + 1}")
-        
-        self.summary.append(f"Total columns: {len(self.df.columns)}")
     
     def _execute_rename_column(self, action_plan: Dict):
         """Execute rename column operation"""
@@ -1355,9 +1378,134 @@ class ExcelProcessor:
             self.summary.append("Rename column: No valid columns to rename")
     
     def _execute_delete_column(self, action_plan: Dict):
-        """Execute delete column operation with positional reference fallback"""
+        """Execute delete column operation with positional reference fallback - supports single or multiple columns"""
         delete_column = action_plan.get("delete_column", {})
         
+        if not delete_column:
+            self.summary.append("Delete column: No configuration specified")
+            return
+        
+        # Handle both single column (dict) and multiple columns (list)
+        if isinstance(delete_column, list):
+            # Multiple columns - process each one
+            columns_to_delete = []
+            for idx, column_config in enumerate(delete_column):
+                if isinstance(column_config, dict):
+                    col_name = self._extract_column_name_from_config(column_config, action_plan)
+                    if col_name:
+                        columns_to_delete.append(col_name)
+                elif isinstance(column_config, str):
+                    # Direct column name as string
+                    if column_config in self.df.columns:
+                        columns_to_delete.append(column_config)
+                    else:
+                        self.summary.append(f"Delete column: Column '{column_config}' not found")
+                else:
+                    logger.warning(f"⚠️ Skipping invalid column config at index {idx}: {column_config}")
+            
+            if columns_to_delete:
+                self.df = self.df.drop(columns=columns_to_delete)
+                self.summary.append(f"Deleted columns: {', '.join([f\"'{c}'\" for c in columns_to_delete])}")
+                self.summary.append(f"Total columns: {len(self.df.columns)}")
+            return
+        
+        # Single column (existing logic)
+        if not isinstance(delete_column, dict):
+            self.summary.append("Delete column: Invalid configuration format")
+            return
+        
+        column_name = delete_column.get("column_name")
+        column_index = delete_column.get("column_index")
+        
+        # If no column name but we have user prompt, try to extract column name or positional reference
+        if not column_name:
+            user_prompt = action_plan.get("user_prompt", "")
+            user_prompt_lower = user_prompt.lower()
+            
+            import re
+            
+            # FIRST: Try to extract direct column name from patterns like:
+            # "remove column name UY7F9", "delete column UY7F9", "remove UY7F9 column", etc.
+            direct_name_patterns = [
+                r'(?:remove|delete|drop)\s+column\s+name\s+([A-Za-z0-9_\-\.\s]+?)(?:\s|$|column)',  # "remove column name UY7F9"
+                r'(?:remove|delete|drop)\s+column\s+([A-Za-z0-9_\-\.\s]+?)(?:\s|$|column)',  # "delete column UY7F9"
+                r'(?:remove|delete|drop)\s+([A-Za-z0-9_\-\.\s]+?)\s+column',  # "remove UY7F9 column"
+            ]
+            
+            for pattern in direct_name_patterns:
+                match = re.search(pattern, user_prompt, re.IGNORECASE)
+                if match:
+                    potential_name = match.group(1).strip()
+                    # Check if this matches any column name (case-insensitive)
+                    for col in self.df.columns:
+                        if col.lower() == potential_name.lower():
+                            column_name = col  # Use exact case from DataFrame
+                            self.summary.append(f"Extracted column name '{column_name}' from user prompt")
+                            break
+                    if column_name:
+                        break
+            
+            # SECOND: If no direct name found, try to extract Excel column letters (A, B, C, etc.)
+            if not column_name:
+                # Match Excel column letters: A=0, B=1, C=2, ..., Z=25, AA=26, AB=27, etc.
+                excel_letter_pattern = r'\bcolumn\s+([A-Z]+)\b'
+                match = re.search(excel_letter_pattern, user_prompt, re.IGNORECASE)
+                if match:
+                    excel_letter = match.group(1).upper()
+                    try:
+                        # Convert Excel column letter to index (A=0, B=1, ..., Z=25, AA=26, etc.)
+                        col_idx = 0
+                        for char in excel_letter:
+                            col_idx = col_idx * 26 + (ord(char) - ord('A') + 1)
+                        col_idx = col_idx - 1  # Convert to 0-indexed
+                        
+                        if 0 <= col_idx < len(self.df.columns):
+                            column_name = self.df.columns[col_idx]
+                            self.summary.append(f"Identified '{column_name}' as column {excel_letter} (index {col_idx})")
+                    except:
+                        pass
+            
+            # THIRD: If still no column name, try to extract positional reference
+            if not column_name:
+                # Match patterns like "1st", "2nd", "3rd", "first", "second", "third", "last"
+                position_patterns = [
+                    (r'\b(\d+)(?:st|nd|rd|th)\s+col', lambda m: int(m.group(1)) - 1),  # "2nd col", "3rd col"
+                    (r'\b(\d+)\s+col', lambda m: int(m.group(1)) - 1),  # "2 col", "3 col"
+                    (r'\bfirst\s+col', lambda m: 0),
+                    (r'\bsecond\s+col', lambda m: 1),
+                    (r'\bthird\s+col', lambda m: 2),
+                    (r'\bfourth\s+col', lambda m: 3),
+                    (r'\bfifth\s+col', lambda m: 4),
+                    (r'\blast\s+col', lambda m: len(self.df.columns) - 1),
+                ]
+                
+                for pattern, index_func in position_patterns:
+                    match = re.search(pattern, user_prompt_lower)
+                    if match:
+                        try:
+                            col_idx = index_func(match)
+                            if 0 <= col_idx < len(self.df.columns):
+                                column_name = self.df.columns[col_idx]
+                                self.summary.append(f"Identified '{column_name}' as the column to delete from positional reference")
+                                break
+                        except:
+                            continue
+        
+        column_name = self._extract_column_name_from_config(delete_column, action_plan)
+        
+        if not column_name:
+            self.summary.append("Delete column: No column name specified. Please specify column name or position (e.g., 'delete second column', 'delete column Name').")
+            return
+        
+        if column_name not in self.df.columns:
+            raise ValueError(f"Column '{column_name}' not found")
+        
+        self.df = self.df.drop(columns=[column_name])
+        self.summary.append(f"Deleted column '{column_name}'")
+        self.summary.append(f"Total columns: {len(self.df.columns)}")
+    
+    def _extract_column_name_from_config(self, delete_column: Dict, action_plan: Dict) -> str:
+        """Helper method to extract column name from delete_column config"""
         column_name = delete_column.get("column_name")
         column_index = delete_column.get("column_index")
         
@@ -1440,21 +1588,35 @@ class ExcelProcessor:
             if 0 <= column_index < len(self.df.columns):
                 column_name = self.df.columns[column_index]
         
-        if not column_name:
-            self.summary.append("Delete column: No column name specified. Please specify column name or position (e.g., 'delete second column', 'delete column Name').")
-            return
-        
-        if column_name not in self.df.columns:
-            raise ValueError(f"Column '{column_name}' not found")
-        
-        self.df = self.df.drop(columns=[column_name])
-        self.summary.append(f"Deleted column '{column_name}'")
-        self.summary.append(f"Total columns: {len(self.df.columns)}")
+        return column_name
     
     def _execute_edit_cell(self, action_plan: Dict):
-        """Execute edit cell operation"""
+        """Execute edit cell operation - supports single or multiple cell edits"""
         edit_cell = action_plan.get("edit_cell", {})
         
+        if not edit_cell:
+            self.summary.append("Edit cell: No configuration specified")
+            return
+        
+        # Handle both single cell (dict) and multiple cells (list)
+        if isinstance(edit_cell, list):
+            # Multiple cells - process each one
+            for idx, cell_config in enumerate(edit_cell):
+                if isinstance(cell_config, dict):
+                    self._process_single_edit_cell(cell_config, idx)
+                else:
+                    logger.warning(f"⚠️ Skipping invalid cell config at index {idx}: {cell_config}")
+            return
+        
+        # Single cell (existing logic)
+        if not isinstance(edit_cell, dict):
+            self.summary.append("Edit cell: Invalid configuration format")
+            return
+        
+        self._process_single_edit_cell(edit_cell, 0)
+    
+    def _process_single_edit_cell(self, edit_cell: Dict, cell_index: int = 0):
+        """Process editing a single cell"""
         row_index = edit_cell.get("row_index")
         column_name = edit_cell.get("column_name")
         value = edit_cell.get("value")
@@ -1616,6 +1778,25 @@ class ExcelProcessor:
             self.summary.append("Format: No format configuration specified")
             return
         
+        # Handle both single format (dict) and multiple formats (list)
+        if isinstance(format_config, list):
+            # Multiple formats - process each one
+            for idx, format_item in enumerate(format_config):
+                if isinstance(format_item, dict):
+                    self._process_single_format(format_item, idx)
+                else:
+                    logger.warning(f"⚠️ Skipping invalid format rule at index {idx}: {format_item}")
+            return
+        
+        # Single format (existing logic)
+        if not isinstance(format_config, dict):
+            self.summary.append("Format: Invalid configuration format")
+            return
+        
+        self._process_single_format(format_config, 0)
+    
+    def _process_single_format(self, format_config: Dict, rule_index: int = 0):
+        """Process a single format rule"""
         # Handle both structures:
         # 1. Nested: {"formatting": {...}, "range": {...}}
         # 2. Flat: {"range": {...}, "bold": true, "italic": false, ...}
@@ -1960,13 +2141,32 @@ class ExcelProcessor:
         return formatting_metadata
     
     def _execute_formula(self, action_plan: Dict):
-        """Execute formula operations using FormulaEngine"""
+        """Execute formula operations using FormulaEngine - supports single or multiple formulas"""
         formula_config = action_plan.get("formula", {})
         
         if not formula_config:
             self.summary.append("Formula: No formula configuration specified")
             return
         
+        # Handle both single formula (dict) and multiple formulas (list)
+        if isinstance(formula_config, list):
+            # Multiple formulas - process each one (last result will be stored in formula_result)
+            for idx, formula_item in enumerate(formula_config):
+                if isinstance(formula_item, dict):
+                    self._process_single_formula(formula_item, idx)
+                else:
+                    logger.warning(f"⚠️ Skipping invalid formula config at index {idx}: {formula_item}")
+            return
+        
+        # Single formula (existing logic)
+        if not isinstance(formula_config, dict):
+            self.summary.append("Formula: Invalid configuration format")
+            return
+        
+        self._process_single_formula(formula_config, 0)
+    
+    def _process_single_formula(self, formula_config: Dict, formula_index: int = 0):
+        """Process a single formula operation"""
         formula_type = formula_config.get("type", "").lower()
         params = formula_config.get("parameters", {})
         column = formula_config.get("column")
