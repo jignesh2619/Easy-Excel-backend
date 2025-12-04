@@ -472,8 +472,13 @@ async def process_file(
             action_plan["task"] = "clean"
             if user_wants_chart and action_plan.get("chart_type") == "none":
                 action_plan["chart_type"] = "bar"
-            result = processor.execute_action_plan(action_plan)
-            logger.info(f"⏱️ [TIMING] Re-execute action plan: {time.time() - step_start:.2f}s")
+            try:
+                result = processor.execute_action_plan(action_plan)
+                logger.info(f"⏱️ [TIMING] Re-execute action plan: {time.time() - step_start:.2f}s")
+            except Exception as e:
+                logger.error(f"❌ Error during re-execution: {str(e)}", exc_info=True)
+                # Continue with current result
+                logger.warning(f"⚠️ Continuing with previous result after re-execution error")
         
         processed_df = result["df"]
         summary = result["summary"]
