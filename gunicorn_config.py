@@ -13,6 +13,11 @@ worker_connections = 1000
 timeout = 300  # 5 minutes - increased for large file processing
 keepalive = 5
 
+# Memory management
+limit_request_line = 4094
+limit_request_fields = 100
+limit_request_field_size = 8190
+
 # Logging
 accesslog = "-"  # Log to stdout
 errorlog = "-"   # Log to stderr
@@ -33,4 +38,9 @@ tmp_upload_dir = None
 max_requests = 1000
 max_requests_jitter = 50
 preload_app = False
+
+
+
+
+
 

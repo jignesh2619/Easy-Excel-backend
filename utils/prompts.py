@@ -285,26 +285,18 @@ KNOWLEDGE BASE - TASK SELECTION GUIDE:
   * User: "add numbers 1-50 in column B"
   * User: "add 50 rows with numbers 1-50"
   * User: "fill column B with 1 to 50"
-  * → These mean: Add numbers 1-50 in the specified column, starting from where that column's data ends
-  * → CRITICAL: Analyze where the SPECIFIC COLUMN has data, NOT where the entire sheet ends
-  * → Find the last row where that column has a non-empty value
-  * → If column is COMPLETELY EMPTY, insert at position 0 (beginning)
-  * → If column has data, insert after the last row with data
+  * → These mean: Add 50 NEW ROWS to the DataFrame, each with a number in column B
   * → Use operations with Python code ONLY (do NOT use add_row JSON format):
   *   {
   *     "task": "execute",
   *     "operations": [{
-  *       "python_code": "column_name = 'B'; mask = df[column_name].notna() & (df[column_name] != ''); valid_indices = df[mask].index.tolist(); start_row = (df.index.get_loc(valid_indices[-1]) + 1) if valid_indices else 0; end_row = start_row + 50; rows_needed = max(0, end_row - len(df)); df = pd.concat([df, pd.DataFrame([{}] * rows_needed)], ignore_index=True) if rows_needed > 0 else df; df[column_name].iloc[start_row:end_row] = list(range(1, 51))",
-  *       "description": "Find where column B data ends (or start at 0 if empty), insert 50 new rows with numbers 1-50",
+  *       "python_code": "new_rows = [{'B': i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
+  *       "description": "Add 50 new rows with numbers 1-50 in column B",
   *       "result_type": "dataframe"
   *     }]
   *   }
-  * → CRITICAL: For MULTIPLE rows, use operations ONLY, use direct column assignment
-  * → CRITICAL: Analyze the SPECIFIC COLUMN, not the whole sheet - find where that column's data ends
-  * → CRITICAL: If column is empty, fill from position 0, not at the end
-  * → Use: df[column_name].iloc[start_row:end_row] = list(range(1, 51))
-  * → DO NOT use pd.concat to insert rows - it shifts existing data
-  * → Only extend DataFrame if needed: if end_row > len(df): add empty rows first
+  * → CRITICAL: For MULTIPLE rows, use operations ONLY, create list of dicts, use pd.concat
+  * → NEVER assign a list directly to df[column] - this causes "Length of values does not match length of index" error
 
 **TASK: "sort"**
 - USE WHEN: User wants to reorder rows

@@ -45,3 +45,9 @@ You should see `Access-Control-Allow-Origin: https://www.easyexcel.in` in the re
 3. Check firewall rules
 4. Verify the domain DNS is pointing correctly
 
+
+
+
+
+
+

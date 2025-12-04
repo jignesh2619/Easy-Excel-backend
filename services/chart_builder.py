@@ -13,7 +13,7 @@ import numpy as np
 import re
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Tuple, Dict, List
+from typing import Optional, Tuple
 
 
 def _extract_numeric_from_string(value):
@@ -174,137 +174,6 @@ class ChartBuilder:
         except Exception as e:
             plt.close()
             raise RuntimeError(f"Failed to create chart: {str(e)}")
-    
-    def create_chart_data(
-        self, 
-        df: pd.DataFrame, 
-        chart_type: str,
-        x_column: Optional[str] = None,
-        y_column: Optional[str] = None,
-        title: Optional[str] = None
-    ) -> Dict:
-        """
-        Create chart data configuration for frontend rendering (interactive charts)
-        
-        Args:
-            df: Processed dataframe
-            chart_type: Type of chart (bar, line, pie, histogram, scatter)
-            x_column: X-axis column name
-            y_column: Y-axis column name
-            title: Chart title
-            
-        Returns:
-            Dictionary with chart configuration and data for Recharts
-        """
-        # Ensure df is a DataFrame
-        if not isinstance(df, pd.DataFrame):
-            raise ValueError(f"Expected DataFrame, got {type(df)}")
-        
-        if df.empty:
-            raise ValueError("Cannot create chart from empty dataframe")
-        
-        # Limit data size
-        MAX_ROWS_FOR_CHART = 1000
-        if len(df) > MAX_ROWS_FOR_CHART:
-            df = df.head(MAX_ROWS_FOR_CHART).copy()
-        
-        # Determine columns if not specified
-        if x_column is None or y_column is None:
-            x_column, y_column = self._auto_detect_columns(df, chart_type)
-        
-        # Validate columns exist
-        if x_column and x_column not in df.columns:
-            raise ValueError(f"Column '{x_column}' not found in dataframe")
-        if y_column and y_column not in df.columns:
-            raise ValueError(f"Column '{y_column}' not found in dataframe")
-        
-        # Extract data based on chart type
-        chart_data = []
-        
-        if chart_type == "bar" or chart_type == "line":
-            # For bar/line charts, create array of {x: value, y: value}
-            if y_column == "Count":
-                # Group by x_column and count
-                grouped = df.groupby(x_column).size().reset_index(name=y_column)
-                x_data = grouped[x_column].astype(str).tolist()
-                y_data = grouped[y_column].tolist()
-            else:
-                x_data = df[x_column].astype(str).tolist()
-                # Extract numeric values from formatted strings
-                y_data = [(_extract_numeric_from_string(val) if _extract_numeric_from_string(val) is not None else 0) 
-                         for val in df[y_column]]
-            
-            chart_data = [
-                {
-                    "x": x_data[i] if i < len(x_data) else f"Item {i}",
-                    "y": y_data[i] if i < len(y_data) else 0
-                }
-                for i in range(max(len(x_data), len(y_data)))
-            ]
-            
-        elif chart_type == "pie":
-            # For pie charts, create array of {name: value, value: count}
-            if y_column == "Count":
-                value_counts = df.groupby(x_column).size().head(20)  # Limit to top 20
-                chart_data = [
-                    {
-                        "name": str(name),
-                        "value": float(val) if pd.notna(val) else 0
-                    }
-                    for name, val in value_counts.items()
-                ]
-            else:
-                # Use y_column values, group by x_column
-                grouped = df.groupby(x_column)[y_column].sum().head(20)
-                chart_data = [
-                    {
-                        "name": str(name),
-                        "value": float(_extract_numeric_from_string(val)) if _extract_numeric_from_string(val) is not None else 0
-                    }
-                    for name, val in grouped.items()
-                ]
-                
-        elif chart_type == "histogram":
-            # For histogram, bin the data
-            data = df[x_column].apply(_extract_numeric_from_string)
-            numeric_data = [x for x in data if x is not None]
-            
-            if numeric_data:
-                # Create bins using numpy
-                hist, bin_edges = np.histogram(numeric_data, bins=min(20, max(5, len(set(numeric_data)))))
-                chart_data = [
-                    {
-                        "x": f"{bin_edges[i]:.2f}-{bin_edges[i+1]:.2f}",
-                        "y": int(hist[i])
-                    }
-                    for i in range(len(hist))
-                ]
-            else:
-                raise ValueError(f"No valid numeric data in column '{x_column}'")
-                
-        elif chart_type == "scatter":
-            # For scatter plots, create array of {x: value, y: value}
-            x_data = df[x_column].apply(_extract_numeric_from_string).tolist()
-            y_data = df[y_column].apply(_extract_numeric_from_string).tolist()
-            
-            # Filter out None values
-            chart_data = [
-                {
-                    "x": x_data[i] if i < len(x_data) and x_data[i] is not None else 0,
-                    "y": y_data[i] if i < len(y_data) and y_data[i] is not None else 0
-                }
-                for i in range(min(len(x_data), len(y_data)))
-                if x_data[i] is not None and y_data[i] is not None
-            ]
-        
-        return {
-            "chart_type": chart_type,
-            "title": title or f"{chart_type.title()} Chart",
-            "x_column": x_column,
-            "y_column": y_column,
-            "data": chart_data,
-            "data_count": len(chart_data)
-        }
     
     def _auto_detect_columns(self, df: pd.DataFrame, chart_type: str) -> Tuple[str, str]:
         """

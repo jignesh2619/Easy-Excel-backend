@@ -57,3 +57,8 @@ systemctl restart nginx
 - Backend service runs on port 8000
 - Nginx proxies requests from port 80/443 to port 8000
 
+
+
+
+
+

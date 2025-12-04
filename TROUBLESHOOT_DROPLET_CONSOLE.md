@@ -140,3 +140,9 @@ systemctl restart droplet-agent && systemctl restart sshd && systemctl status dr
 
 - [DigitalOcean Droplet Console Documentation](https://docs.digitalocean.com/products/droplets/how-to/connect-with-console)
 
+
+
+
+
+
+

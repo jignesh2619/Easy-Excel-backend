@@ -6,6 +6,7 @@ FastAPI server for processing Excel/CSV files with AI-powered prompts.
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Request, Header, Depends
 from fastapi.responses import JSONResponse, FileResponse
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -15,6 +16,7 @@ import traceback
 import logging
 from pathlib import Path
 from datetime import datetime
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -609,21 +611,27 @@ async def process_file(
             except Exception as e:
                 logger.warning(f"Failed to record feedback: {e}")
         
-        return ProcessFileResponse(
-            status="success",
-            processed_file_url=processed_file_url,
-            chart_url=chart_url,
-            summary=summary,
-            action_plan=action_plan,
-            message="File processed successfully",
-            processed_data=processed_data,
-            columns=columns,
-            row_count=row_count,
-            formatting_metadata=formatting_metadata,
-            type=response_type,
-            operation=operation,
-            result=result_value
-        )
+        # Use jsonable_encoder to ensure all data is JSON serializable before creating response
+        response_data = {
+            "status": "success",
+            "processed_file_url": processed_file_url,
+            "chart_url": chart_url,
+            "summary": summary,
+            "action_plan": action_plan,
+            "message": "File processed successfully",
+            "processed_data": processed_data,
+            "columns": columns,
+            "row_count": row_count,
+            "formatting_metadata": formatting_metadata,
+            "type": response_type,
+            "operation": operation,
+            "result": result_value
+        }
+        
+        # Encode to ensure all types are JSON serializable
+        response_data = jsonable_encoder(response_data)
+        
+        return ProcessFileResponse(**response_data)
         
     except HTTPException:
         raise
@@ -912,8 +920,8 @@ async def process_data(
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
         
         # 12. Convert processed dataframe to JSON for preview
-        # Limit to first 50 rows for preview to save memory (OOM fix - was 100)
-        preview_limit = 50
+        # Limit to first 25 rows for preview to save memory (OOM fix - reduced from 50)
+        preview_limit = 25
         preview_df = processed_df.head(preview_limit) if len(processed_df) > preview_limit else processed_df
         # Only convert column names to strings (fast operation)
         preview_df.columns = [str(col) for col in preview_df.columns]
@@ -921,38 +929,62 @@ async def process_data(
         # Convert datetime columns to strings before to_dict to prevent serialization errors
         import pandas as pd
         from datetime import datetime as dt
+        import numpy as np
+        
+        # Convert all datetime columns first
         for col in preview_df.columns:
             if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
                 preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
             elif preview_df[col].dtype == 'object':
                 # Check if column contains datetime objects
                 sample_val = preview_df[col].dropna()
-                if len(sample_val) > 0 and isinstance(sample_val.iloc[0], dt):
-                    preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, dt) and pd.notna(x) else x)
+                if len(sample_val) > 0:
+                    first_val = sample_val.iloc[0]
+                    if isinstance(first_val, dt):
+                        preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, dt) and pd.notna(x) else x)
         
         # Convert to dict - handle NaN values
         processed_data = preview_df.to_dict(orient='records')
         
-        # Convert any remaining datetime objects and NaN values to strings/None
-        for row in processed_data:
-            for key, value in row.items():
-                if isinstance(value, dt):
-                    row[key] = value.strftime('%Y-%m-%d %H:%M:%S')
-                elif pd.isna(value):
-                    row[key] = None
-                elif hasattr(value, 'item'):  # numpy types
-                    try:
-                        row[key] = value.item()
-                    except (ValueError, AttributeError):
-                        row[key] = str(value)
-        
         # Clear preview_df from memory immediately to prevent OOM
         del preview_df
+        import gc
+        gc.collect()
+        
+        # Comprehensive conversion of all non-serializable types
+        def make_json_serializable(obj):
+            """Recursively convert datetime, numpy, and other non-serializable types"""
+            if isinstance(obj, dt):
+                return obj.strftime('%Y-%m-%d %H:%M:%S')
+            elif isinstance(obj, (np.integer, np.int64, np.int32)):
+                return int(obj)
+            elif isinstance(obj, (np.floating, np.float64, np.float32)):
+                return float(obj)
+            elif isinstance(obj, np.bool_):
+                return bool(obj)
+            elif pd.isna(obj):
+                return None
+            elif isinstance(obj, dict):
+                return {k: make_json_serializable(v) for k, v in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                return [make_json_serializable(item) for item in obj]
+            elif hasattr(obj, 'item'):  # numpy scalar types
+                try:
+                    return obj.item()
+                except (ValueError, AttributeError):
+                    return str(obj)
+            else:
+                return obj
+        
+        # Apply conversion to all rows
+        processed_data = [make_json_serializable(row) for row in processed_data]
+        
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
         
         # Clear processed_df after we've extracted what we need
         del processed_df
+        gc.collect()  # Force garbage collection
         
         # 13. Skip formatting metadata for preview (performance optimization)
         # Formatting is still applied to the saved Excel file, but we skip preview metadata to improve speed
@@ -1033,21 +1065,27 @@ async def process_data(
             except Exception as e:
                 logger.warning(f"Failed to record feedback: {e}")
         
-        return ProcessFileResponse(
-            status="success",
-            processed_file_url=processed_file_url,
-            chart_url=chart_url,
-            summary=summary,
-            action_plan=action_plan,
-            message="Data processed successfully",
-            processed_data=processed_data,
-            columns=columns,
-            row_count=row_count,
-            formatting_metadata=formatting_metadata,
-            type=response_type,
-            operation=operation,
-            result=result_value
-        )
+        # Use jsonable_encoder to ensure all data is JSON serializable before creating response
+        response_data = {
+            "status": "success",
+            "processed_file_url": processed_file_url,
+            "chart_url": chart_url,
+            "summary": summary,
+            "action_plan": action_plan,
+            "message": "Data processed successfully",
+            "processed_data": processed_data,
+            "columns": columns,
+            "row_count": row_count,
+            "formatting_metadata": formatting_metadata,
+            "type": response_type,
+            "operation": operation,
+            "result": result_value
+        }
+        
+        # Encode to ensure all types are JSON serializable
+        response_data = jsonable_encoder(response_data)
+        
+        return ProcessFileResponse(**response_data)
         
     except HTTPException:
         raise
