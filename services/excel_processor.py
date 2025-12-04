@@ -1681,8 +1681,32 @@ class ExcelProcessor:
         logger.info(f"🔍 _execute_conditional_format called with action_plan keys: {list(action_plan.keys())}")
         conditional_format = action_plan.get("conditional_format", {})
         
-        logger.info(f"🔍 Extracted conditional_format: {conditional_format}")
+        logger.info(f"🔍 Extracted conditional_format: {conditional_format}, type: {type(conditional_format)}")
         
+        # Handle both single format (dict) and multiple formats (list)
+        if isinstance(conditional_format, list):
+            # Multiple conditional formats - process each one
+            logger.info(f"✅ Processing {len(conditional_format)} conditional format rules")
+            for idx, format_rule in enumerate(conditional_format):
+                if isinstance(format_rule, dict):
+                    # Process each rule individually
+                    self._process_single_conditional_format(format_rule, idx)
+                else:
+                    logger.warning(f"⚠️ Skipping invalid format rule at index {idx}: {format_rule}")
+            return
+        elif not isinstance(conditional_format, dict):
+            logger.warning(f"⚠️ conditional_format is not dict or list, trying fallback...")
+            fallback = self._build_conditional_format_fallback(action_plan)
+            if fallback:
+                conditional_format = fallback
+                logger.info(f"✅ Using fallback: {fallback}")
+                self.summary.append("Conditional format: Applied fallback configuration from user prompt.")
+            else:
+                logger.error(f"❌ No conditional_format and no fallback available!")
+                self.summary.append("Conditional format: No configuration specified")
+                return
+        
+        # Single conditional format (existing logic)
         if not conditional_format:
             logger.warning(f"⚠️ conditional_format is empty, trying fallback...")
             fallback = self._build_conditional_format_fallback(action_plan)
@@ -1695,6 +1719,11 @@ class ExcelProcessor:
                 self.summary.append("Conditional format: No configuration specified")
                 return
         
+        # Process single format
+        self._process_single_conditional_format(conditional_format, 0)
+    
+    def _process_single_conditional_format(self, conditional_format: Dict, rule_index: int = 0):
+        """Process a single conditional format rule"""
         # Extract conditional formatting details
         format_type = conditional_format.get("format_type", "")
         config = conditional_format.get("config", {})
@@ -1730,11 +1759,13 @@ class ExcelProcessor:
         elif format_type == "contains_text":
             column = config.get("column", "unknown")
             text = config.get("text", "unknown")
-            self.summary.append(f"Conditional formatting: Highlight cells containing '{text}' in column '{column}'")
+            bg_color = config.get("bg_color", "unknown")
+            self.summary.append(f"Conditional formatting: Highlight cells containing '{text}' in column '{column}' with {bg_color}")
         elif format_type == "text_equals":
             column = config.get("column", "unknown")
             text = config.get("text", "unknown")
-            self.summary.append(f"Conditional formatting: Highlight cells equal to '{text}' in column '{column}'")
+            bg_color = config.get("bg_color", "unknown")
+            self.summary.append(f"Conditional formatting: Highlight cells equal to '{text}' in column '{column}' with {bg_color}")
         else:
             self.summary.append(f"Conditional formatting rule stored: {format_type}")
     
