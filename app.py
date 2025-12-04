@@ -279,8 +279,31 @@ async def process_file(
             sample_result = sample_selector.build_sample(df)
             sample_df = sample_result.dataframe
             sample_explanation = sample_result.explanation
+            
+            # Limit sample to max 30 rows to save memory (was 50)
+            max_sample_rows = 30
+            if len(sample_df) > max_sample_rows:
+                sample_df = sample_df.head(max_sample_rows)
+            
+            # Convert datetime columns to strings before serialization
+            import pandas as pd
+            from datetime import datetime as dt
+            for col in sample_df.columns:
+                if pd.api.types.is_datetime64_any_dtype(sample_df[col]):
+                    sample_df[col] = sample_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+            
             sample_data = sample_df.to_dict("records")
-            # FastAPI's jsonable_encoder will handle serialization automatically
+            
+            # Convert any remaining datetime objects in sample_data
+            for row in sample_data:
+                for key, value in row.items():
+                    if isinstance(value, dt):
+                        row[key] = value.strftime('%Y-%m-%d %H:%M:%S')
+                    elif pd.isna(value):
+                        row[key] = None
+            
+            # Clear sample_df from memory
+            del sample_df
             
             import json
             json_start = time.time()
@@ -289,11 +312,16 @@ async def process_file(
             data_size_estimate = len(data_json) // 4
             logger.info(
                 "✅ Sample prepared for LLM: %s rows selected from %s total, explanation: %s",
-                len(sample_df),
+                max_sample_rows if len(df) > max_sample_rows else len(df),
                 len(df),
                 sample_explanation
             )
         logger.info(f"⏱️ [TIMING] Step 6 (prepare sample data): {time.time() - step_start:.2f}s")
+        
+        # 6a. Validate required columns exist (before deleting df)
+        # We need to check columns before LLM call, but we'll validate again after getting action_plan
+        # This is just a preliminary check if we can determine columns needed from prompt
+        # (We'll do full validation after LLM call with the actual action_plan)
         
         # 7. Check token limits before LLM call (account for full Excel data)
         # Estimate includes: user prompt + system prompt + Excel data + response
@@ -327,6 +355,11 @@ async def process_file(
         
         logger.info(f"⏱️ [TIMING] About to call LLM at {time.time() - start_time:.2f}s total elapsed")
         # Don't pass full DataFrame to LLM to save memory - only pass sample_data
+        # Clear df from memory before LLM call to free up memory
+        del df
+        import gc
+        gc.collect()  # Force garbage collection to free memory
+        
         llm_result = llm_agent.interpret_prompt(
             prompt,
             available_columns,
@@ -357,10 +390,17 @@ async def process_file(
         else:
             logger.info(f"Token usage: {actual_tokens_used} tokens")
         
-        # 8. Validate required columns exist
+        # 8. Validate required columns exist (reload df from temp file for validation)
         columns_needed = action_plan.get("columns_needed", [])
         if columns_needed:
-            is_valid, error, missing = validator.validate_columns_exist(df, columns_needed)
+            # Reload df just for validation, then delete again
+            import pandas as pd
+            if file.filename.endswith('.csv'):
+                validation_df = pd.read_csv(temp_file_path)
+            else:
+                validation_df = pd.read_excel(temp_file_path)
+            is_valid, error, missing = validator.validate_columns_exist(validation_df, columns_needed)
+            del validation_df  # Free memory immediately
             if not is_valid:
                 file_manager.delete_file(temp_file_path)
                 raise HTTPException(status_code=400, detail=error)
@@ -436,18 +476,47 @@ async def process_file(
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
         
         # 12. Convert processed dataframe to JSON for preview
-        # Limit to first 1000 rows for preview to improve performance
-        # Limit to first 100 rows for preview to save memory (OOM fix - was 1000)
-        preview_limit = 100
+        # Limit to first 50 rows for preview to save memory (OOM fix - was 100)
+        preview_limit = 50
         preview_df = processed_df.head(preview_limit) if len(processed_df) > preview_limit else processed_df
         # Only convert column names to strings (fast operation)
         preview_df.columns = [str(col) for col in preview_df.columns]
-        # Convert to dict - FastAPI's jsonable_encoder will handle NaN, datetime, and all other types automatically
+        
+        # Convert datetime columns to strings before to_dict to prevent serialization errors
+        import pandas as pd
+        from datetime import datetime as dt
+        for col in preview_df.columns:
+            if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
+                preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+            elif preview_df[col].dtype == 'object':
+                # Check if column contains datetime objects
+                sample_val = preview_df[col].dropna()
+                if len(sample_val) > 0 and isinstance(sample_val.iloc[0], dt):
+                    preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, dt) and pd.notna(x) else x)
+        
+        # Convert to dict - handle NaN values
         processed_data = preview_df.to_dict(orient='records')
+        
+        # Convert any remaining datetime objects and NaN values to strings/None
+        for row in processed_data:
+            for key, value in row.items():
+                if isinstance(value, dt):
+                    row[key] = value.strftime('%Y-%m-%d %H:%M:%S')
+                elif pd.isna(value):
+                    row[key] = None
+                elif hasattr(value, 'item'):  # numpy types
+                    try:
+                        row[key] = value.item()
+                    except (ValueError, AttributeError):
+                        row[key] = str(value)
+        
         # Clear preview_df from memory immediately to prevent OOM
         del preview_df
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
+        
+        # Clear processed_df after we've extracted what we need
+        del processed_df
         
         # 12a. Skip formatting metadata for preview (performance optimization)
         # Formatting is still applied to the saved Excel file, but we skip preview metadata to improve speed
@@ -686,22 +755,41 @@ async def process_data(
             sample_result = sample_selector.build_sample(df)
             sample_df = sample_result.dataframe
             sample_explanation = sample_result.explanation
-            # Limit sample to max 50 rows to save memory
-            max_sample_rows = 50
+            # Limit sample to max 30 rows to save memory (was 50)
+            max_sample_rows = 30
             if len(sample_df) > max_sample_rows:
                 sample_df = sample_df.head(max_sample_rows)
+            
+            # Convert datetime columns to strings before serialization
+            import pandas as pd
+            from datetime import datetime as dt
+            for col in sample_df.columns:
+                if pd.api.types.is_datetime64_any_dtype(sample_df[col]):
+                    sample_df[col] = sample_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+            
             sample_data = sample_df.to_dict("records")
-            # FastAPI's jsonable_encoder will handle serialization automatically
+            
+            # Convert any remaining datetime objects in sample_data
+            for row in sample_data:
+                for key, value in row.items():
+                    if isinstance(value, dt):
+                        row[key] = value.strftime('%Y-%m-%d %H:%M:%S')
+                    elif pd.isna(value):
+                        row[key] = None
+            
+            # Clear sample_df from memory
+            del sample_df
             
             import json
             data_json = json.dumps(sample_data)
             data_size_estimate = len(data_json) // 4
-            # Clear sample_df from memory
-            del sample_df
+            
+            # Store row count before deleting df
+            total_rows = len(df)
             logger.info(
                 "✅ Sample prepared for LLM: %s rows selected from %s total, explanation: %s",
-                len(sample_df),
-                len(df),
+                max_sample_rows if total_rows > max_sample_rows else total_rows,
+                total_rows,
                 sample_explanation
             )
         
@@ -734,13 +822,18 @@ async def process_data(
         if user:
             user_id = user["user_id"]
         
+        # Clear df from memory before LLM call to free up memory
+        del df
+        import gc
+        gc.collect()  # Force garbage collection to free memory
+        
         llm_result = llm_agent.interpret_prompt(
             request.prompt,
             available_columns,
             user_id=user_id,
             sample_data=sample_data,
             sample_explanation=sample_explanation,
-            df=df
+            df=None  # Don't pass full DataFrame - save memory
         )
         action_plan = llm_result.get("action_plan", {})
         action_plan["user_prompt"] = request.prompt
@@ -756,10 +849,14 @@ async def process_data(
         elif actual_tokens_used > estimated_tokens * 2:
             logger.warning(f"⚠️ Actual tokens ({actual_tokens_used}) is more than 2x estimate ({estimated_tokens}). This might indicate an issue.")
         
-        # 7. Validate required columns
+        # 7. Validate required columns (reload df from temp file for validation)
         columns_needed = action_plan.get("columns_needed", [])
         if columns_needed:
-            is_valid, error, missing = validator.validate_columns_exist(df, columns_needed)
+            # Reload df just for validation, then delete again
+            import pandas as pd
+            validation_df = pd.read_csv(temp_file_path)
+            is_valid, error, missing = validator.validate_columns_exist(validation_df, columns_needed)
+            del validation_df  # Free memory immediately
             if not is_valid:
                 if temp_file_path and Path(temp_file_path).exists():
                     file_manager.delete_file(temp_file_path)
@@ -815,18 +912,47 @@ async def process_data(
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
         
         # 12. Convert processed dataframe to JSON for preview
-        # Limit to first 1000 rows for preview to improve performance
-        # Limit to first 100 rows for preview to save memory (OOM fix - was 1000)
-        preview_limit = 100
+        # Limit to first 50 rows for preview to save memory (OOM fix - was 100)
+        preview_limit = 50
         preview_df = processed_df.head(preview_limit) if len(processed_df) > preview_limit else processed_df
         # Only convert column names to strings (fast operation)
         preview_df.columns = [str(col) for col in preview_df.columns]
-        # Convert to dict - FastAPI's jsonable_encoder will handle NaN, datetime, and all other types automatically
+        
+        # Convert datetime columns to strings before to_dict to prevent serialization errors
+        import pandas as pd
+        from datetime import datetime as dt
+        for col in preview_df.columns:
+            if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
+                preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+            elif preview_df[col].dtype == 'object':
+                # Check if column contains datetime objects
+                sample_val = preview_df[col].dropna()
+                if len(sample_val) > 0 and isinstance(sample_val.iloc[0], dt):
+                    preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, dt) and pd.notna(x) else x)
+        
+        # Convert to dict - handle NaN values
         processed_data = preview_df.to_dict(orient='records')
+        
+        # Convert any remaining datetime objects and NaN values to strings/None
+        for row in processed_data:
+            for key, value in row.items():
+                if isinstance(value, dt):
+                    row[key] = value.strftime('%Y-%m-%d %H:%M:%S')
+                elif pd.isna(value):
+                    row[key] = None
+                elif hasattr(value, 'item'):  # numpy types
+                    try:
+                        row[key] = value.item()
+                    except (ValueError, AttributeError):
+                        row[key] = str(value)
+        
         # Clear preview_df from memory immediately to prevent OOM
         del preview_df
         columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
         row_count = len(processed_df)
+        
+        # Clear processed_df after we've extracted what we need
+        del processed_df
         
         # 13. Skip formatting metadata for preview (performance optimization)
         # Formatting is still applied to the saved Excel file, but we skip preview metadata to improve speed
