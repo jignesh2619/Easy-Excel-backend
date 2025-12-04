@@ -439,8 +439,28 @@ async def process_file(
         
         step_start = time.time()
         logger.info(f"⏱️ [TIMING] About to execute action plan at {time.time() - start_time:.2f}s total elapsed")
-        result = processor.execute_action_plan(action_plan)
-        logger.info(f"⏱️ [TIMING] Action plan execution: {time.time() - step_start:.2f}s")
+        try:
+            result = processor.execute_action_plan(action_plan)
+            logger.info(f"⏱️ [TIMING] Action plan execution: {time.time() - step_start:.2f}s")
+        except Exception as e:
+            logger.error(f"❌ Error during action plan execution: {str(e)}", exc_info=True)
+            # Try to continue with whatever data we have - formatting might still be applied
+            # Get the current dataframe even if execution partially failed
+            try:
+                processed_df = processor.get_dataframe()
+                result = {
+                    "df": processed_df,
+                    "summary": processor.summary if hasattr(processor, 'summary') else [f"Warning: Partial execution - {str(e)}"],
+                    "chart_path": None,
+                    "chart_needed": False,
+                    "chart_type": "none",
+                    "formula_result": None,
+                    "task": action_plan.get("task", "execute")
+                }
+                logger.warning(f"⚠️ Continuing with partial results after error")
+            except Exception as e2:
+                logger.error(f"❌ Failed to get dataframe after error: {str(e2)}")
+                raise HTTPException(status_code=500, detail=f"Failed to execute action plan: {str(e)}")
         
         # Double-check: If task ended up as "summarize" but user wanted cleaning, 
         # we need to reload and re-execute with clean task

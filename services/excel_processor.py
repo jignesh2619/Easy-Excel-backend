@@ -1047,6 +1047,11 @@ class ExcelProcessor:
             format_type = rule.get("format_type")
             config = rule.get("config", {})
             
+            # Defensive check: ensure config is a dict
+            if not isinstance(config, dict):
+                logger.warning(f"⚠️ Skipping conditional format rule with invalid config type: {type(config)}")
+                continue
+            
             # Debug: Log what we're trying to apply
             logger.info(f"Applying conditional formatting: type={format_type}, config={config}")
             
@@ -1910,6 +1915,30 @@ class ExcelProcessor:
         format_type = conditional_format.get("format_type", "")
         config = conditional_format.get("config", {})
         
+        # Defensive check: if config is a list, try to extract from first item or convert
+        if isinstance(config, list):
+            logger.warning(f"⚠️ Config is a list, attempting to process first item or convert structure")
+            if len(config) > 0 and isinstance(config[0], dict):
+                # If it's a list of configs, process each one as a separate rule
+                for idx, single_config in enumerate(config):
+                    if isinstance(single_config, dict):
+                        # Create a new conditional format dict for this config
+                        new_conditional_format = {
+                            "format_type": format_type,
+                            "config": single_config
+                        }
+                        # Recursively process this single config
+                        self._process_single_conditional_format(new_conditional_format, rule_index + idx)
+                return  # Exit early since we processed all configs
+            else:
+                # Invalid structure, use empty dict
+                config = {}
+        
+        # Ensure config is a dict
+        if not isinstance(config, dict):
+            logger.error(f"❌ Invalid config type: {type(config)}, expected dict. Using empty dict.")
+            config = {}
+        
         logger.info(f"✅ Format type: {format_type}, Config: {config}")
         
         # Store conditional formatting rule to apply when saving
@@ -1921,32 +1950,32 @@ class ExcelProcessor:
         self.formatting_rules.append(rule)
         logger.info(f"✅ Added conditional format rule to formatting_rules. Total rules: {len(self.formatting_rules)}")
         
-        # Build summary message
+        # Build summary message (with defensive checks)
         if format_type == "duplicates":
-            column = config.get("column", "unknown")
+            column = config.get("column", "unknown") if isinstance(config, dict) else "unknown"
             self.summary.append(f"Conditional formatting: Highlight duplicates in column '{column}'")
         elif format_type == "greater_than":
-            column = config.get("column", "unknown")
-            value = config.get("value", "unknown")
+            column = config.get("column", "unknown") if isinstance(config, dict) else "unknown"
+            value = config.get("value", "unknown") if isinstance(config, dict) else "unknown"
             self.summary.append(f"Conditional formatting: Highlight values > {value} in column '{column}'")
         elif format_type == "less_than":
-            column = config.get("column", "unknown")
-            value = config.get("value", "unknown")
+            column = config.get("column", "unknown") if isinstance(config, dict) else "unknown"
+            value = config.get("value", "unknown") if isinstance(config, dict) else "unknown"
             self.summary.append(f"Conditional formatting: Highlight values < {value} in column '{column}'")
         elif format_type == "between":
-            column = config.get("column", "unknown")
-            min_val = config.get("min_value", "unknown")
-            max_val = config.get("max_value", "unknown")
+            column = config.get("column", "unknown") if isinstance(config, dict) else "unknown"
+            min_val = config.get("min_value", "unknown") if isinstance(config, dict) else "unknown"
+            max_val = config.get("max_value", "unknown") if isinstance(config, dict) else "unknown"
             self.summary.append(f"Conditional formatting: Highlight values between {min_val} and {max_val} in column '{column}'")
         elif format_type == "contains_text":
-            column = config.get("column", "unknown")
-            text = config.get("text", "unknown")
-            bg_color = config.get("bg_color", "unknown")
+            column = config.get("column", "unknown") if isinstance(config, dict) else "unknown"
+            text = config.get("text", "unknown") if isinstance(config, dict) else "unknown"
+            bg_color = config.get("bg_color", "unknown") if isinstance(config, dict) else "unknown"
             self.summary.append(f"Conditional formatting: Highlight cells containing '{text}' in column '{column}' with {bg_color}")
         elif format_type == "text_equals":
-            column = config.get("column", "unknown")
-            text = config.get("text", "unknown")
-            bg_color = config.get("bg_color", "unknown")
+            column = config.get("column", "unknown") if isinstance(config, dict) else "unknown"
+            text = config.get("text", "unknown") if isinstance(config, dict) else "unknown"
+            bg_color = config.get("bg_color", "unknown") if isinstance(config, dict) else "unknown"
             self.summary.append(f"Conditional formatting: Highlight cells equal to '{text}' in column '{column}' with {bg_color}")
         else:
             self.summary.append(f"Conditional formatting rule stored: {format_type}")
@@ -2059,6 +2088,11 @@ class ExcelProcessor:
                 format_type = rule.get("format_type")
                 config = rule.get("config", {})
                 
+                # Defensive check: ensure config is a dict
+                if not isinstance(config, dict):
+                    logger.warning(f"⚠️ Skipping conditional format rule with invalid config type: {type(config)}")
+                    continue
+                
                 if format_type == "contains_text":
                     column = config.get("column")
                     text = config.get("text", "")
@@ -2106,6 +2140,10 @@ class ExcelProcessor:
                         logger.warning(f"⚠️ Column '{column}' not found in DataFrame columns: {list(df.columns)}")
                         
                 elif format_type == "text_equals":
+                    # Defensive check: ensure config is a dict
+                    if not isinstance(config, dict):
+                        logger.warning(f"⚠️ Skipping text_equals rule with invalid config type: {type(config)}")
+                        continue
                     column = config.get("column")
                     text = config.get("text", "")
                     bg_color = config.get("bg_color") or config.get("background_color", "#FFF3CD")
