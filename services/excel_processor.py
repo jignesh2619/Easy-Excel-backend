@@ -233,22 +233,24 @@ class ExcelProcessor:
                         loaded_data = pd.read_excel(
                             self.file_path, 
                             sheet_name=0,
-                            engine='openpyxl' if file_ext == '.xlsx' else None
+                            engine='openpyxl' if file_ext == '.xlsx' else None,
+                            keep_default_na=False  # Preserve empty cells as empty strings
                         )
                     else:
                         loaded_data = pd.read_excel(
                             self.file_path, 
                             sheet_name=sheet_name,
-                            engine='openpyxl' if file_ext == '.xlsx' else None
+                            engine='openpyxl' if file_ext == '.xlsx' else None,
+                            keep_default_na=False  # Preserve empty cells as empty strings
                         )
                 except Exception as e:
                     # Try without engine specification for .xls files
                     if file_ext == '.xls':
                         try:
                             if sheet_name is None:
-                                loaded_data = pd.read_excel(self.file_path, sheet_name=0)
+                                loaded_data = pd.read_excel(self.file_path, sheet_name=0, keep_default_na=False)
                             else:
-                                loaded_data = pd.read_excel(self.file_path, sheet_name=sheet_name)
+                                loaded_data = pd.read_excel(self.file_path, sheet_name=sheet_name, keep_default_na=False)
                         except Exception as e2:
                             raise RuntimeError(f"Failed to read Excel file. The file may be corrupted. Error: {str(e2)}")
                     else:

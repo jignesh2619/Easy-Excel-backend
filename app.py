@@ -400,7 +400,7 @@ async def process_file(
             if file.filename.endswith('.csv'):
                 validation_df = pd.read_csv(temp_file_path)
             else:
-                validation_df = pd.read_excel(temp_file_path)
+                validation_df = pd.read_excel(temp_file_path, keep_default_na=False)
             is_valid, error, missing = validator.validate_columns_exist(validation_df, columns_needed)
             del validation_df  # Free memory immediately
             if not is_valid:
@@ -505,7 +505,7 @@ async def process_file(
                 if isinstance(value, dt):
                     row[key] = value.strftime('%Y-%m-%d %H:%M:%S')
                 elif pd.isna(value):
-                    row[key] = None
+                    row[key] = ""  # Empty string instead of None to preserve structure
                 elif hasattr(value, 'item'):  # numpy types
                     try:
                         row[key] = value.item()
@@ -963,7 +963,7 @@ async def process_data(
             elif isinstance(obj, np.bool_):
                 return bool(obj)
             elif pd.isna(obj):
-                return None
+                return ""  # Empty string instead of None to preserve structure
             elif isinstance(obj, dict):
                 return {k: make_json_serializable(v) for k, v in obj.items()}
             elif isinstance(obj, (list, tuple)):
