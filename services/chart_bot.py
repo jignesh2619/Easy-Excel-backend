@@ -8,6 +8,7 @@ Handles all chart/visualization requests.
 import json
 import os
 import logging
+import re
 from typing import Dict, List, Optional
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -33,15 +34,26 @@ RULES:
 - Use ACTUAL column names from available_columns (not Excel letters)
 - Chart types: bar (categories), line (time), pie (proportions), scatter (numeric pairs), histogram (distribution)
 
+EXCEL COLUMN REFERENCES:
+- "graph between A and B" → A = first column, B = second column (use actual names from available_columns)
+- "chart of column A" → A = available_columns[0]
+- "column B vs C" → B = available_columns[1], C = available_columns[2]
+- Always resolve Excel letters (A, B, C, etc.) to actual column names from available_columns
+
+BAR CHART RULES:
+- X-axis: Can be categorical (products, names, categories) - stored as strings/objects
+- Y-axis: Must be numeric (sales, revenue, counts) - can be stored as numbers or numeric strings
+- Example: Products (A) vs Sales (B) → {"chart_type": "bar", "x_column": "Product", "y_column": "Sales"}
+
 OUTPUT FORMATS:
 Single: {"chart_type": "bar", "x_column": "Name", "y_column": "Value", "title": "Title", "description": "Desc"}
 Multiple: {"charts": [{"chart_type": "bar", "x_column": "X", "y_column": "Y", "title": "T", "description": "D"}, ...]}
 
 EXAMPLES:
 "bar chart of revenue by country" → {"chart_type": "bar", "x_column": "Country", "y_column": "Revenue", "title": "Revenue by Country", "description": "Bar chart"}
+"graph between A and B" → {"chart_type": "bar", "x_column": "ColumnA", "y_column": "ColumnB", "title": "ColumnB by ColumnA", "description": "Bar chart"}
 "create dashboard" → {"charts": [{"chart_type": "bar", ...}, {"chart_type": "line", ...}]}
 
-COLUMN REFERENCE: "column C" → check if column "C" exists, else use available_columns[2]
 Return ONLY valid JSON, no markdown or explanations.
 """
 
@@ -141,6 +153,17 @@ class ChartBot:
             
             # Get column mapping info (Excel letters → actual column names)
             column_mapping = get_column_mapping_info(available_columns)
+            
+            # Enhance prompt to handle Excel column references in user request
+            # Check if user mentions Excel column letters (A, B, C, etc.)
+            excel_ref_pattern = r'\b([A-Z])\b'
+            excel_refs = re.findall(excel_ref_pattern, user_prompt.upper())
+            if excel_refs and len(excel_refs) >= 2:
+                # User likely wants chart between Excel columns
+                # Add explicit instruction to resolve these
+                excel_instruction = f"\nNOTE: User mentioned Excel columns {', '.join(set(excel_refs[:2]))}. "
+                excel_instruction += "Resolve these to actual column names using the column mapping below.\n"
+                column_mapping = excel_instruction + column_mapping
             
             # Build prompt with context
             prompt = self._build_chart_prompt(

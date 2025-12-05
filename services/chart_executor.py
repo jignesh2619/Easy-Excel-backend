@@ -75,6 +75,30 @@ class ChartExecutor:
             if y_column and y_column not in self.df.columns:
                 raise ValueError(f"Column '{y_column}' not found. Available: {list(self.df.columns)}")
             
+            # Validate data types for chart
+            if chart_type in ["bar", "line", "pie"]:
+                # For bar/line/pie charts, Y column should have numeric data (can be strings that convert to numbers)
+                if y_column:
+                    y_data = self.df[y_column]
+                    # Check if column is numeric or can be converted to numeric
+                    is_numeric = pd.api.types.is_numeric_dtype(y_data)
+                    if not is_numeric:
+                        # Try to convert to numeric (handles string numbers)
+                        try:
+                            pd.to_numeric(y_data, errors='raise')
+                            logger.info(f"Column '{y_column}' contains numeric strings, will be converted during chart generation")
+                        except (ValueError, TypeError):
+                            # Check if it's mostly numeric strings (like "5218.00")
+                            numeric_count = 0
+                            for val in y_data.head(10):  # Sample first 10
+                                try:
+                                    float(str(val).replace(',', '').strip())
+                                    numeric_count += 1
+                                except:
+                                    pass
+                            if numeric_count < 5:  # Less than half are numeric
+                                logger.warning(f"Column '{y_column}' may not contain numeric data, but proceeding anyway")
+            
             # Generate chart using ChartBuilder
             logger.info(f"Calling ChartBuilder.create_chart with type={chart_type}, x={x_column}, y={y_column}")
             chart_path = self.chart_builder.create_chart(

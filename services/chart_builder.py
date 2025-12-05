@@ -239,6 +239,25 @@ class ChartBuilder:
             valid_mask = pd.Series([y is not None for y in y_data])
             x_data = x_data[valid_mask].astype(str)  # Ensure string type
             y_data = pd.Series([y for y, valid in zip(y_data, valid_mask) if valid])
+            
+            # Check if we have valid numeric data
+            if len(y_data) == 0:
+                # Try alternative: convert entire column to numeric
+                try:
+                    y_data = pd.to_numeric(df[y_column], errors='coerce')
+                    valid_mask = ~y_data.isna()
+                    x_data = df[x_column][valid_mask].astype(str)
+                    y_data = y_data[valid_mask]
+                except Exception:
+                    pass
+                
+                if len(y_data) == 0:
+                    raise ValueError(
+                        f"No valid numeric data found in column '{y_column}'. "
+                        f"Column contains: {df[y_column].dtype} type data. "
+                        f"Sample values: {list(df[y_column].head(5))}. "
+                        f"Please ensure the Y-axis column contains numeric values (numbers or numeric strings)."
+                    )
         
         # Create bar chart
         bars = ax.bar(range(len(x_data)), y_data, color='#00A878', edgecolor='#008c67', linewidth=1.5)
