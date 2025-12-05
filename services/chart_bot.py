@@ -165,19 +165,20 @@ When user mentions "column C", "column A", etc.:
 class ChartBot:
     """Bot for generating chart configurations"""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
         """
         Initialize Chart Bot
         
         Args:
             api_key: OpenAI API key
-            model: Model to use
+            model: Model to use (default: gpt-4o-mini for cost savings)
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OpenAI API key not found")
         
-        self.model = os.getenv("OPENAI_MODEL", model)
+        # Use provided model directly (no env var override) since LLMAgent handles routing
+        self.model = model
         self.client = OpenAI(api_key=self.api_key)
         
         # Initialize feedback learner
@@ -329,7 +330,7 @@ class ChartBot:
                            kb_summary: str = "", similar_examples: str = "", column_mapping: str = "",
                            data_analysis: Optional[Dict] = None, is_generic: bool = False) -> str:
         """Build prompt for chart generation"""
-        columns_info = f"Available columns: {', '.join(str(col) for col in columns)}"
+        columns_info = f"Available columns: {', '.join(columns)}"
         
         sample_text = ""
         if sample_data:
@@ -347,9 +348,9 @@ class ChartBot:
 ═══════════════════════════════════════════════════════════════════════════════
 
 Column Types:
-- Numeric columns: {', '.join(str(col) for col in data_analysis.get('numeric_columns', [])) if data_analysis.get('numeric_columns') else 'None'}
-- Categorical columns: {', '.join(str(col) for col in data_analysis.get('categorical_columns', [])) if data_analysis.get('categorical_columns') else 'None'}
-- Datetime columns: {', '.join(str(col) for col in data_analysis.get('datetime_columns', [])) if data_analysis.get('datetime_columns') else 'None'}
+- Numeric columns: {', '.join(data_analysis.get('numeric_columns', [])) if data_analysis.get('numeric_columns') else 'None'}
+- Categorical columns: {', '.join(data_analysis.get('categorical_columns', [])) if data_analysis.get('categorical_columns') else 'None'}
+- Datetime columns: {', '.join(data_analysis.get('datetime_columns', [])) if data_analysis.get('datetime_columns') else 'None'}
 
 Suggested Chart Configurations:
 """

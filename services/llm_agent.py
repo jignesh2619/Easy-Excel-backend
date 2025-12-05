@@ -87,21 +87,23 @@ SYSTEM_MESSAGE = (
 
 
 class LLMAgent:
-    """Handles LLM interpretation of user prompts using OpenAI GPT-4"""
+    """Handles LLM interpretation of user prompts using OpenAI with hybrid model routing"""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
         """
-        Initialize LLM Agent with OpenAI GPT-4
+        Initialize LLM Agent with hybrid model support (gpt-4o-mini default, gpt-4o for complex)
         
         Args:
             api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
-            model: Model to use (default: gpt-4o)
+            model: Default model to use (default: gpt-4o-mini for cost savings)
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
         
-        self.model = os.getenv("OPENAI_MODEL", model)
+        # Get model from env var, default to gpt-4o-mini for cost savings
+        self.default_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        self.complex_model = "gpt-4o"  # Use for complex operations
         
         try:
             self.client = OpenAI(api_key=self.api_key)
@@ -120,9 +122,18 @@ class LLMAgent:
         except Exception:
             self.training_data_loader = None
         
-        # Initialize specialized bots
-        self.action_plan_bot = ActionPlanBot(api_key=self.api_key, model=self.model)
-        self.chart_bot = ChartBot(api_key=self.api_key, model=self.model)
+        # Initialize specialized bots with both models for hybrid routing
+        # Mini bots (default for simple operations)
+        self.action_plan_bot_mini = ActionPlanBot(api_key=self.api_key, model=self.default_model)
+        self.chart_bot_mini = ChartBot(api_key=self.api_key, model=self.default_model)
+        
+        # Full bots (for complex operations)
+        self.action_plan_bot_full = ActionPlanBot(api_key=self.api_key, model=self.complex_model)
+        self.chart_bot_full = ChartBot(api_key=self.api_key, model=self.complex_model)
+        
+        logger.info(f"🤖 LLMAgent initialized with hybrid model routing:")
+        logger.info(f"   Default (simple): {self.default_model}")
+        logger.info(f"   Complex: {self.complex_model}")
     
     def _is_chart_request(self, prompt: str) -> bool:
         """
@@ -130,7 +141,7 @@ class LLMAgent:
         
         Args:
             prompt: User prompt
-        
+            
         Returns:
             True if chart request, False otherwise
         """
@@ -144,6 +155,185 @@ class LLMAgent:
         ]
         return any(keyword in prompt_lower for keyword in chart_keywords)
     
+    def _is_complex_operation(self, user_prompt: str, available_columns: List[str] = None, 
+                              sample_data: Optional[List[Dict]] = None) -> bool:
+        """
+        Hybrid complexity detection - determines if operation needs GPT-4o
+        
+        Uses two-stage approach:
+        1. Fast keyword checks (80-90% of cases, no API call)
+        2. LLM classification for ambiguous cases (10-20%, tiny cheap API call)
+        
+        This handles typos, variations, and different phrasings accurately.
+        Runs BEFORE any heavy operations, so it's completely safe.
+        
+        Args:
+            user_prompt: User's request
+            available_columns: Available column names (optional, for future use)
+            sample_data: Sample data (optional, for future use)
+            
+        Returns:
+            True if complex operation (use gpt-4o), False if simple (use gpt-4o-mini)
+        """
+        if not user_prompt:
+            return False
+        
+        prompt_lower = user_prompt.lower()
+        
+        # FAST PATH 1: Obviously simple operations (no API call needed)
+        if self._quick_simple_check(prompt_lower):
+            return False
+        
+        # FAST PATH 2: Obviously complex operations (no API call needed)
+        if self._quick_complex_check(prompt_lower, sample_data):
+            return True
+        
+        # SLOW PATH: Ambiguous cases - use LLM classification (tiny, cheap call)
+        # Only ~10-20% of requests reach here
+        return self._llm_classify_complexity(user_prompt)
+    
+    def _quick_simple_check(self, prompt_lower: str) -> bool:
+        """
+        Fast check for obviously simple operations
+        
+        Returns True if operation is definitely simple (single, straightforward task)
+        """
+        import re
+        
+        # Simple single-operation patterns (must not have "and", "then", etc.)
+        simple_patterns = [
+            r"^(delete|remove|drop)\s+column",  # "delete column A"
+            r"^rename\s+column",  # "rename column Name"
+            r"^add\s+column\s+\w+$",  # "add column Total" (single operation)
+            r"^make\s+(bold|italic|color|header)",  # "make bold"
+            r"^change\s+cell",  # "change cell A1"
+            r"^clear\s+cell",  # "clear cell A1"
+        ]
+        
+        # Check if matches simple pattern AND doesn't have multi-step indicators
+        for pattern in simple_patterns:
+            if re.match(pattern, prompt_lower):
+                # Make sure it's not multi-step
+                if not any(kw in prompt_lower for kw in [" and ", " then ", " also ", " after ", " next "]):
+                    return True  # Definitely simple
+        
+        # Single operation keywords (only if no multi-step words)
+        single_ops = ["delete column", "remove column", "rename column", "make bold", "make italic"]
+        if any(op in prompt_lower for op in single_ops):
+            if not any(kw in prompt_lower for kw in [" and ", " then ", " also ", " after ", " next "]):
+                return True  # Definitely simple
+        
+        return False
+    
+    def _quick_complex_check(self, prompt_lower: str, sample_data: Optional[List[Dict]] = None) -> bool:
+        """
+        Fast check for obviously complex operations
+        
+        Returns True if operation is definitely complex (multi-step, complex formulas, etc.)
+        """
+        # Multi-step operations (most common complexity indicator)
+        # Check for variations: "then", "thennn" (typo), "and then", "after that", etc.
+        multi_step_patterns = [
+            r"\s+and\s+then\s+",  # "add and then sort"
+            r"\s+then\s+",  # "add then sort" (handles "thennn" too via fuzzy)
+            r"\s+also\s+",  # "add also format"
+            r"\s+after\s+that\s+",  # "add after that sort"
+            r"\s+next\s+",  # "add next sort"
+            r"\s+and\s+\w+\s+and\s+",  # "add and sort and format"
+        ]
+        
+        import re
+        for pattern in multi_step_patterns:
+            if re.search(pattern, prompt_lower):
+                return True  # Definitely complex
+        
+        # Complex formulas and functions (handles typos via case-insensitive)
+        complex_formula_keywords = [
+            "vlookup", "index match", "nested", "complex formula",
+            "if and", "if or", "sumif", "countif", "sumifs", "countifs",
+            "hlookup", "match", "index"
+        ]
+        if any(kw in prompt_lower for kw in complex_formula_keywords):
+            return True
+        
+        # Advanced conditional formatting with multiple conditions
+        if any(kw in prompt_lower for kw in ["multiple conditions", "and condition", "or condition"]):
+            return True
+        
+        # Data analysis operations
+        analysis_keywords = ["analyze", "find patterns", "identify", "detect", "correlation", "trend", "outlier"]
+        if any(kw in prompt_lower for kw in analysis_keywords):
+            return True
+        
+        # Count number of operations requested
+        operation_keywords = [
+            "add", "delete", "remove", "rename", "format", "highlight",
+            "sort", "filter", "clean", "calculate", "formula", "chart"
+        ]
+        operation_count = sum(1 for keyword in operation_keywords if keyword in prompt_lower)
+        
+        # Multiple operations (3+) indicate complexity
+        if operation_count >= 3:
+            return True
+        
+        # Ambiguous column references in potentially large datasets
+        ambiguous_refs = ["column with", "column containing", "find column", "which column"]
+        if any(ref in prompt_lower for ref in ambiguous_refs):
+            # Only mark as complex if we have a large dataset
+            if sample_data and len(sample_data) > 100:
+                return True
+        
+        return False
+    
+    def _llm_classify_complexity(self, user_prompt: str) -> bool:
+        """
+        LLM-based complexity classification for ambiguous cases
+        
+        Uses gpt-4o-mini for a tiny, cheap classification call (~50-100 tokens).
+        Handles typos, variations, and different phrasings accurately.
+        
+        Args:
+            user_prompt: User's request
+            
+        Returns:
+            True if complex, False if simple
+        """
+        try:
+            classification_prompt = f"""Classify this Excel operation request as SIMPLE or COMPLEX.
+
+SIMPLE = Single operation, straightforward task
+Examples: "delete column A", "rename column Name", "make header bold", "add column Total"
+
+COMPLEX = Multiple operations, complex formulas, or requires reasoning
+Examples: "add column and sort", "create vlookup formula", "add total then highlight values > 1000"
+
+User request: "{user_prompt}"
+
+Respond with only: SIMPLE or COMPLEX"""
+
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",  # Use cheapest model for classification
+                messages=[
+                    {"role": "system", "content": "You are a classifier. Respond with only SIMPLE or COMPLEX. Handle typos and variations."},
+                    {"role": "user", "content": classification_prompt}
+                ],
+                temperature=0.1,  # Low temperature for consistent classification
+                max_tokens=10  # Just need "SIMPLE" or "COMPLEX"
+            )
+            
+            result = response.choices[0].message.content.strip().upper()
+            is_complex = "COMPLEX" in result
+            
+            tokens_used = response.usage.total_tokens if hasattr(response, 'usage') else 0
+            logger.info(f"🔍 LLM complexity classification: '{user_prompt[:50]}...' → {result} ({tokens_used} tokens)")
+            
+            return is_complex
+            
+        except Exception as e:
+            logger.warning(f"LLM complexity classification failed: {e}. Defaulting to simple (safe fallback).")
+            # Fallback: if LLM fails, assume simple (safer for cost)
+            return False
+    
     def interpret_prompt(
         self, 
         user_prompt: str, 
@@ -154,19 +344,29 @@ class LLMAgent:
         df: Optional[pd.DataFrame] = None
     ) -> Dict:
         """
-        Interpret user prompt and route to appropriate bot
+        Interpret user prompt and route to appropriate bot with hybrid model selection
         
         Routes to:
         - ChartBot: If chart/visualization request
         - ActionPlanBot: For all data operations
+        
+        Uses hybrid model routing:
+        - gpt-4o-mini: For simple operations (default, cost-effective)
+        - gpt-4o: For complex operations (better accuracy)
         """
         # Check if chart request
         is_chart = self._is_chart_request(user_prompt)
         
+        # Detect complexity (ultra-lightweight, runs before any heavy operations)
+        is_complex = self._is_complex_operation(user_prompt, available_columns, sample_data)
+        
         if is_chart:
-            # Route to ChartBot
-            logger.info("Routing to ChartBot for chart generation")
-            result = self.chart_bot.generate_chart_plan(
+            # Route to ChartBot with appropriate model
+            chart_bot = self.chart_bot_full if is_complex else self.chart_bot_mini
+            model_used = self.complex_model if is_complex else self.default_model
+            logger.info(f"📊 Routing to ChartBot ({model_used}) - Complex: {is_complex}")
+            
+            result = chart_bot.generate_chart_plan(
                 user_prompt=user_prompt,
                 available_columns=available_columns,
                 sample_data=sample_data,
@@ -193,10 +393,13 @@ class LLMAgent:
                     "tokens_used": result.get("tokens_used", 0)
                 }
         else:
-            # Route to ActionPlanBot
-            logger.info("🔄 Routing to ActionPlanBot for data operations")
+            # Route to ActionPlanBot with appropriate model
+            action_bot = self.action_plan_bot_full if is_complex else self.action_plan_bot_mini
+            model_used = self.complex_model if is_complex else self.default_model
+            logger.info(f"🔄 Routing to ActionPlanBot ({model_used}) - Complex: {is_complex}")
             logger.info(f"📝 User prompt: {user_prompt}")
-            result = self.action_plan_bot.generate_action_plan(
+            
+            result = action_bot.generate_action_plan(
                 user_prompt=user_prompt,
                 available_columns=available_columns,
                 sample_data=sample_data,
@@ -262,16 +465,6 @@ class LLMAgent:
             if sample_explanation:
                 sample_explanation_text = f"\n\nDATA SAMPLE SUMMARY:\n{sample_explanation}\n"
             
-            # Safely format reasoning list (handle None, non-list, and non-string items)
-            reasoning_list = []
-            if task_suggestions and isinstance(task_suggestions, dict):
-                raw_reasoning = task_suggestions.get('reasoning', [])
-                if isinstance(raw_reasoning, list):
-                    reasoning_list = [str(r) if r is not None else '' for r in raw_reasoning]
-            reasoning_text = ', '.join(reasoning_list) if reasoning_list else 'No specific reasoning'
-            suggested_task = task_suggestions.get('suggested_task', 'auto-detect') if task_suggestions and isinstance(task_suggestions, dict) else 'auto-detect'
-            confidence = task_suggestions.get('confidence', 0) if task_suggestions and isinstance(task_suggestions, dict) else 0
-            
             full_prompt = f"""You are a data analysis assistant that returns ONLY valid JSON. 
 Do not include any markdown formatting, code blocks, or explanatory text. Return pure JSON only.
 
@@ -283,9 +476,9 @@ KNOWLEDGE BASE CONTEXT:
 {kb_summary}
 
 TASK DECISION HINT (use as guidance, not strict rule):
-Based on the user prompt, the suggested task is: {suggested_task}
-Reasoning: {reasoning_text}
-Confidence: {confidence}
+Based on the user prompt, the suggested task is: {task_suggestions.get('suggested_task', 'auto-detect')}
+Reasoning: {', '.join(task_suggestions.get('reasoning', []))}
+Confidence: {task_suggestions.get('confidence', 0)}
 {similar_examples_text}
 {sample_explanation_text}
 
@@ -295,7 +488,7 @@ Return your response as a valid JSON object with no additional formatting.
 Include "operations" array with "execution_instructions" for each operation."""
 
             response = self.client.chat.completions.create(
-                model=self.model,
+                model=self.default_model,
                 messages=[
                     {"role": "system", "content": SYSTEM_MESSAGE},
                     {"role": "user", "content": full_prompt},

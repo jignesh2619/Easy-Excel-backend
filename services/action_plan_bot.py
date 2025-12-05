@@ -68,10 +68,6 @@ You MUST generate Python code for ALL operations. The backend executes your code
   "format": {
     "range": {"column": "ColumnName"},
     "bold": true
-  },
-  "rename_column": {
-    "old_name": "OldColumnName",
-    "new_name": "NewColumnName"
   }
 }
 
@@ -81,11 +77,6 @@ You MUST generate Python code for ALL operations. The backend executes your code
 3. Use .reset_index(drop=True) after operations that change rows
 4. Code must be self-executable (no external dependencies)
 5. Use available utilities: DateCleaner, TextCleaner, CurrencyCleaner
-6. NEVER use markdown formatting in data (no **text**, __text__, etc.)
-7. NEVER use .str.bold() or .str.italic() - these don't exist in pandas
-8. NEVER use 'bold' or 'italic' as variable names in Python code - this causes NameError
-9. For formatting (bold, italic, colors), use "format" or "conditional_format" JSON, NOT Python code
-10. NEVER generate Python code like: df['col'] = bold, df['col'] = italic, or any code referencing bold/italic variables
 
 **AVAILABLE IN EXECUTION CONTEXT:**
 - df: Current pandas DataFrame
@@ -164,70 +155,6 @@ Example 7: "Total of rows and columns" (user wants both row and column totals)
     "result_type": "dataframe"
   }]
 }
-
-Example 8: "Extract emails and phone numbers from entire sheet and put them in column B and C respectively"
-{
-  "operations": [{
-    "python_code": "import re; email_pattern = r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}'; phone_pattern = r'(?:\\+?1[-.]?)?\\(?([0-9]{3})\\)?[-.]?([0-9]{3})[-.]?([0-9]{4})'; all_emails = []; all_phones = []; [all_emails.extend(re.findall(email_pattern, str(val))) for col in df.columns for val in df[col].astype(str)]; [all_phones.extend(re.findall(phone_pattern, str(val))) for col in df.columns for val in df[col].astype(str)]; target_email_col = df.columns[1] if len(df.columns) > 1 else 'Email'; target_phone_col = df.columns[2] if len(df.columns) > 2 else 'Phone'; df[target_email_col] = ''; df[target_phone_col] = ''; [df.at.__setitem__((i, target_email_col), all_emails[i] if i < len(all_emails) else '') for i in range(len(df))]; [df.at.__setitem__((i, target_phone_col), all_phones[i] if i < len(all_phones) else '') for i in range(len(df))]",
-    "description": "Extract emails and phones from all columns and add to columns B and C",
-    "result_type": "dataframe"
-  }]
-}
-
-**CRITICAL FOR EXTRACTION OPERATIONS:**
-When extracting data (emails, phones, numbers, etc.) from multiple columns:
-1. Search ALL columns, not just one
-2. Use regex patterns to find matches
-3. Collect ALL matches from ALL columns first into lists
-4. Then assign to target columns (one per row)
-5. If user says "column B" or "column C", use the actual column name at that position: df.columns[1] for B, df.columns[2] for C
-6. If target columns don't exist, create them with empty strings first
-7. Assign values row by row using df.at[i, column_name] = value
-8. IMPORTANT: Make sure to actually assign values, not just create empty columns
-
-**CORRECT EMAIL/PHONE EXTRACTION PATTERN:**
-```python
-import re
-email_pattern = r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}'
-phone_pattern = r'(?:\\+?1[-.]?)?\\(?([0-9]{3})\\)?[-.]?([0-9]{3})[-.]?([0-9]{4})'
-
-# Step 1: Collect all emails and phones from ALL columns
-all_emails = []
-all_phones = []
-for col in df.columns:
-    for val in df[col].astype(str):
-        all_emails.extend(re.findall(email_pattern, val))
-        all_phones.extend(re.findall(phone_pattern, val))
-
-# Step 2: Get target column names (B = index 1, C = index 2)
-target_email_col = df.columns[1] if len(df.columns) > 1 else 'Email'
-target_phone_col = df.columns[2] if len(df.columns) > 2 else 'Phone'
-
-# Step 3: Create columns if they don't exist, initialize with empty strings
-if target_email_col not in df.columns:
-    df[target_email_col] = ''
-if target_phone_col not in df.columns:
-    df[target_phone_col] = ''
-
-# Step 4: Assign extracted values row by row (CRITICAL: Actually assign, don't just create columns)
-# Use a loop to assign values - list comprehensions with side effects are unreliable
-for i in range(len(df)):
-    if i < len(all_emails):
-        df.at[i, target_email_col] = all_emails[i]
-    else:
-        df.at[i, target_email_col] = ''
-    if i < len(all_phones):
-        df.at[i, target_phone_col] = all_phones[i]
-    else:
-        df.at[i, target_phone_col] = ''
-```
-
-**COMMON MISTAKES TO AVOID:**
-- Don't just create empty columns - you must assign values
-- Don't search only one column - search ALL columns
-- Don't forget to import re for regex
-- Don't use df.loc for single cell assignment - use df.at[i, col] = value
-- Make sure to handle cases where extracted list is shorter than dataframe rows
 
 **COLUMN REFERENCE HANDLING:**
 When user mentions "column C", "column A", etc.:
@@ -554,75 +481,26 @@ If column name is "Id" or "ColumnB" or similar:
 9. When using add_row, only specify columns you need in data - other columns will be empty
 10. Calculate values in operations first, then reference them in add_row.data using expressions
 11. NEVER assign a list of values directly to df[column] or df.loc - always use pd.concat with DataFrame
-
-═══════════════════════════════════════════════════════════════════════════════
-🎨 FORMATTING OPERATIONS - CRITICAL RULES
-═══════════════════════════════════════════════════════════════════════════════
-
-**NEVER USE MARKDOWN IN DATA:**
-- DO NOT add **text** or __text__ to cell values
-- DO NOT use markdown formatting in Python code
-- DO NOT modify cell text to include formatting characters
-- Cell values must be plain text only
-
-**FOR BOLD/ITALIC/COLORS - USE JSON FORMAT, NOT PYTHON CODE:**
-- ❌ WRONG: df['Column'].str.bold()  (doesn't exist - AttributeError)
-- ❌ WRONG: df['Column'] = bold  (variable 'bold' not defined - NameError)
-- ❌ WRONG: bold = True; df['Column'] = bold  (don't use bold as variable name)
-- ❌ WRONG: df['Column'] = '**' + df['Column'] + '**'  (markdown in data)
-- ✅ CORRECT: Use "format" JSON with "bold": true
-- ✅ CORRECT: Use "conditional_format" JSON for highlighting
-
-**FORMATTING EXAMPLES:**
-
-Example: "Make all text bold"
-{
-  "format": {
-    "range": {"column": "ColumnName"},
-    "bold": true
-  }
-}
-
-Example: "Highlight cells containing 'car detailing service'"
-{
-  "conditional_format": {
-    "format_type": "contains_text",
-    "config": {
-      "column": "ColumnName",
-      "text": "car detailing service",
-      "bg_color": "#FFFF00"
-    }
-  }
-}
-
-Example: "Rename all columns to descriptive names"
-{
-  "rename_column": {
-    "columns": [
-      {"old_name": "hfpxzc href", "new_name": "Business URL"},
-      {"old_name": "qBF1Pd", "new_name": "Business Name"}
-    ]
-  }
-}
 """
 
 
 class ActionPlanBot:
     """Bot for generating data operation action plans"""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
         """
         Initialize Action Plan Bot
         
         Args:
             api_key: OpenAI API key
-            model: Model to use
+            model: Model to use (default: gpt-4o-mini for cost savings)
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OpenAI API key not found")
         
-        self.model = os.getenv("OPENAI_MODEL", model)
+        # Use provided model directly (no env var override) since LLMAgent handles routing
+        self.model = model
         self.client = OpenAI(api_key=self.api_key)
         
         # Initialize feedback learner
@@ -657,9 +535,8 @@ class ActionPlanBot:
             Action plan dict with operations
         """
         try:
-            # Build prompt WITHOUT the massive SYSTEM_PROMPT (we have our own ACTION_PLAN_SYSTEM_PROMPT)
-            # Only get the essential context (columns, sample data) without the redundant system instructions
-            prompt = self._build_lightweight_prompt(user_prompt, available_columns, sample_data)
+            # Build prompt
+            prompt = get_prompt_with_context(user_prompt, available_columns, sample_data)
             
             # Get knowledge base summary
             kb_summary = get_knowledge_base_summary()
@@ -703,15 +580,6 @@ class ActionPlanBot:
             # Get column mapping info (Excel letters → actual column names)
             column_mapping = get_column_mapping_info(available_columns)
             
-            # Safely format reasoning list (handle None, non-list, and non-string items)
-            reasoning_list = []
-            if task_suggestions and isinstance(task_suggestions, dict):
-                raw_reasoning = task_suggestions.get('reasoning', [])
-                if isinstance(raw_reasoning, list):
-                    reasoning_list = [str(r) if r is not None else '' for r in raw_reasoning]
-            reasoning_text = ', '.join(reasoning_list) if reasoning_list else 'No specific reasoning'
-            suggested_task = task_suggestions.get('suggested_task', 'auto-detect') if task_suggestions and isinstance(task_suggestions, dict) else 'auto-detect'
-            
             full_prompt = f"""You are a data operations assistant. Return ONLY valid JSON.
 
 CRITICAL: Generate Python code for ALL operations. The backend will execute your code directly.
@@ -720,8 +588,8 @@ KNOWLEDGE BASE CONTEXT:
 {kb_summary}
 
 TASK DECISION HINT:
-Suggested task: {suggested_task}
-Reasoning: {reasoning_text}
+Suggested task: {task_suggestions.get('suggested_task', 'auto-detect')}
+Reasoning: {', '.join(task_suggestions.get('reasoning', []))}
 {column_mapping}
 {similar_examples_text}
 {sample_explanation_text}
@@ -798,119 +666,6 @@ Include "operations" array with "python_code" for each operation.
         except Exception as e:
             logger.error(f"ActionPlanBot failed: {str(e)}")
             raise RuntimeError(f"Action plan generation failed: {str(e)}")
-    
-    def _build_lightweight_prompt(self, user_prompt: str, available_columns: List[str], sample_data: Optional[List[Dict]] = None) -> str:
-        """
-        Build a lightweight prompt with essential accuracy-critical instructions.
-        Includes column mapping rules without the massive redundant SYSTEM_PROMPT.
-        
-        Args:
-            user_prompt: User's request
-            available_columns: Available column names
-            sample_data: Sample data rows
-            
-        Returns:
-            Lightweight prompt with essential context and accuracy instructions
-        """
-        # Create column info with positional references (CRITICAL for accuracy)
-        columns_with_indices = []
-        for idx, col in enumerate(available_columns):
-            col_label = str(col)
-            position_name = ""
-            if idx == 0:
-                position_name = " (first column)"
-            elif idx == 1:
-                position_name = " (second column)"
-            elif idx == 2:
-                position_name = " (third column)"
-            elif idx == len(available_columns) - 1:
-                position_name = " (last column)"
-            columns_with_indices.append(f"{idx}: {col_label}{position_name}")
-        
-        columns_info = "Available columns (with indices for positional references):\n" + "\n".join(columns_with_indices)
-        columns_list = f"Column list: {', '.join(str(col) for col in available_columns)}"
-        
-        # Build Excel column letter mapping (CRITICAL for accuracy)
-        excel_mapping = []
-        for idx, col_name in enumerate(available_columns[:26]):  # First 26 columns (A-Z)
-            excel_letter = chr(ord('A') + idx)
-            excel_mapping.append(f"  Column {excel_letter} (index {idx}): '{col_name}'")
-        excel_mapping_text = "\n".join(excel_mapping) if excel_mapping else ""
-        
-        # Add sample data if provided (ESSENTIAL for understanding data structure and content)
-        sample_data_text = ""
-        if sample_data:
-            total_rows = len(sample_data)
-            sample_data_text = f"\n📊 REPRESENTATIVE SAMPLE ({total_rows} rows, {len(available_columns)} columns):\n"
-            sample_data_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            sample_data_text += "IMPORTANT: Search through ALL rows below to find which columns contain specific text/values.\n"
-            sample_data_text += "Use this data to identify actual column names when user mentions content (e.g., 'phone column').\n"
-            sample_data_text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            
-            for row_idx, row in enumerate(sample_data, 1):
-                sample_data_text += f"ROW {row_idx}:\n"
-                for col in available_columns:
-                    col_label = str(col)
-                    value = row.get(col, row.get(col_label, ""))
-                    # Truncate long values
-                    if isinstance(value, str) and len(value) > 300:
-                        value = value[:300] + "..."
-                    sample_data_text += f"  [{col_label}]: {value}\n"
-                sample_data_text += "\n"
-        
-        # Build lightweight prompt with CRITICAL accuracy instructions
-        prompt = f"""USER REQUEST:
-{user_prompt}
-
-═══════════════════════════════════════════════════════════════════════════════
-📊 AVAILABLE COLUMNS (with positional indices):
-═══════════════════════════════════════════════════════════════════════════════
-{columns_info}
-
-Column List: {columns_list}
-
-{f'📋 EXCEL COLUMN LETTER MAPPING:\n{excel_mapping_text}\n' if excel_mapping_text else ''}
-{sample_data_text}
-═══════════════════════════════════════════════════════════════════════════════
-🎯 CRITICAL ACCURACY RULES (MANDATORY):
-═══════════════════════════════════════════════════════════════════════════════
-
-**POSITIONAL REFERENCES:**
-- "first column" = index 0 = {available_columns[0] if available_columns else 'N/A'}
-- "second column" = index 1 = {available_columns[1] if len(available_columns) > 1 else 'N/A'}
-- "third column" = index 2 = {available_columns[2] if len(available_columns) > 2 else 'N/A'}
-- "last column" = index {len(available_columns) - 1 if available_columns else 0} = {available_columns[-1] if available_columns else 'N/A'}
-
-**EXCEL COLUMN LETTERS:**
-- Column A = index 0 = {available_columns[0] if available_columns else 'N/A'}
-- Column B = index 1 = {available_columns[1] if len(available_columns) > 1 else 'N/A'}
-- Column C = index 2 = {available_columns[2] if len(available_columns) > 2 else 'N/A'}
-- When user says "column A", "column B", etc., FIRST check if a column with that name exists
-- If NO column named "A" exists, interpret as Excel letter and use the column at that index
-
-**TEXT-BASED SEARCH:**
-- If user says "highlight cells with X" or "column with X":
-  → Search through ALL {len(sample_data) if sample_data else 0} sample rows above
-  → Find which column(s) contain the text "X"
-  → Use the ACTUAL column name from available_columns list
-  → Example: If "X" appears in column "{available_columns[0] if available_columns else 'ColumnName'}", use "{available_columns[0] if available_columns else 'ColumnName'}" in your JSON
-
-**COLUMN NAME MATCHING:**
-- Column names are case-sensitive: "{available_columns[0] if available_columns else 'Name'}" ≠ "{available_columns[0].lower() if available_columns else 'name'}"
-- Use EXACT column names from available_columns list in your Python code
-- NEVER use positional references ("2nd", "second") or Excel letters ("C", "column C") in JSON
-- ALWAYS use actual column names: {', '.join(str(col) for col in available_columns[:3]) if len(available_columns) >= 3 else ', '.join(str(col) for col in available_columns)}
-
-**EXAMPLES:**
-- User: "delete second column" → Use column at index 1: "{available_columns[1] if len(available_columns) > 1 else 'ColumnName'}"
-- User: "remove column C" → Check if column named "C" exists, if not use index 2: "{available_columns[2] if len(available_columns) > 2 else 'ColumnName'}"
-- User: "highlight cells with 'text'" → Search sample data, find column containing "text", use that actual column name
-
-═══════════════════════════════════════════════════════════════════════════════
-
-Return ONLY valid JSON with actual column names from the list above. NO markdown, NO explanations."""
-        
-        return prompt
     
     def _normalize_action_plan(self, action_plan: Dict) -> Dict:
         """Normalize and validate action plan structure"""
