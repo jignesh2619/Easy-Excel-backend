@@ -199,7 +199,6 @@ class ChartBot:
             try:
                 chart_config = json.loads(content)
             except json.JSONDecodeError:
-                import re
                 json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content, re.DOTALL)
                 if json_match:
                     chart_config = json.loads(json_match.group())
