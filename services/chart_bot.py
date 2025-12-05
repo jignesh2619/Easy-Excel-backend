@@ -25,140 +25,24 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-CHART_BOT_SYSTEM_PROMPT = """You are a Chart Generation Specialist for Excel automation.
+CHART_BOT_SYSTEM_PROMPT = """You are a Chart Generation Specialist. Generate chart configurations as JSON.
 
-Your ONLY job: Generate chart configurations for visualization requests.
+RULES:
+- Generic requests ("dashboard", "graphs", "visualize"): Return {"charts": [...]} with 2-4 charts
+- Specific requests: Return single chart config
+- Use ACTUAL column names from available_columns (not Excel letters)
+- Chart types: bar (categories), line (time), pie (proportions), scatter (numeric pairs), histogram (distribution)
 
-═══════════════════════════════════════════════════════════════════════════════
-📊 CHART GENERATION RULES
-═══════════════════════════════════════════════════════════════════════════════
+OUTPUT FORMATS:
+Single: {"chart_type": "bar", "x_column": "Name", "y_column": "Value", "title": "Title", "description": "Desc"}
+Multiple: {"charts": [{"chart_type": "bar", "x_column": "X", "y_column": "Y", "title": "T", "description": "D"}, ...]}
 
-**HANDLING GENERIC REQUESTS:**
-When user says "create graphs", "create dashboard", "visualize data", "show charts", etc.:
-1. Analyze the provided data analysis summary
-2. Select the BEST chart configurations from suggested_charts
-3. For dashboards: Generate MULTIPLE chart configurations (2-4 charts)
-4. Choose charts that provide different insights (bar, line, pie, histogram, scatter)
-5. Prioritize charts that make sense for the data structure
+EXAMPLES:
+"bar chart of revenue by country" → {"chart_type": "bar", "x_column": "Country", "y_column": "Revenue", "title": "Revenue by Country", "description": "Bar chart"}
+"create dashboard" → {"charts": [{"chart_type": "bar", ...}, {"chart_type": "line", ...}]}
 
-**OUTPUT FORMAT FOR GENERIC REQUESTS (MULTIPLE CHARTS):**
-
-{
-  "charts": [
-    {
-      "chart_type": "bar",
-      "x_column": "ColumnName",
-      "y_column": "ColumnName",
-      "title": "Chart Title",
-      "description": "Chart description"
-    },
-    {
-      "chart_type": "line",
-      "x_column": "ColumnName",
-      "y_column": "ColumnName",
-      "title": "Chart Title",
-      "description": "Chart description"
-    }
-  ]
-}
-
-**OUTPUT FORMAT FOR SPECIFIC REQUESTS (SINGLE CHART):**
-
-{
-  "chart_type": "bar|line|pie|histogram|scatter",
-  "x_column": "ColumnName",
-  "y_column": "ColumnName",
-  "title": "Chart Title",
-  "description": "Chart description"
-}
-
-**CHART TYPE SELECTION:**
-- bar: Categorical comparison (e.g., revenue by country)
-- line: Time series data (e.g., revenue over time)
-- pie: Proportions/percentages (e.g., market share)
-- histogram: Distribution of numeric data (e.g., age distribution)
-- scatter: Relationship between two numeric variables (e.g., sales vs profit)
-
-**COLUMN IDENTIFICATION:**
-1. Analyze the dataset provided
-2. Use the data analysis summary to understand column types
-3. For generic requests: Use suggested_charts from analysis
-4. For specific requests: Identify X and Y columns based on user request
-5. Use ACTUAL column names from available_columns
-6. For pie charts: X = categories, Y = values
-7. For scatter: X and Y = both numeric columns
-8. For histogram: X = numeric column (Y is auto-generated)
-
-**EXAMPLES:**
-
-Example 1: "Create a bar chart of revenue by country"
-{
-  "chart_type": "bar",
-  "x_column": "Country",
-  "y_column": "Revenue",
-  "title": "Revenue by Country",
-  "description": "Bar chart showing revenue for each country"
-}
-
-Example 2: "Show revenue over time"
-{
-  "chart_type": "line",
-  "x_column": "Date",
-  "y_column": "Revenue",
-  "title": "Revenue Over Time",
-  "description": "Line chart showing revenue trends"
-}
-
-Example 3: "Pie chart of market share"
-{
-  "chart_type": "pie",
-  "x_column": "Category",
-  "y_column": "MarketShare",
-  "title": "Market Share by Category",
-  "description": "Pie chart showing market share distribution"
-}
-
-Example 4: "Histogram of ages"
-{
-  "chart_type": "histogram",
-  "x_column": "Age",
-  "y_column": null,
-  "title": "Age Distribution",
-  "description": "Histogram showing age distribution"
-}
-
-Example 5: "Scatter plot of sales vs profit"
-{
-  "chart_type": "scatter",
-  "x_column": "Sales",
-  "y_column": "Profit",
-  "title": "Sales vs Profit",
-  "description": "Scatter plot showing relationship between sales and profit"
-}
-
-**COLUMN REFERENCE HANDLING:**
-When user mentions "column C", "column A", etc.:
-1. FIRST check if there's a column named "C" or "A" (exact name match)
-2. If NO column with that name exists, interpret as Excel column letter:
-   - Column A = 1st column (index 0)
-   - Column B = 2nd column (index 1)
-   - Column C = 3rd column (index 2)
-   - etc.
-3. Use the ACTUAL column name from available_columns list in your response
-4. Example: User says "chart of column C"
-   - Check: Is there a column named "C"? If yes, use it.
-   - If no: Column C = index 2, get actual name: available_columns[2]
-   - Return: "x_column": "ActualColumnName"  # NOT "C"
-
-**CRITICAL RULES:**
-1. For generic requests: Return MULTIPLE charts in "charts" array
-2. For specific requests: Return SINGLE chart configuration
-3. ALWAYS use actual column names from dataset (not Excel letters)
-4. Analyze dataset to identify appropriate columns
-5. Choose chart type based on data and user request
-6. Provide clear, descriptive titles
-7. Return ONLY valid JSON (no markdown, no explanations)
-8. If columns not clear, make best inference from dataset
+COLUMN REFERENCE: "column C" → check if column "C" exists, else use available_columns[2]
+Return ONLY valid JSON, no markdown or explanations.
 """
 
 
@@ -334,36 +218,28 @@ class ChartBot:
         
         sample_text = ""
         if sample_data:
-            sample_text = "\n\nSample data (first 5 rows):\n"
-            for i, row in enumerate(sample_data[:5], 1):
-                sample_text += f"Row {i}: {row}\n"
+            # Limit to 3 rows to reduce tokens
+            sample_text = "\n\nSample data (first 3 rows):\n"
+            for i, row in enumerate(sample_data[:3], 1):
+                # Only include key columns to reduce token usage
+                sample_row = {k: v for k, v in list(row.items())[:5]}  # Max 5 columns per row
+                sample_text += f"Row {i}: {sample_row}\n"
         
-        # Add data analysis for generic requests
+        # Add data analysis for generic requests (condensed to reduce tokens)
         analysis_text = ""
         if is_generic and data_analysis:
-            analysis_text = f"""
-
-═══════════════════════════════════════════════════════════════════════════════
-📊 DATA ANALYSIS FOR CHART SUGGESTIONS
-═══════════════════════════════════════════════════════════════════════════════
-
-Column Types:
-- Numeric columns: {', '.join(data_analysis.get('numeric_columns', [])) if data_analysis.get('numeric_columns') else 'None'}
-- Categorical columns: {', '.join(data_analysis.get('categorical_columns', [])) if data_analysis.get('categorical_columns') else 'None'}
-- Datetime columns: {', '.join(data_analysis.get('datetime_columns', [])) if data_analysis.get('datetime_columns') else 'None'}
-
-Suggested Chart Configurations:
-"""
-            for i, chart in enumerate(data_analysis.get('suggested_charts', [])[:5], 1):
-                analysis_text += f"""
-Chart {i}:
-- Type: {chart['chart_type']}
-- X-axis: {chart['x_column']}
-- Y-axis: {chart.get('y_column', 'N/A')}
-- Title: {chart['title']}
-- Description: {chart['description']}
-"""
-            analysis_text += "\nUse these suggestions to create a comprehensive dashboard with 2-4 charts.\n"
+            numeric = ', '.join(data_analysis.get('numeric_columns', [])[:5]) or 'None'
+            categorical = ', '.join(data_analysis.get('categorical_columns', [])[:5]) or 'None'
+            datetime_cols = ', '.join(data_analysis.get('datetime_columns', [])[:3]) or 'None'
+            
+            analysis_text = f"\nDATA ANALYSIS:\nNumeric: {numeric}\nCategorical: {categorical}\nDatetime: {datetime_cols}\n"
+            
+            # Only include top 3 suggested charts to reduce tokens
+            suggested = data_analysis.get('suggested_charts', [])[:3]
+            if suggested:
+                analysis_text += "Suggested charts:\n"
+                for i, chart in enumerate(suggested, 1):
+                    analysis_text += f"{i}. {chart.get('chart_type', 'unknown')}: {chart.get('x_column', 'X')} vs {chart.get('y_column', 'Y')}\n"
         
         kb_context = ""
         if kb_summary:
@@ -373,22 +249,25 @@ Chart {i}:
         if similar_examples:
             examples_context = f"\n{similar_examples}\n"
         
-        return f"""You are a chart generation assistant. Return ONLY valid JSON.
-
-{analysis_text}{kb_context}{examples_context}
-{column_mapping}
-
-User Request: {user_prompt}
-
-{columns_info}
-{sample_text}
-
-Analyze the request and generate chart configuration.
-{"For generic requests, return MULTIPLE charts in a 'charts' array. " if is_generic else ""}
-Identify the appropriate chart type and columns from the dataset.
-Use actual column names from the available columns list (not Excel letters).
-Return ONLY valid JSON.
-"""
+        # Build concise prompt to reduce tokens
+        prompt_parts = []
+        if analysis_text:
+            prompt_parts.append(analysis_text.strip())
+        if kb_context:
+            prompt_parts.append(kb_context.strip())
+        if examples_context:
+            prompt_parts.append(examples_context.strip())
+        if column_mapping:
+            prompt_parts.append(column_mapping.strip())
+        
+        prompt_parts.append(f"User Request: {user_prompt}")
+        prompt_parts.append(columns_info)
+        if sample_text:
+            prompt_parts.append(sample_text.strip())
+        
+        prompt_parts.append(f"{'Generate MULTIPLE charts in a charts array. ' if is_generic else 'Generate SINGLE chart config. '}Use actual column names. Return ONLY valid JSON.")
+        
+        return "\n\n".join(prompt_parts)
     
     def _validate_chart_config(self, chart_config: Dict, available_columns: List[str]) -> Dict:
         """Validate and fix chart configuration"""

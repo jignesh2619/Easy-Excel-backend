@@ -87,8 +87,15 @@ class ChartExecutor:
             
             logger.info(f"ChartBuilder returned path: {chart_path}")
             self.chart_paths.append(chart_path)
-            self.execution_log.append(f"✓ Generated {chart_type} chart: {description}")
-            logger.info(f"Generated chart: {description} -> {chart_path}")
+            
+            # Create descriptive log message with column details
+            if x_column and y_column:
+                log_msg = f"✓ Generated {chart_type} chart: {title or f'{x_column} vs {y_column}'}"
+            else:
+                log_msg = f"✓ Generated {chart_type} chart: {description or title or 'Chart'}"
+            
+            self.execution_log.append(log_msg)
+            logger.info(f"Generated chart: {log_msg} -> {chart_path}")
             
             return chart_path
             

@@ -12,7 +12,6 @@ from pathlib import Path
 import re
 import xlsxwriter
 from datetime import datetime
-import logging
 from services.formula_engine import FormulaEngine
 # New modular imports
 from services.excel_writer.write_xlsx import XlsxWriter
@@ -23,8 +22,6 @@ from services.cleaning.text import TextCleaner
 from services.dflib import default_engine, DataFrameWrapper
 from services.python_executor import PythonExecutor
 from services.chart_executor import ChartExecutor
-
-logger = logging.getLogger(__name__)
 
 
 class ExcelProcessor:
@@ -233,24 +230,22 @@ class ExcelProcessor:
                         loaded_data = pd.read_excel(
                             self.file_path, 
                             sheet_name=0,
-                            engine='openpyxl' if file_ext == '.xlsx' else None,
-                            keep_default_na=False  # Preserve empty cells as empty strings
+                            engine='openpyxl' if file_ext == '.xlsx' else None
                         )
                     else:
                         loaded_data = pd.read_excel(
                             self.file_path, 
                             sheet_name=sheet_name,
-                            engine='openpyxl' if file_ext == '.xlsx' else None,
-                            keep_default_na=False  # Preserve empty cells as empty strings
+                            engine='openpyxl' if file_ext == '.xlsx' else None
                         )
                 except Exception as e:
                     # Try without engine specification for .xls files
                     if file_ext == '.xls':
                         try:
                             if sheet_name is None:
-                                loaded_data = pd.read_excel(self.file_path, sheet_name=0, keep_default_na=False)
+                                loaded_data = pd.read_excel(self.file_path, sheet_name=0)
                             else:
-                                loaded_data = pd.read_excel(self.file_path, sheet_name=sheet_name, keep_default_na=False)
+                                loaded_data = pd.read_excel(self.file_path, sheet_name=sheet_name)
                         except Exception as e2:
                             raise RuntimeError(f"Failed to read Excel file. The file may be corrupted. Error: {str(e2)}")
                     else:
@@ -272,54 +267,8 @@ class ExcelProcessor:
             if not isinstance(self.df, pd.DataFrame):
                 raise ValueError(f"Expected DataFrame, got {type(self.df)}")
             
-            # Clean cell values: Remove ANSI escape codes and rich text formatting metadata
-            # Performance optimization: Combine all cleaning operations into single pass
-            # Pattern 1: [48;5;10mText[0m (ANSI escape codes)
-            # Pattern 2: ||48,5,10mText||0m (old format with pipes)
-            ansi_pattern = re.compile(r'\[48;5;10m(.*?)\[0m', re.DOTALL)
-            old_format_pattern = re.compile(r'\|\|48,5,10m(.*?)\|\|0m', re.DOTALL)
-            general_ansi_pattern = re.compile(r'\[\d+(?:;\d+)*m', re.DOTALL)
-            
-            def clean_cell_value(x):
-                """Clean cell value in single pass - removes all ANSI codes and formatting metadata"""
-                if pd.notna(x) and isinstance(x, str):
-                    # Apply all cleaning patterns in sequence
-                    x = ansi_pattern.sub(r'\1', x)
-                    x = old_format_pattern.sub(r'\1', x)
-                    x = general_ansi_pattern.sub('', x)
-                return x
-            
-            # Store cleaning function for on-demand use
-            self._clean_cell_value = clean_cell_value
-            
-            # Performance optimization: For large datasets (>1000 rows), only clean first 1000 rows initially
-            # Remaining rows will be cleaned on-demand during processing operations to ensure accuracy
-            for col in self.df.columns:
-                if self.df[col].dtype == 'object':  # Only process string columns
-                    if len(self.df) > 1000:
-                        # Large dataset: clean first 1000 rows initially for preview
-                        self.df[col] = self.df[col].astype(str)
-                        self.df.loc[:999, col] = self.df.loc[:999, col].apply(clean_cell_value)
-                        # Mark column as partially cleaned (for on-demand cleaning)
-                        if not hasattr(self, '_partially_cleaned_cols'):
-                            self._partially_cleaned_cols = set()
-                        self._partially_cleaned_cols.add(col)
-                    else:
-                        # Small dataset: clean all rows immediately
-                        self.df[col] = self.df[col].astype(str).apply(clean_cell_value)
-            
-            # Keep original copy (lazy copy for large datasets to save memory/CPU)
-            # For undo/rollback operations, we need a copy but can defer for very large files
-            # Accuracy: Ensure we can always rollback if needed, but optimize for large files
-            if len(self.df) > 5000:
-                # Very large dataset: Use shallow copy initially (saves memory/CPU)
-                # Will create deep copy on-demand if actual modifications are needed
-                self.original_df = self.df.copy(deep=False)  # Shallow copy - shares data but not index
-                self._needs_deep_copy = True  # Flag to create deep copy if needed
-            else:
-                # Small/medium dataset: Copy immediately (full deep copy for safety)
-                self.original_df = self.df.copy()
-                self._needs_deep_copy = False
+            # Keep original copy
+            self.original_df = self.df.copy()
             self.summary.append(f"Loaded {len(self.df)} rows and {len(self.df.columns)} columns")
             
             # Generate summary using new summarizer module
@@ -358,6 +307,9 @@ class ExcelProcessor:
         try:
             # Handle chart requests (single or multiple)
             if task == "chart" or "chart_config" in action_plan or "chart_configs" in action_plan:
+                import logging
+                logger = logging.getLogger(__name__)
+                
                 chart_executor = ChartExecutor(self.df)
                 
                 # Check for multiple charts (generic requests like "create dashboard")
@@ -368,7 +320,23 @@ class ExcelProcessor:
                         try:
                             chart_paths = chart_executor.execute_multiple(chart_configs)
                             self.summary.extend(chart_executor.get_execution_log())
-                            self.summary.append(f"Generated {len(chart_paths)} charts for dashboard")
+                            
+                            # Create descriptive summary with chart details
+                            chart_details = []
+                            for config in chart_configs:
+                                chart_type = config.get("chart_type", "chart")
+                                x_col = config.get("x_column", "")
+                                y_col = config.get("y_column", "")
+                                if x_col and y_col:
+                                    chart_details.append(f"{chart_type} chart ({x_col} vs {y_col})")
+                                else:
+                                    chart_details.append(f"{chart_type} chart")
+                            
+                            if chart_details:
+                                self.summary.append(f"Generated dashboard with {len(chart_paths)} charts: {', '.join(chart_details)}")
+                            else:
+                                self.summary.append(f"Generated {len(chart_paths)} charts for dashboard")
+                            
                             # Use first chart path for compatibility (or could return array)
                             chart_path = chart_paths[0] if chart_paths else None
                         except Exception as e:
@@ -385,7 +353,15 @@ class ExcelProcessor:
                             chart_path = chart_executor.execute(chart_config)
                             self.summary.extend(chart_executor.get_execution_log())
                             chart_type = chart_config.get("chart_type", "chart")
-                            self.summary.append(f"Generated {chart_type} chart")
+                            x_column = chart_config.get("x_column", "")
+                            y_column = chart_config.get("y_column", "")
+                            title = chart_config.get("title", "")
+                            
+                            # Create descriptive summary message
+                            if x_column and y_column:
+                                self.summary.append(f"Generated {chart_type} chart: {title or f'{x_column} vs {y_column}'}")
+                            else:
+                                self.summary.append(f"Generated {chart_type} chart")
                         except Exception as e:
                             logger.error(f"Failed to generate single chart: {str(e)}", exc_info=True)
                             raise RuntimeError(f"Chart generation failed: {str(e)}")
@@ -396,33 +372,10 @@ class ExcelProcessor:
             # Handle data operations (Python code execution)
             operations = action_plan.get("operations", [])
             if operations:
-                initial_df_shape = self.df.shape
-                initial_columns = set(self.df.columns)
-                
                 python_executor = PythonExecutor(self.df)
                 execution_result = python_executor.execute_multiple(operations)
                 self.df = python_executor.get_dataframe()
                 self.summary.extend(python_executor.get_execution_log())
-                
-                # Validate that operations actually produced changes
-                final_df_shape = self.df.shape
-                final_columns = set(self.df.columns)
-                
-                # Check if operations actually modified the dataframe
-                operations_changed_data = (
-                    initial_df_shape != final_df_shape or
-                    initial_columns != final_columns or
-                    not self.df.equals(self.df)  # Check if any values changed
-                )
-                
-                # If operations were supposed to modify data but didn't, log warning
-                if not operations_changed_data and any(op.get("result_type") == "dataframe" for op in operations):
-                    logger.warning("Operations executed but dataframe appears unchanged. This may indicate the operations didn't work as expected.")
-                    # Check if this was an extraction operation
-                    extraction_keywords = ["extract", "email", "phone", "number", "find", "search"]
-                    if any(keyword in str(op.get("description", "")).lower() for op in operations for keyword in extraction_keywords):
-                        logger.error("Extraction operation may have failed - no data was extracted. Check if the extraction pattern matched any data.")
-                        self.summary.append("⚠️ Warning: Extraction operation may not have found any matches. Please verify the data contains the expected patterns.")
                 
                 # Store formula result if present
                 if execution_result.get("results"):
@@ -446,17 +399,6 @@ class ExcelProcessor:
             # Handle formatting (still needs special handling)
             if "format" in action_plan:
                 self._execute_format(action_plan)
-            
-            # Handle rename column
-            if "rename_column" in action_plan:
-                self._execute_rename_column(action_plan)
-            
-            # Handle add/delete column
-            if "add_column" in action_plan:
-                self._execute_add_column(action_plan)
-            
-            if "delete_column" in action_plan:
-                self._execute_delete_column(action_plan)
             
             # Extract chart_type for response
             chart_type_for_response = "none"
@@ -527,16 +469,6 @@ class ExcelProcessor:
                         column = matching_column
                 
                 if column and column in self.df.columns:
-                    # Accuracy: Clean remaining rows on-demand if this column was partially cleaned
-                    if hasattr(self, '_partially_cleaned_cols') and column in self._partially_cleaned_cols:
-                        # Clean remaining rows (>1000) to ensure accuracy during processing
-                        if len(self.df) > 1000 and self.df[column].dtype == 'object':
-                            remaining_rows = self.df.loc[1000:, column]
-                            if len(remaining_rows) > 0:
-                                self.df.loc[1000:, column] = remaining_rows.apply(self._clean_cell_value)
-                                # Mark as fully cleaned
-                                self._partially_cleaned_cols.discard(column)
-                    
                     # Get the character/pattern to remove or replace
                     char_to_remove = params.get("character") or params.get("pattern") or params.get("value") or params.get("old") or ""
                     # Get replacement value (empty string for "remove", space for "replace with space", or specified value)
@@ -565,24 +497,20 @@ class ExcelProcessor:
                         char_to_remove = "."
                     
                     if char_to_remove:
-                        # Always convert to string to ensure .str accessor works
-                        # Handle NaN/None values properly before string operations
-                        col_series = self.df[column].fillna('').astype(str)
-                        
                         if remove_from == "start":
                             # Remove/replace from beginning - handles multi-char patterns
                             if len(char_to_remove) > 1:
                                 # For multi-character patterns, use replace with count=1 and start check
-                                self.df[column] = col_series.apply(
+                                self.df[column] = self.df[column].astype(str).apply(
                                     lambda x: x[len(char_to_remove):] if x.startswith(char_to_remove) else x
-                                ) if replace_with == "" else col_series.apply(
+                                ) if replace_with == "" else self.df[column].astype(str).apply(
                                     lambda x: replace_with + x[len(char_to_remove):] if x.startswith(char_to_remove) else x
                                 )
                             else:
                                 if replace_with == "":
-                                    self.df[column] = col_series.astype(str).str.lstrip(char_to_remove)
+                                    self.df[column] = self.df[column].astype(str).str.lstrip(char_to_remove)
                                 else:
-                                    self.df[column] = col_series.apply(
+                                    self.df[column] = self.df[column].astype(str).apply(
                                         lambda x: replace_with + x.lstrip(char_to_remove) if x.startswith(char_to_remove) else x
                                     )
                             action = "Replaced" if replace_with != "" else "Removed"
@@ -591,18 +519,17 @@ class ExcelProcessor:
                             operation_executed = True
                         elif remove_from == "end":
                             # Remove/replace from end - handles multi-char patterns
-                            # Reuse col_series from above to avoid redundant .astype(str)
                             if len(char_to_remove) > 1:
-                                self.df[column] = col_series.apply(
+                                self.df[column] = self.df[column].astype(str).apply(
                                     lambda x: x[:-len(char_to_remove)] if x.endswith(char_to_remove) else x
-                                ) if replace_with == "" else col_series.apply(
+                                ) if replace_with == "" else self.df[column].astype(str).apply(
                                     lambda x: x[:-len(char_to_remove)] + replace_with if x.endswith(char_to_remove) else x
                                 )
                             else:
                                 if replace_with == "":
-                                    self.df[column] = col_series.astype(str).str.rstrip(char_to_remove)
+                                    self.df[column] = self.df[column].astype(str).str.rstrip(char_to_remove)
                                 else:
-                                    self.df[column] = col_series.apply(
+                                    self.df[column] = self.df[column].astype(str).apply(
                                         lambda x: x.rstrip(char_to_remove) + replace_with if x.endswith(char_to_remove) else x
                                     )
                             action = "Replaced" if replace_with != "" else "Removed"
@@ -611,8 +538,7 @@ class ExcelProcessor:
                             operation_executed = True
                         else:
                             # Remove/replace all occurrences - works for both single and multi-char patterns
-                            # Reuse col_series to avoid redundant .astype(str)
-                            self.df[column] = col_series.astype(str).str.replace(char_to_remove, replace_with, regex=False)
+                            self.df[column] = self.df[column].astype(str).str.replace(char_to_remove, replace_with, regex=False)
                             action = "Replaced" if replace_with != "" else "Removed"
                             replacement_text = f" with '{replace_with}'" if replace_with != "" else ""
                             self.summary.append(f"{action} all '{char_to_remove}' from '{column}' column{replacement_text}")
@@ -840,25 +766,9 @@ class ExcelProcessor:
         elif condition == "!=":
             self.df = self.df[self.df[column] != value]
         elif condition == "contains":
-            # Accuracy: Clean remaining rows on-demand if this column was partially cleaned
-            if hasattr(self, '_partially_cleaned_cols') and column in self._partially_cleaned_cols:
-                if len(self.df) > 1000 and self.df[column].dtype == 'object':
-                    remaining_rows = self.df.loc[1000:, column]
-                    if len(remaining_rows) > 0:
-                        self.df.loc[1000:, column] = remaining_rows.apply(self._clean_cell_value)
-                        self._partially_cleaned_cols.discard(column)
-            
             # Filter rows where column contains the text (case-insensitive)
             self.df = self.df[self.df[column].astype(str).str.contains(str(value), case=False, na=False)]
         elif condition == "not_contains":
-            # Accuracy: Clean remaining rows on-demand if this column was partially cleaned
-            if hasattr(self, '_partially_cleaned_cols') and column in self._partially_cleaned_cols:
-                if len(self.df) > 1000 and self.df[column].dtype == 'object':
-                    remaining_rows = self.df.loc[1000:, column]
-                    if len(remaining_rows) > 0:
-                        self.df.loc[1000:, column] = remaining_rows.apply(self._clean_cell_value)
-                        self._partially_cleaned_cols.discard(column)
-            
             # Filter rows where column does NOT contain the text (case-insensitive)
             self.df = self.df[~self.df[column].astype(str).str.contains(str(value), case=False, na=False)]
         else:
@@ -923,6 +833,9 @@ class ExcelProcessor:
             raise ValueError("No data to save")
         
         try:
+            import logging
+            logger = logging.getLogger(__name__)
+            
             logger.info(f"💾 Saving processed file to: {output_path}")
             logger.info(f"💾 Formatting rules: {len(self.formatting_rules)} total")
             
@@ -947,6 +860,8 @@ class ExcelProcessor:
             return output_path
             
         except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
             logger.error(f"❌ Failed to save processed file: {str(e)}", exc_info=True)
             raise RuntimeError(f"Failed to save processed file: {str(e)}")
     
@@ -1047,12 +962,9 @@ class ExcelProcessor:
             format_type = rule.get("format_type")
             config = rule.get("config", {})
             
-            # Defensive check: ensure config is a dict
-            if not isinstance(config, dict):
-                logger.warning(f"⚠️ Skipping conditional format rule with invalid config type: {type(config)}")
-                continue
-            
             # Debug: Log what we're trying to apply
+            import logging
+            logger = logging.getLogger(__name__)
             logger.info(f"Applying conditional formatting: type={format_type}, config={config}")
             
             if format_type == "duplicates":
@@ -1118,9 +1030,7 @@ class ExcelProcessor:
                     if column not in self.df.columns:
                         continue
                     col_idx = list(self.df.columns).index(column)
-                    # Always convert to string and handle NaN/None values properly
-                    # This ensures .str accessor works on all data types
-                    series = self.df[column].fillna('').astype(str)
+                    series = self.df[column].astype(str)
                     
                     try:
                         if format_type == "contains_text":
@@ -1130,38 +1040,32 @@ class ExcelProcessor:
                         else:  # regex_match
                             matches = series.str.contains(pattern, na=False, regex=True)
                         
-                        # Format matches in exported file with reasonable limit to prevent CPU spikes
-                        # Preview is limited to 1000 rows with all matches, export limits to 5000 matches per column per rule
-                        # Increased from 2000 to 5000 to improve accuracy while still preventing CPU spikes
-                        all_match_indices = matches[matches].index if isinstance(matches, pd.Series) else []
-                        match_count = len(all_match_indices)
-                        
-                        # Limit to 5000 matches per column per rule to prevent CPU spikes
-                        # Increased from 2000 to 5000 for better accuracy (still prevents system overload)
-                        max_export_matches = 5000
-                        match_indices = all_match_indices[:max_export_matches] if len(all_match_indices) > max_export_matches else all_match_indices
-                        
-                        if len(all_match_indices) > max_export_matches:
-                            logger.warning(f"Limiting formatting to {max_export_matches} matches (out of {match_count} total) in column '{column}' to prevent CPU spikes")
-                        
-                        for row_idx in match_indices:
-                            excel_row = row_idx + 1  # +1 for header row
-                            cell_value = self.df.iloc[row_idx, col_idx]
-                            
-                            # Determine value type and write accordingly
-                            if pd.isna(cell_value):
-                                worksheet.write_blank(excel_row, col_idx, cell_format)
-                            elif isinstance(cell_value, (int, float)):
-                                worksheet.write_number(excel_row, col_idx, cell_value, cell_format)
-                            elif isinstance(cell_value, bool):
-                                worksheet.write_boolean(excel_row, col_idx, cell_value, cell_format)
-                            else:
-                                worksheet.write_string(excel_row, col_idx, str(cell_value), cell_format)
+                        match_count = 0
+                        for row_idx, match in enumerate(matches):
+                            if match:
+                                excel_row = row_idx + 1  # +1 for header row
+                                cell_value = self.df.iloc[row_idx, col_idx]
+                                
+                                # Determine value type and write accordingly
+                                if pd.isna(cell_value):
+                                    worksheet.write_blank(excel_row, col_idx, cell_format)
+                                elif isinstance(cell_value, (int, float)):
+                                    worksheet.write_number(excel_row, col_idx, cell_value, cell_format)
+                                elif isinstance(cell_value, bool):
+                                    worksheet.write_boolean(excel_row, col_idx, cell_value, cell_format)
+                                else:
+                                    worksheet.write_string(excel_row, col_idx, str(cell_value), cell_format)
+                                
+                                match_count += 1
                         
                         # Log how many cells were formatted
+                        import logging
+                        logger = logging.getLogger(__name__)
                         logger.info(f"Formatted {match_count} cells in column '{column}' with text '{target_text}'")
                     except Exception as e:
                         # Log error but continue
+                        import logging
+                        logger = logging.getLogger(__name__)
                         logger.error(f"Error applying conditional formatting to column '{column}': {str(e)}")
                         import traceback
                         logger.error(traceback.format_exc())
@@ -1265,34 +1169,9 @@ class ExcelProcessor:
         self.summary.append(f"Total rows: {len(self.df)}")
     
     def _execute_add_column(self, action_plan: Dict):
-        """Execute add column operation - supports single or multiple columns"""
+        """Execute add column operation"""
         add_column = action_plan.get("add_column", {})
         
-        if not add_column:
-            self.summary.append("Add column: No configuration specified")
-            return
-        
-        # Handle both single column (dict) and multiple columns (list)
-        if isinstance(add_column, list):
-            # Multiple columns - process each one
-            for idx, column_config in enumerate(add_column):
-                if isinstance(column_config, dict):
-                    self._process_single_add_column(column_config, idx)
-                else:
-                    logger.warning(f"⚠️ Skipping invalid column config at index {idx}: {column_config}")
-            self.summary.append(f"Total columns: {len(self.df.columns)}")
-            return
-        
-        # Single column (existing logic)
-        if not isinstance(add_column, dict):
-            self.summary.append("Add column: Invalid configuration format")
-            return
-        
-        self._process_single_add_column(add_column, 0)
-        self.summary.append(f"Total columns: {len(self.df.columns)}")
-    
-    def _process_single_add_column(self, add_column: Dict, column_index: int = 0):
-        """Process adding a single column"""
         column_name = add_column.get("name", "NewColumn")
         position = add_column.get("position", -1)  # -1 means append at end
         default_value = add_column.get("default_value", "")
@@ -1316,202 +1195,13 @@ class ExcelProcessor:
                 self.df = self.df.reindex(columns=cols)
                 self.df[column_name] = default_value
                 self.summary.append(f"Added new column '{column_name}' at position {position + 1}")
-    
-    def _execute_rename_column(self, action_plan: Dict):
-        """Execute rename column operation"""
-        rename_config = action_plan.get("rename_column", {})
         
-        # Support both single rename and multiple renames
-        if isinstance(rename_config, dict):
-            if "old_name" in rename_config and "new_name" in rename_config:
-                # Single rename: {"old_name": "A", "new_name": "B"}
-                rename_config = [rename_config]
-            elif "columns" in rename_config:
-                # Multiple renames: {"columns": [{"old_name": "A", "new_name": "B"}, ...]}
-                rename_config = rename_config.get("columns", [])
-            else:
-                # Try to extract from mapping format
-                rename_mapping = {k: v for k, v in rename_config.items() if k != "columns"}
-                if rename_mapping:
-                    rename_config = [{"old_name": k, "new_name": v} for k, v in rename_mapping.items()]
-                else:
-                    self.summary.append("Rename column: No valid rename configuration found")
-                    return
-        
-        if not isinstance(rename_config, list):
-            self.summary.append("Rename column: Invalid configuration format")
-            return
-        
-        rename_mapping = {}
-        for rename_item in rename_config:
-            old_name = rename_item.get("old_name") or rename_item.get("from") or rename_item.get("column")
-            new_name = rename_item.get("new_name") or rename_item.get("to") or rename_item.get("name")
-            
-            if not old_name or not new_name:
-                continue
-            
-            # Improved column matching: exact match first, then case-insensitive, then partial match
-            matched_column = None
-            if old_name in self.df.columns:
-                matched_column = old_name
-            else:
-                # Try case-insensitive match
-                for col in self.df.columns:
-                    if str(col).lower() == str(old_name).lower():
-                        matched_column = col
-                        break
-                # If still no match, try partial match for "Unnamed: X" patterns
-                if not matched_column:
-                    # Handle "Unnamed: 1" vs "Unnamed:1" variations (normalize spaces)
-                    old_name_normalized = str(old_name).replace(" ", "").lower()
-                    for col in self.df.columns:
-                        col_normalized = str(col).replace(" ", "").lower()
-                        if old_name_normalized == col_normalized:
-                            matched_column = col
-                            break
-            
-            if matched_column:
-                rename_mapping[matched_column] = new_name
-            else:
-                self.summary.append(f"Rename column: Column '{old_name}' not found")
-        
-        if rename_mapping:
-            self.df = self.df.rename(columns=rename_mapping)
-            renamed_cols = ", ".join([f"'{old}' → '{new}'" for old, new in rename_mapping.items()])
-            self.summary.append(f"Renamed columns: {renamed_cols}")
-        else:
-            self.summary.append("Rename column: No valid columns to rename")
-    
-    def _execute_delete_column(self, action_plan: Dict):
-        """Execute delete column operation with positional reference fallback - supports single or multiple columns"""
-        delete_column = action_plan.get("delete_column", {})
-        
-        if not delete_column:
-            self.summary.append("Delete column: No configuration specified")
-            return
-        
-        # Handle both single column (dict) and multiple columns (list)
-        if isinstance(delete_column, list):
-            # Multiple columns - process each one
-            columns_to_delete = []
-            for idx, column_config in enumerate(delete_column):
-                if isinstance(column_config, dict):
-                    col_name = self._extract_column_name_from_config(column_config, action_plan)
-                    if col_name:
-                        columns_to_delete.append(col_name)
-                elif isinstance(column_config, str):
-                    # Direct column name as string
-                    if column_config in self.df.columns:
-                        columns_to_delete.append(column_config)
-                    else:
-                        self.summary.append(f"Delete column: Column '{column_config}' not found")
-                else:
-                    logger.warning(f"⚠️ Skipping invalid column config at index {idx}: {column_config}")
-            
-            if columns_to_delete:
-                self.df = self.df.drop(columns=columns_to_delete)
-                deleted_list = ', '.join([f"'{c}'" for c in columns_to_delete])
-                self.summary.append(f"Deleted columns: {deleted_list}")
-                self.summary.append(f"Total columns: {len(self.df.columns)}")
-            return
-        
-        # Single column (existing logic)
-        if not isinstance(delete_column, dict):
-            self.summary.append("Delete column: Invalid configuration format")
-            return
-        
-        column_name = delete_column.get("column_name")
-        column_index = delete_column.get("column_index")
-        
-        # If no column name but we have user prompt, try to extract column name or positional reference
-        if not column_name:
-            user_prompt = action_plan.get("user_prompt", "")
-            user_prompt_lower = user_prompt.lower()
-            
-            import re
-            
-            # FIRST: Try to extract direct column name from patterns like:
-            # "remove column name UY7F9", "delete column UY7F9", "remove UY7F9 column", etc.
-            direct_name_patterns = [
-                r'(?:remove|delete|drop)\s+column\s+name\s+([A-Za-z0-9_\-\.\s]+?)(?:\s|$|column)',  # "remove column name UY7F9"
-                r'(?:remove|delete|drop)\s+column\s+([A-Za-z0-9_\-\.\s]+?)(?:\s|$|column)',  # "delete column UY7F9"
-                r'(?:remove|delete|drop)\s+([A-Za-z0-9_\-\.\s]+?)\s+column',  # "remove UY7F9 column"
-            ]
-            
-            for pattern in direct_name_patterns:
-                match = re.search(pattern, user_prompt, re.IGNORECASE)
-                if match:
-                    potential_name = match.group(1).strip()
-                    # Check if this matches any column name (case-insensitive)
-                    for col in self.df.columns:
-                        if col.lower() == potential_name.lower():
-                            column_name = col  # Use exact case from DataFrame
-                            self.summary.append(f"Extracted column name '{column_name}' from user prompt")
-                            break
-                    if column_name:
-                        break
-            
-            # SECOND: If no direct name found, try to extract Excel column letters (A, B, C, etc.)
-            if not column_name:
-                # Match Excel column letters: A=0, B=1, C=2, ..., Z=25, AA=26, AB=27, etc.
-                excel_letter_pattern = r'\bcolumn\s+([A-Z]+)\b'
-                match = re.search(excel_letter_pattern, user_prompt, re.IGNORECASE)
-                if match:
-                    excel_letter = match.group(1).upper()
-                    try:
-                        # Convert Excel column letter to index (A=0, B=1, ..., Z=25, AA=26, etc.)
-                        col_idx = 0
-                        for char in excel_letter:
-                            col_idx = col_idx * 26 + (ord(char) - ord('A') + 1)
-                        col_idx = col_idx - 1  # Convert to 0-indexed
-                        
-                        if 0 <= col_idx < len(self.df.columns):
-                            column_name = self.df.columns[col_idx]
-                            self.summary.append(f"Identified '{column_name}' as column {excel_letter} (index {col_idx})")
-                    except:
-                        pass
-            
-            # THIRD: If still no column name, try to extract positional reference
-            if not column_name:
-                # Match patterns like "1st", "2nd", "3rd", "first", "second", "third", "last"
-                position_patterns = [
-                    (r'\b(\d+)(?:st|nd|rd|th)\s+col', lambda m: int(m.group(1)) - 1),  # "2nd col", "3rd col"
-                    (r'\b(\d+)\s+col', lambda m: int(m.group(1)) - 1),  # "2 col", "3 col"
-                    (r'\bfirst\s+col', lambda m: 0),
-                    (r'\bsecond\s+col', lambda m: 1),
-                    (r'\bthird\s+col', lambda m: 2),
-                    (r'\bfourth\s+col', lambda m: 3),
-                    (r'\bfifth\s+col', lambda m: 4),
-                    (r'\blast\s+col', lambda m: len(self.df.columns) - 1),
-                ]
-                
-                for pattern, index_func in position_patterns:
-                    match = re.search(pattern, user_prompt_lower)
-                    if match:
-                        try:
-                            col_idx = index_func(match)
-                            if 0 <= col_idx < len(self.df.columns):
-                                column_name = self.df.columns[col_idx]
-                                self.summary.append(f"Identified '{column_name}' as the column to delete from positional reference")
-                                break
-                        except:
-                            continue
-        
-        column_name = self._extract_column_name_from_config(delete_column, action_plan)
-        
-        if not column_name:
-            self.summary.append("Delete column: No column name specified. Please specify column name or position (e.g., 'delete second column', 'delete column Name').")
-            return
-        
-        if column_name not in self.df.columns:
-            raise ValueError(f"Column '{column_name}' not found")
-        
-        self.df = self.df.drop(columns=[column_name])
-        self.summary.append(f"Deleted column '{column_name}'")
         self.summary.append(f"Total columns: {len(self.df.columns)}")
     
-    def _extract_column_name_from_config(self, delete_column: Dict, action_plan: Dict) -> str:
-        """Helper method to extract column name from delete_column config"""
+    def _execute_delete_column(self, action_plan: Dict):
+        """Execute delete column operation with positional reference fallback"""
+        delete_column = action_plan.get("delete_column", {})
+        
         column_name = delete_column.get("column_name")
         column_index = delete_column.get("column_index")
         
@@ -1594,35 +1284,21 @@ class ExcelProcessor:
             if 0 <= column_index < len(self.df.columns):
                 column_name = self.df.columns[column_index]
         
-        return column_name
+        if not column_name:
+            self.summary.append("Delete column: No column name specified. Please specify column name or position (e.g., 'delete second column', 'delete column Name').")
+            return
+        
+        if column_name not in self.df.columns:
+            raise ValueError(f"Column '{column_name}' not found")
+        
+        self.df = self.df.drop(columns=[column_name])
+        self.summary.append(f"Deleted column '{column_name}'")
+        self.summary.append(f"Total columns: {len(self.df.columns)}")
     
     def _execute_edit_cell(self, action_plan: Dict):
-        """Execute edit cell operation - supports single or multiple cell edits"""
+        """Execute edit cell operation"""
         edit_cell = action_plan.get("edit_cell", {})
         
-        if not edit_cell:
-            self.summary.append("Edit cell: No configuration specified")
-            return
-        
-        # Handle both single cell (dict) and multiple cells (list)
-        if isinstance(edit_cell, list):
-            # Multiple cells - process each one
-            for idx, cell_config in enumerate(edit_cell):
-                if isinstance(cell_config, dict):
-                    self._process_single_edit_cell(cell_config, idx)
-                else:
-                    logger.warning(f"⚠️ Skipping invalid cell config at index {idx}: {cell_config}")
-            return
-        
-        # Single cell (existing logic)
-        if not isinstance(edit_cell, dict):
-            self.summary.append("Edit cell: Invalid configuration format")
-            return
-        
-        self._process_single_edit_cell(edit_cell, 0)
-    
-    def _process_single_edit_cell(self, edit_cell: Dict, cell_index: int = 0):
-        """Process editing a single cell"""
         row_index = edit_cell.get("row_index")
         column_name = edit_cell.get("column_name")
         value = edit_cell.get("value")
@@ -1784,25 +1460,6 @@ class ExcelProcessor:
             self.summary.append("Format: No format configuration specified")
             return
         
-        # Handle both single format (dict) and multiple formats (list)
-        if isinstance(format_config, list):
-            # Multiple formats - process each one
-            for idx, format_item in enumerate(format_config):
-                if isinstance(format_item, dict):
-                    self._process_single_format(format_item, idx)
-                else:
-                    logger.warning(f"⚠️ Skipping invalid format rule at index {idx}: {format_item}")
-            return
-        
-        # Single format (existing logic)
-        if not isinstance(format_config, dict):
-            self.summary.append("Format: Invalid configuration format")
-            return
-        
-        self._process_single_format(format_config, 0)
-    
-    def _process_single_format(self, format_config: Dict, rule_index: int = 0):
-        """Process a single format rule"""
         # Handle both structures:
         # 1. Nested: {"formatting": {...}, "range": {...}}
         # 2. Flat: {"range": {...}, "bold": true, "italic": false, ...}
@@ -1865,35 +1522,14 @@ class ExcelProcessor:
     
     def _execute_conditional_format(self, action_plan: Dict):
         """Execute conditional format operation - store conditional formatting rules"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         logger.info(f"🔍 _execute_conditional_format called with action_plan keys: {list(action_plan.keys())}")
         conditional_format = action_plan.get("conditional_format", {})
         
-        logger.info(f"🔍 Extracted conditional_format: {conditional_format}, type: {type(conditional_format)}")
+        logger.info(f"🔍 Extracted conditional_format: {conditional_format}")
         
-        # Handle both single format (dict) and multiple formats (list)
-        if isinstance(conditional_format, list):
-            # Multiple conditional formats - process each one
-            logger.info(f"✅ Processing {len(conditional_format)} conditional format rules")
-            for idx, format_rule in enumerate(conditional_format):
-                if isinstance(format_rule, dict):
-                    # Process each rule individually
-                    self._process_single_conditional_format(format_rule, idx)
-                else:
-                    logger.warning(f"⚠️ Skipping invalid format rule at index {idx}: {format_rule}")
-            return
-        elif not isinstance(conditional_format, dict):
-            logger.warning(f"⚠️ conditional_format is not dict or list, trying fallback...")
-            fallback = self._build_conditional_format_fallback(action_plan)
-            if fallback:
-                conditional_format = fallback
-                logger.info(f"✅ Using fallback: {fallback}")
-                self.summary.append("Conditional format: Applied fallback configuration from user prompt.")
-            else:
-                logger.error(f"❌ No conditional_format and no fallback available!")
-                self.summary.append("Conditional format: No configuration specified")
-                return
-        
-        # Single conditional format (existing logic)
         if not conditional_format:
             logger.warning(f"⚠️ conditional_format is empty, trying fallback...")
             fallback = self._build_conditional_format_fallback(action_plan)
@@ -1906,38 +1542,9 @@ class ExcelProcessor:
                 self.summary.append("Conditional format: No configuration specified")
                 return
         
-        # Process single format
-        self._process_single_conditional_format(conditional_format, 0)
-    
-    def _process_single_conditional_format(self, conditional_format: Dict, rule_index: int = 0):
-        """Process a single conditional format rule"""
         # Extract conditional formatting details
         format_type = conditional_format.get("format_type", "")
         config = conditional_format.get("config", {})
-        
-        # Defensive check: if config is a list, try to extract from first item or convert
-        if isinstance(config, list):
-            logger.warning(f"⚠️ Config is a list, attempting to process first item or convert structure")
-            if len(config) > 0 and isinstance(config[0], dict):
-                # If it's a list of configs, process each one as a separate rule
-                for idx, single_config in enumerate(config):
-                    if isinstance(single_config, dict):
-                        # Create a new conditional format dict for this config
-                        new_conditional_format = {
-                            "format_type": format_type,
-                            "config": single_config
-                        }
-                        # Recursively process this single config
-                        self._process_single_conditional_format(new_conditional_format, rule_index + idx)
-                return  # Exit early since we processed all configs
-            else:
-                # Invalid structure, use empty dict
-                config = {}
-        
-        # Ensure config is a dict
-        if not isinstance(config, dict):
-            logger.error(f"❌ Invalid config type: {type(config)}, expected dict. Using empty dict.")
-            config = {}
         
         logger.info(f"✅ Format type: {format_type}, Config: {config}")
         
@@ -1950,57 +1557,50 @@ class ExcelProcessor:
         self.formatting_rules.append(rule)
         logger.info(f"✅ Added conditional format rule to formatting_rules. Total rules: {len(self.formatting_rules)}")
         
-        # Build summary message (with defensive checks)
+        # Build summary message
         if format_type == "duplicates":
-            column = config.get("column", "unknown") if isinstance(config, dict) else "unknown"
+            column = config.get("column", "unknown")
             self.summary.append(f"Conditional formatting: Highlight duplicates in column '{column}'")
         elif format_type == "greater_than":
-            column = config.get("column", "unknown") if isinstance(config, dict) else "unknown"
-            value = config.get("value", "unknown") if isinstance(config, dict) else "unknown"
+            column = config.get("column", "unknown")
+            value = config.get("value", "unknown")
             self.summary.append(f"Conditional formatting: Highlight values > {value} in column '{column}'")
         elif format_type == "less_than":
-            column = config.get("column", "unknown") if isinstance(config, dict) else "unknown"
-            value = config.get("value", "unknown") if isinstance(config, dict) else "unknown"
+            column = config.get("column", "unknown")
+            value = config.get("value", "unknown")
             self.summary.append(f"Conditional formatting: Highlight values < {value} in column '{column}'")
         elif format_type == "between":
-            column = config.get("column", "unknown") if isinstance(config, dict) else "unknown"
-            min_val = config.get("min_value", "unknown") if isinstance(config, dict) else "unknown"
-            max_val = config.get("max_value", "unknown") if isinstance(config, dict) else "unknown"
+            column = config.get("column", "unknown")
+            min_val = config.get("min_value", "unknown")
+            max_val = config.get("max_value", "unknown")
             self.summary.append(f"Conditional formatting: Highlight values between {min_val} and {max_val} in column '{column}'")
         elif format_type == "contains_text":
-            column = config.get("column", "unknown") if isinstance(config, dict) else "unknown"
-            text = config.get("text", "unknown") if isinstance(config, dict) else "unknown"
-            bg_color = config.get("bg_color", "unknown") if isinstance(config, dict) else "unknown"
-            self.summary.append(f"Conditional formatting: Highlight cells containing '{text}' in column '{column}' with {bg_color}")
+            column = config.get("column", "unknown")
+            text = config.get("text", "unknown")
+            self.summary.append(f"Conditional formatting: Highlight cells containing '{text}' in column '{column}'")
         elif format_type == "text_equals":
-            column = config.get("column", "unknown") if isinstance(config, dict) else "unknown"
-            text = config.get("text", "unknown") if isinstance(config, dict) else "unknown"
-            bg_color = config.get("bg_color", "unknown") if isinstance(config, dict) else "unknown"
-            self.summary.append(f"Conditional formatting: Highlight cells equal to '{text}' in column '{column}' with {bg_color}")
+            column = config.get("column", "unknown")
+            text = config.get("text", "unknown")
+            self.summary.append(f"Conditional formatting: Highlight cells equal to '{text}' in column '{column}'")
         else:
             self.summary.append(f"Conditional formatting rule stored: {format_type}")
     
     def get_formatting_metadata(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Extract formatting metadata for preview display"""
-        # Performance optimization: Early exit if no formatting rules
-        if not self.formatting_rules:
-            logger.info("📊 No formatting rules, returning empty metadata")
-            return {
-                "conditional_formatting": [],
-                "cell_formats": {}
-            }
+        import logging
+        logger = logging.getLogger(__name__)
         
         formatting_metadata = {
             "conditional_formatting": [],
             "cell_formats": {}
         }
         
-        # Reduced logging for performance - only log if there are many rules
-        if len(self.formatting_rules) > 5:
-            logger.info(f"🔍 Processing {len(self.formatting_rules)} formatting rules for {len(df)} rows")
+        logger.info(f"🔍 get_formatting_metadata called with {len(self.formatting_rules)} formatting rules")
+        logger.info(f"🔍 DataFrame has {len(df)} rows and columns: {list(df.columns)}")
         
         for rule_idx, rule in enumerate(self.formatting_rules):
             rule_type = rule.get("type")
+            logger.info(f"🔍 Rule {rule_idx}: type={rule_type}")
             
             if rule_type == "format":
                 # Handle static formatting rules
@@ -2041,12 +1641,9 @@ class ExcelProcessor:
                 
                 elif "column" in range_info:
                     # Apply to entire column
-                    # Performance optimization: Use vectorized operations instead of row-by-row iteration
                     col_name = range_info["column"]
                     if col_name in df.columns:
-                        # Limit to preview rows only (max 1000) to prevent CPU spikes
-                        max_rows = min(len(df), 1000)
-                        for row_idx in range(max_rows):
+                        for row_idx in range(len(df)):
                             cell_key = f"{row_idx}_{col_name}"
                             cell_format = {}
                             if bg_color:
@@ -2088,47 +1685,55 @@ class ExcelProcessor:
                 format_type = rule.get("format_type")
                 config = rule.get("config", {})
                 
-                # Defensive check: ensure config is a dict
-                if not isinstance(config, dict):
-                    logger.warning(f"⚠️ Skipping conditional format rule with invalid config type: {type(config)}")
-                    continue
+                logger.info(f"🔍 Conditional rule: format_type={format_type}, config={config}")
                 
                 if format_type == "contains_text":
                     column = config.get("column")
                     text = config.get("text", "")
                     bg_color = config.get("bg_color") or config.get("background_color", "#FFF3CD")
                     
+                    logger.info(f"🔍 contains_text: column='{column}', text='{text}', bg_color='{bg_color}'")
+                    logger.info(f"🔍 Column in df.columns? {column in df.columns if column else False}")
+                    
                     if column and column in df.columns:
                         # Find matching rows
-                        # Always convert to string and handle NaN/None values properly
-                        # This ensures .str accessor works on all data types
-                        series = df[column].fillna('').astype(str)
+                        series = df[column].astype(str)
+                        
+                        # Debug: Show sample values from the column
+                        sample_values = series[series.notna()].head(10).tolist()
+                        logger.info(f"🔍 Sample values from column '{column}': {sample_values}")
                         
                         # Try the search
                         search_text = str(text)
                         matches = series.str.contains(search_text, case=False, na=False)
                         match_count = matches.sum()
                         
+                        logger.info(f"🔍 Searching for '{search_text}' (case-insensitive)")
+                        logger.info(f"🔍 Found {match_count} matches for text '{text}' in column '{column}'")
+                        
+                        # If no matches, try to find similar values
+                        if match_count == 0:
+                            # Try to find values that contain any word from the search text
+                            search_words = search_text.lower().split()
+                            logger.info(f"🔍 Search words: {search_words}")
+                            for word in search_words:
+                                word_matches = series.str.contains(word, case=False, na=False)
+                                word_count = word_matches.sum()
+                                if word_count > 0:
+                                    logger.info(f"🔍 Found {word_count} cells containing word '{word}'")
+                                    sample_matches = series[word_matches].head(5).tolist()
+                                    logger.info(f"🔍 Sample matches for '{word}': {sample_matches}")
+                        
                         # Build cell format map: "row_col" -> format info
-                        # Accuracy: Format ALL matches within preview rows (first 1000 rows)
-                        # Performance optimization: Use vectorized operations instead of list comprehension with get_loc
-                        preview_limit = min(len(df), 1000)  # Match preview size
-                        
-                        # Get matches and filter to preview rows using numpy (much faster)
-                        import numpy as np
-                        match_positions = np.where(matches.values)[0] if hasattr(matches, 'values') else np.where(matches)[0]
-                        
-                        # Filter to only positions within preview limit
-                        match_positions = match_positions[match_positions < preview_limit]
-                        
-                        for pos in match_positions:
-                            cell_key = f"{pos}_{column}"
-                            formatting_metadata["cell_formats"][cell_key] = {
-                                "bg_color": bg_color,
-                                "text_color": config.get("text_color") or config.get("font_color"),
-                                "bold": config.get("bold", False),
-                                "italic": config.get("italic", False)
-                            }
+                        for row_idx, match in enumerate(matches):
+                            if match:
+                                cell_key = f"{row_idx}_{column}"
+                                formatting_metadata["cell_formats"][cell_key] = {
+                                    "bg_color": bg_color,
+                                    "text_color": config.get("text_color") or config.get("font_color"),
+                                    "bold": config.get("bold", False),
+                                    "italic": config.get("italic", False)
+                                }
                         
                         formatting_metadata["conditional_formatting"].append({
                             "type": format_type,
@@ -2140,39 +1745,30 @@ class ExcelProcessor:
                         logger.warning(f"⚠️ Column '{column}' not found in DataFrame columns: {list(df.columns)}")
                         
                 elif format_type == "text_equals":
-                    # Defensive check: ensure config is a dict
-                    if not isinstance(config, dict):
-                        logger.warning(f"⚠️ Skipping text_equals rule with invalid config type: {type(config)}")
-                        continue
                     column = config.get("column")
                     text = config.get("text", "")
                     bg_color = config.get("bg_color") or config.get("background_color", "#FFF3CD")
                     
+                    logger.info(f"🔍 text_equals: column='{column}', text='{text}', bg_color='{bg_color}'")
+                    
                     if column and column in df.columns:
-                        # Always convert to string and handle NaN/None values properly
-                        # This ensures .str accessor works on all data types
-                        series = df[column].fillna('').astype(str)
+                        series = df[column].astype(str)
                         matches = series.str.lower() == str(text).lower()
+                        match_count = matches.sum()
                         
-                        # Accuracy: Format ALL matches within preview rows (first 1000 rows)
-                        # Performance optimization: Use vectorized operations
-                        preview_limit = min(len(df), 1000)  # Match preview size
+                        logger.info(f"🔍 Found {match_count} exact matches for text '{text}' in column '{column}'")
                         
-                        # Get 0-based positions directly using numpy where (much faster)
-                        import numpy as np
-                        match_positions = np.where(matches.values)[0] if hasattr(matches, 'values') else np.where(matches)[0]
-                        
-                        # Filter to only positions within preview limit
-                        match_positions = match_positions[match_positions < preview_limit]
-                        
-                        for pos in match_positions:
-                            cell_key = f"{pos}_{column}"
-                            formatting_metadata["cell_formats"][cell_key] = {
-                                "bg_color": bg_color,
-                                "text_color": config.get("text_color") or config.get("font_color"),
-                                "bold": config.get("bold", False),
-                                "italic": config.get("italic", False)
-                            }
+                        for row_idx, match in enumerate(matches):
+                            if match:
+                                cell_key = f"{row_idx}_{column}"
+                                formatting_metadata["cell_formats"][cell_key] = {
+                                    "bg_color": bg_color,
+                                    "text_color": config.get("text_color") or config.get("font_color"),
+                                    "bold": config.get("bold", False),
+                                    "italic": config.get("italic", False)
+                                }
+                    else:
+                        logger.warning(f"⚠️ Column '{column}' not found in DataFrame columns: {list(df.columns)}")
         
         total_cells = len(formatting_metadata["cell_formats"])
         logger.info(f"✅ Formatting metadata generated: {total_cells} cells with formatting")
@@ -2180,32 +1776,13 @@ class ExcelProcessor:
         return formatting_metadata
     
     def _execute_formula(self, action_plan: Dict):
-        """Execute formula operations using FormulaEngine - supports single or multiple formulas"""
+        """Execute formula operations using FormulaEngine"""
         formula_config = action_plan.get("formula", {})
         
         if not formula_config:
             self.summary.append("Formula: No formula configuration specified")
             return
         
-        # Handle both single formula (dict) and multiple formulas (list)
-        if isinstance(formula_config, list):
-            # Multiple formulas - process each one (last result will be stored in formula_result)
-            for idx, formula_item in enumerate(formula_config):
-                if isinstance(formula_item, dict):
-                    self._process_single_formula(formula_item, idx)
-                else:
-                    logger.warning(f"⚠️ Skipping invalid formula config at index {idx}: {formula_item}")
-            return
-        
-        # Single formula (existing logic)
-        if not isinstance(formula_config, dict):
-            self.summary.append("Formula: Invalid configuration format")
-            return
-        
-        self._process_single_formula(formula_config, 0)
-    
-    def _process_single_formula(self, formula_config: Dict, formula_index: int = 0):
-        """Process a single formula operation"""
         formula_type = formula_config.get("type", "").lower()
         params = formula_config.get("parameters", {})
         column = formula_config.get("column")
