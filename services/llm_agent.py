@@ -148,24 +148,45 @@ class LLMAgent:
         prompt_lower = prompt.lower()
         chart_keywords = [
             "chart", "graph", "plot", "visualize", "visualization",
-            "bar chart", "line chart", "pie chart", "histogram",
+            "bar chart", "bar graph", "line chart", "line graph",
+            "pie chart", "pie graph", "histogram",
             "scatter plot", "scatter", "dashboard", "show chart",
-            "create chart", "generate chart", "make chart",
-            "draw chart", "display chart"
+            "create chart", "create graph", "generate chart", "generate graph",
+            "make chart", "make graph", "draw chart", "draw graph",
+            "display chart", "display graph", "show graph",
+            # Additional patterns
+            "between", "compare", "relationship", "correlation",
+            # Chart type variations
+            "bar", "line", "pie", "scatter", "histogram"
         ]
-        return any(keyword in prompt_lower for keyword in chart_keywords)
+        
+        # Check for explicit chart keywords
+        has_chart_keyword = any(keyword in prompt_lower for keyword in chart_keywords)
+        
+        # Also check for patterns like "between X and Y" which often indicate chart requests
+        has_between_pattern = "between" in prompt_lower and ("and" in prompt_lower or "&" in prompt_lower)
+        
+        # Check for visualization intent words
+        visualization_intent = any(word in prompt_lower for word in [
+            "show", "display", "visualize", "compare", "relationship"
+        ])
+        
+        result = has_chart_keyword or (has_between_pattern and visualization_intent)
+        
+        logger.info(f"Chart detection: prompt='{prompt[:50]}...', has_keyword={has_chart_keyword}, has_between={has_between_pattern}, result={result}")
+        
+        return result
     
     def _is_complex_operation(self, user_prompt: str, available_columns: List[str] = None, 
                               sample_data: Optional[List[Dict]] = None) -> bool:
         """
-        Hybrid complexity detection - determines if operation needs GPT-4o
+        Smart complexity detection - LLM-based with minimal token usage
         
-        Uses two-stage approach:
-        1. Fast keyword checks (80-90% of cases, no API call)
-        2. LLM classification for ambiguous cases (10-20%, tiny cheap API call)
+        Strategy:
+        1. Fast path: Obvious simple/complex cases (no API call) - ~80% of requests
+        2. LLM path: Ambiguous cases (tiny API call ~60-80 tokens) - ~20% of requests
         
-        This handles typos, variations, and different phrasings accurately.
-        Runs BEFORE any heavy operations, so it's completely safe.
+        Total token overhead: ~12-16 tokens per request on average (very low)
         
         Args:
             user_prompt: User's request
@@ -178,119 +199,58 @@ class LLMAgent:
         if not user_prompt:
             return False
         
-        prompt_lower = user_prompt.lower()
+        prompt_lower = user_prompt.lower().strip()
         
-        # FAST PATH 1: Obviously simple operations (no API call needed)
-        if self._quick_simple_check(prompt_lower):
+        # Fast path 1: Very obvious simple cases (no API call)
+        if self._is_obviously_simple(prompt_lower):
             return False
         
-        # FAST PATH 2: Obviously complex operations (no API call needed)
-        if self._quick_complex_check(prompt_lower, sample_data):
+        # Fast path 2: Very obvious complex cases (no API call)
+        if self._is_obviously_complex(prompt_lower):
             return True
         
-        # SLOW PATH: Ambiguous cases - use LLM classification (tiny, cheap call)
-        # Only ~10-20% of requests reach here
+        # LLM path: Everything else (tiny, cheap call)
         return self._llm_classify_complexity(user_prompt)
     
-    def _quick_simple_check(self, prompt_lower: str) -> bool:
+    def _is_obviously_simple(self, prompt_lower: str) -> bool:
         """
-        Fast check for obviously simple operations
+        Fast check for obvious simple operations - no API call
         
         Returns True if operation is definitely simple (single, straightforward task)
         """
-        import re
-        
-        # Simple single-operation patterns (must not have "and", "then", etc.)
-        simple_patterns = [
-            r"^(delete|remove|drop)\s+column",  # "delete column A"
-            r"^rename\s+column",  # "rename column Name"
-            r"^add\s+column\s+\w+$",  # "add column Total" (single operation)
-            r"^make\s+(bold|italic|color|header)",  # "make bold"
-            r"^change\s+cell",  # "change cell A1"
-            r"^clear\s+cell",  # "clear cell A1"
-        ]
-        
-        # Check if matches simple pattern AND doesn't have multi-step indicators
-        for pattern in simple_patterns:
-            if re.match(pattern, prompt_lower):
-                # Make sure it's not multi-step
-                if not any(kw in prompt_lower for kw in [" and ", " then ", " also ", " after ", " next "]):
-                    return True  # Definitely simple
-        
-        # Single operation keywords (only if no multi-step words)
-        single_ops = ["delete column", "remove column", "rename column", "make bold", "make italic"]
-        if any(op in prompt_lower for op in single_ops):
-            if not any(kw in prompt_lower for kw in [" and ", " then ", " also ", " after ", " next "]):
-                return True  # Definitely simple
-        
+        # Very short, single-operation commands only
+        if len(prompt_lower.split()) <= 4:
+            simple_patterns = [
+                "delete column", "remove column", "rename column",
+                "clear cell", "make bold", "make italic"
+            ]
+            for pattern in simple_patterns:
+                if prompt_lower.startswith(pattern):
+                    return True
         return False
     
-    def _quick_complex_check(self, prompt_lower: str, sample_data: Optional[List[Dict]] = None) -> bool:
+    def _is_obviously_complex(self, prompt_lower: str) -> bool:
         """
-        Fast check for obviously complex operations
+        Fast check for obvious complex operations - no API call
         
         Returns True if operation is definitely complex (multi-step, complex formulas, etc.)
         """
-        # Multi-step operations (most common complexity indicator)
-        # Check for variations: "then", "thennn" (typo), "and then", "after that", etc.
-        multi_step_patterns = [
-            r"\s+and\s+then\s+",  # "add and then sort"
-            r"\s+then\s+",  # "add then sort" (handles "thennn" too via fuzzy)
-            r"\s+also\s+",  # "add also format"
-            r"\s+after\s+that\s+",  # "add after that sort"
-            r"\s+next\s+",  # "add next sort"
-            r"\s+and\s+\w+\s+and\s+",  # "add and sort and format"
-        ]
-        
-        import re
-        for pattern in multi_step_patterns:
-            if re.search(pattern, prompt_lower):
-                return True  # Definitely complex
-        
-        # Complex formulas and functions (handles typos via case-insensitive)
-        complex_formula_keywords = [
-            "vlookup", "index match", "nested", "complex formula",
-            "if and", "if or", "sumif", "countif", "sumifs", "countifs",
-            "hlookup", "match", "index"
-        ]
-        if any(kw in prompt_lower for kw in complex_formula_keywords):
+        # Only explicit multi-step indicators
+        if any(sep in prompt_lower for sep in [" and then ", " then ", " after that ", ", then "]):
             return True
         
-        # Advanced conditional formatting with multiple conditions
-        if any(kw in prompt_lower for kw in ["multiple conditions", "and condition", "or condition"]):
+        # Only very explicit complex formulas
+        if any(kw in prompt_lower for kw in ["vlookup", "index match", "nested formula"]):
             return True
-        
-        # Data analysis operations
-        analysis_keywords = ["analyze", "find patterns", "identify", "detect", "correlation", "trend", "outlier"]
-        if any(kw in prompt_lower for kw in analysis_keywords):
-            return True
-        
-        # Count number of operations requested
-        operation_keywords = [
-            "add", "delete", "remove", "rename", "format", "highlight",
-            "sort", "filter", "clean", "calculate", "formula", "chart"
-        ]
-        operation_count = sum(1 for keyword in operation_keywords if keyword in prompt_lower)
-        
-        # Multiple operations (3+) indicate complexity
-        if operation_count >= 3:
-            return True
-        
-        # Ambiguous column references in potentially large datasets
-        ambiguous_refs = ["column with", "column containing", "find column", "which column"]
-        if any(ref in prompt_lower for ref in ambiguous_refs):
-            # Only mark as complex if we have a large dataset
-            if sample_data and len(sample_data) > 100:
-                return True
         
         return False
     
     def _llm_classify_complexity(self, user_prompt: str) -> bool:
         """
-        LLM-based complexity classification for ambiguous cases
+        Token-efficient LLM classification (~60-80 tokens total)
         
-        Uses gpt-4o-mini for a tiny, cheap classification call (~50-100 tokens).
-        Handles typos, variations, and different phrasings accurately.
+        Uses minimal prompt to keep costs low while maintaining accuracy.
+        Handles typos, variations, and different phrasings intelligently.
         
         Args:
             user_prompt: User's request
@@ -299,38 +259,38 @@ class LLMAgent:
             True if complex, False if simple
         """
         try:
-            classification_prompt = f"""Classify this Excel operation request as SIMPLE or COMPLEX.
+            # Ultra-concise prompt (minimal tokens)
+            classification_prompt = f"""Classify: SIMPLE or COMPLEX
 
-SIMPLE = Single operation, straightforward task
-Examples: "delete column A", "rename column Name", "make header bold", "add column Total"
+SIMPLE: Single operation (delete column, rename, add column, sort, filter, simple formula)
+COMPLEX: Multiple steps OR complex formulas (vlookup, nested, multiple conditions)
 
-COMPLEX = Multiple operations, complex formulas, or requires reasoning
-Examples: "add column and sort", "create vlookup formula", "add total then highlight values > 1000"
-
-User request: "{user_prompt}"
-
-Respond with only: SIMPLE or COMPLEX"""
+Request: "{user_prompt}"
+Answer:"""
 
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",  # Use cheapest model for classification
                 messages=[
-                    {"role": "system", "content": "You are a classifier. Respond with only SIMPLE or COMPLEX. Handle typos and variations."},
+                    {
+                        "role": "system", 
+                        "content": "Classify Excel operations. Respond: SIMPLE or COMPLEX only."
+                    },
                     {"role": "user", "content": classification_prompt}
                 ],
                 temperature=0.1,  # Low temperature for consistent classification
-                max_tokens=10  # Just need "SIMPLE" or "COMPLEX"
+                max_tokens=5  # Just "SIMPLE" or "COMPLEX"
             )
             
             result = response.choices[0].message.content.strip().upper()
             is_complex = "COMPLEX" in result
             
             tokens_used = response.usage.total_tokens if hasattr(response, 'usage') else 0
-            logger.info(f"🔍 LLM complexity classification: '{user_prompt[:50]}...' → {result} ({tokens_used} tokens)")
+            logger.info(f"🔍 LLM classification: '{user_prompt[:40]}...' → {result} ({tokens_used} tokens)")
             
             return is_complex
             
         except Exception as e:
-            logger.warning(f"LLM complexity classification failed: {e}. Defaulting to simple (safe fallback).")
+            logger.warning(f"LLM classification failed: {e}. Defaulting to simple.")
             # Fallback: if LLM fails, assume simple (safer for cost)
             return False
     
