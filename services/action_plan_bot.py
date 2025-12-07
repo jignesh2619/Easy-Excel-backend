@@ -86,6 +86,12 @@ You MUST generate Python code for ALL operations. The backend executes your code
 - datetime: Date/time functions
 - Basic functions: abs, round, min, max, sum, str, len, list, range
 
+**TEXTCLEANER USAGE (REQUIRES COLUMN ARGUMENT):**
+- TextCleaner.normalize_text(df, 'ColumnName') - REQUIRES column name
+- TextCleaner.trim_whitespace(df, 'ColumnName') - REQUIRES column name
+- TextCleaner.normalize_case(df, 'ColumnName', case='lower') - REQUIRES column name
+- Example: "clean this sheet" → df = TextCleaner.normalize_text(df, 'ColumnName') for each text column
+
 **RESULT TYPES:**
 - "dataframe": Operation modifies dataframe (filter, sort, clean, etc.)
 - "single_value": Operation returns single value (SUM, AVERAGE, COUNT)
@@ -152,6 +158,15 @@ Example 7: "Total of rows and columns" (user wants both row and column totals)
   "operations": [{
     "python_code": "df['Row Total'] = df.select_dtypes(include=[np.number]).sum(axis=1); col_totals = {}; [col_totals.update({col: df[col].sum()}) for col in df.select_dtypes(include=[np.number]).columns]; first_col = df.columns[0]; col_totals[first_col] = 'Total'; df = pd.concat([df, pd.DataFrame([col_totals])], ignore_index=True)",
     "description": "Add row totals column and column totals row",
+    "result_type": "dataframe"
+  }]
+}
+
+Example 8: "Clean this sheet" or "normalize text"
+{
+  "operations": [{
+    "python_code": "text_cols = [col for col in df.columns if df[col].dtype == 'object']; df = TextCleaner.normalize_text(df, text_cols)",
+    "description": "Normalize text in all text columns",
     "result_type": "dataframe"
   }]
 }
