@@ -86,15 +86,27 @@ class TextCleaner:
         if isinstance(columns, str):
             columns = [columns]
         
-        if keep is None:
+        if keep is None or keep == '':
             # Default: keep alphanumeric, spaces, and common punctuation
             pattern = r'[^a-zA-Z0-9\s.,!?;:\-()]'
         else:
-            pattern = f'[^{keep}]'
+            # Escape special regex characters in keep pattern
+            try:
+                # Test if keep is a valid regex pattern
+                re.compile(keep)
+                pattern = f'[^{keep}]'
+            except re.error:
+                # If invalid regex, escape special characters
+                escaped_keep = re.escape(keep)
+                pattern = f'[^{escaped_keep}]'
         
         for col in columns:
             if col in df.columns:
-                df[col] = df[col].astype(str).str.replace(pattern, '', regex=True)
+                try:
+                    df[col] = df[col].astype(str).str.replace(pattern, '', regex=True)
+                except re.error:
+                    # Fallback to non-regex replace if pattern is invalid
+                    df[col] = df[col].astype(str).str.replace(pattern, '', regex=False)
         
         return df
     
@@ -117,7 +129,14 @@ class TextCleaner:
         
         for col in columns:
             if col in df.columns:
-                df[col] = df[col].astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
+                try:
+                    df[col] = df[col].astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
+                except re.error:
+                    # Fallback if regex fails
+                    df[col] = df[col].astype(str).str.replace('  ', ' ', regex=False)
+                    while df[col].str.contains('  ', regex=False).any():
+                        df[col] = df[col].str.replace('  ', ' ', regex=False)
+                    df[col] = df[col].str.strip()
         
         return df
     
@@ -144,10 +163,14 @@ class TextCleaner:
         
         for col in columns:
             if col in df.columns:
-                if case_sensitive:
-                    df[col] = df[col].astype(str).str.replace(old_text, new_text)
-                else:
-                    df[col] = df[col].astype(str).str.replace(old_text, new_text, case=False, regex=False)
+                try:
+                    if case_sensitive:
+                        df[col] = df[col].astype(str).str.replace(old_text, new_text, regex=False)
+                    else:
+                        df[col] = df[col].astype(str).str.replace(old_text, new_text, case=False, regex=False)
+                except Exception:
+                    # Fallback: use simple string replace
+                    df[col] = df[col].astype(str).str.replace(old_text, new_text, regex=False)
         
         return df
     
