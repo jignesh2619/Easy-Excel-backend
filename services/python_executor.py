@@ -70,41 +70,18 @@ class PythonExecutor:
             
             # Step 5: Update dataframe
             if 'df' in exec_globals:
-                new_df = exec_globals['df']
-                # Validate that dataframe was actually modified (for dataframe operations)
-                if result_type == "dataframe":
-                    # Check if dataframe shape or content changed
-                    if new_df.shape == self.df.shape and new_df.equals(self.df):
-                        logger.warning(f"Dataframe operation '{description}' executed but dataframe appears unchanged. This may indicate the operation didn't work as expected.")
-                        # For extraction operations, provide more specific warning
-                        if "extract" in description.lower() or "email" in description.lower() or "phone" in description.lower():
-                            logger.error(f"Extraction operation '{description}' may have failed - no data was extracted. Verify the extraction pattern matches the data.")
-                            self.execution_log.append(f"⚠️ {description} - No data extracted (check if pattern matches data)")
-                        else:
-                            self.execution_log.append(f"⚠️ {description} - Dataframe unchanged (operation may not have worked)")
-                    else:
-                        self.execution_log.append(f"✓ {description}")
-                        logger.info(f"Successfully executed: {description}")
-                else:
-                    self.execution_log.append(f"✓ {description}")
-                    logger.info(f"Successfully executed: {description}")
-                
-                self.df = new_df
+                self.df = exec_globals['df']
                 # Ensure index is reset after operations
                 if not self.df.index.equals(pd.RangeIndex(len(self.df))):
                     self.df = self.df.reset_index(drop=True)
-            else:
-                # No dataframe in result - this is unusual for dataframe operations
-                if result_type == "dataframe":
-                    logger.warning(f"Dataframe operation '{description}' executed but 'df' not found in result. Operation may have failed.")
-                    self.execution_log.append(f"⚠️ {description} - DataFrame not found in result")
-                else:
-                    self.execution_log.append(f"✓ {description}")
-                    logger.info(f"Successfully executed: {description}")
             
             # Step 6: Store result
             if result is not None:
                 self.result = result
+            
+            # Step 7: Log success
+            self.execution_log.append(f"✓ {description}")
+            logger.info(f"Successfully executed: {description}")
             
             return {
                 "success": True,
@@ -115,12 +92,7 @@ class PythonExecutor:
             }
             
         except NameError as e:
-            error_str = str(e)
-            # Handle specific 'bold' variable error
-            if "bold" in error_str.lower() and ("not defined" in error_str.lower() or "not associated" in error_str.lower()):
-                error_msg = "Execution failed: Cannot use 'bold' as a variable name. For bold formatting, use the 'format' JSON structure in the action plan with 'bold': true, NOT Python code. Example: Use 'format' in action plan, not Python code like 'df[col] = bold'."
-            else:
-                error_msg = self._handle_name_error(e, python_code)
+            error_msg = self._handle_name_error(e, python_code)
             self.errors.append(error_msg)
             self.execution_log.append(f"✗ {description}: {error_msg}")
             raise RuntimeError(error_msg)
@@ -143,18 +115,11 @@ class PythonExecutor:
             logger.error(f"Execution error: {error_msg}\nCode: {python_code[:200]}")
             raise RuntimeError(error_msg)
             
-        except AttributeError as e:
-            error_str = str(e)
-            # Handle common attribute errors with helpful messages
-            if "'StringMethods' object has no attribute 'bold'" in error_str:
-                error_msg = "Execution failed: Cannot apply bold formatting using .str.bold(). Use conditional formatting or format operations instead. Example: Use 'format' in action plan with 'bold': true, not Python code with .str.bold()"
-            elif "'StringMethods' object has no attribute" in error_str:
-                error_msg = f"Execution failed: {error_str}. String methods (.str) don't support this operation. Check pandas documentation for available .str methods."
-            else:
-                error_msg = f"Execution failed: {error_str}"
+        except re.error as e:
+            error_msg = f"Execution failed: Invalid regex pattern - {str(e)}. Use regex=False for simple string replacements."
             self.errors.append(error_msg)
             self.execution_log.append(f"✗ {description}: {error_msg}")
-            logger.error(f"Execution error: {error_msg}\nCode: {python_code[:200]}")
+            logger.error(f"Regex error: {error_msg}\nCode: {python_code[:200]}")
             raise RuntimeError(error_msg)
             
         except Exception as e:
