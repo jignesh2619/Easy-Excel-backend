@@ -90,6 +90,7 @@ You MUST generate Python code for ALL operations. The backend executes your code
 - ALWAYS provide column name: TextCleaner.normalize_text(df, 'ColumnName') or TextCleaner.normalize_text(df, ['Col1', 'Col2'])
 - For multiple columns: Use list: TextCleaner.normalize_text(df, ['Name', 'Address'])
 - For all text columns: text_cols = [col for col in df.columns if df[col].dtype == 'object']\nif text_cols:\n    df = TextCleaner.normalize_text(df, text_cols)
+- When using .str.replace(), ALWAYS use regex=False: df['Col'] = df['Col'].str.replace('old', 'new', regex=False)
 - When using .str.replace(), ALWAYS use regex=False unless you need regex: df['Col'] = df['Col'].str.replace('old', 'new', regex=False)
 
 **RESULT TYPES:**
