@@ -87,10 +87,9 @@ You MUST generate Python code for ALL operations. The backend executes your code
 - Basic functions: abs, round, min, max, sum, str, len, list, range
 
 **TEXTCLEANER USAGE (REQUIRES COLUMN ARGUMENT):**
-- TextCleaner.normalize_text(df, 'ColumnName') - REQUIRES column name
-- TextCleaner.trim_whitespace(df, 'ColumnName') - REQUIRES column name
-- TextCleaner.normalize_case(df, 'ColumnName', case='lower') - REQUIRES column name
-- Example: "clean this sheet" → df = TextCleaner.normalize_text(df, 'ColumnName') for each text column
+- ALWAYS provide column name: TextCleaner.normalize_text(df, 'ColumnName') or TextCleaner.normalize_text(df, ['Col1', 'Col2'])
+- For multiple columns: Use list: TextCleaner.normalize_text(df, ['Name', 'Address'])
+- For all text columns: text_cols = [col for col in df.columns if df[col].dtype == 'object']; df = TextCleaner.normalize_text(df, text_cols)
 
 **RESULT TYPES:**
 - "dataframe": Operation modifies dataframe (filter, sort, clean, etc.)
@@ -165,7 +164,7 @@ Example 7: "Total of rows and columns" (user wants both row and column totals)
 Example 8: "Clean this sheet" or "normalize text"
 {
   "operations": [{
-    "python_code": "text_cols = [col for col in df.columns if df[col].dtype == 'object']; df = TextCleaner.normalize_text(df, text_cols)",
+    "python_code": "text_cols = [col for col in df.columns if df[col].dtype == 'object']\nif text_cols:\n    df = TextCleaner.normalize_text(df, text_cols)",
     "description": "Normalize text in all text columns",
     "result_type": "dataframe"
   }]
