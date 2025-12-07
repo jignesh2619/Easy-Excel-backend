@@ -255,28 +255,36 @@ class TextCleaner:
         
         for col in column:
             if col in df.columns:
-                # Convert to string
-                df[col] = df[col].astype(str)
+                # Convert to string, handling NaN and None values
+                df[col] = df[col].fillna('').astype(str)
                 
-                # Remove trailing unwanted characters (commas, question marks, etc.)
-                df[col] = df[col].str.replace(r'[,?]+$', '', regex=True)  # Remove trailing , and ?
-                df[col] = df[col].str.replace(r'^[,?]+', '', regex=True)  # Remove leading , and ?
+                # Replace 'nan' string (from NaN conversion) with empty string
+                df[col] = df[col].replace('nan', '', regex=False)
+                df[col] = df[col].replace('None', '', regex=False)
                 
-                # Remove multiple consecutive unwanted characters
-                df[col] = df[col].str.replace(r'[,?]{2,}', '', regex=True)  # Remove multiple , or ?
+                # Only process non-empty strings
+                mask = df[col] != ''
                 
-                # Trim whitespace
-                df[col] = df[col].str.strip()
-                
-                # Normalize case
-                if case == 'lower':
-                    df[col] = df[col].str.lower()
-                elif case == 'upper':
-                    df[col] = df[col].str.upper()
-                elif case == 'title':
-                    df[col] = df[col].str.title()
-                elif case == 'sentence':
-                    df[col] = df[col].str.capitalize()
+                if mask.any():
+                    # Remove trailing unwanted characters (commas, question marks, etc.)
+                    df.loc[mask, col] = df.loc[mask, col].str.replace(r'[,?]+$', '', regex=True)  # Remove trailing , and ?
+                    df.loc[mask, col] = df.loc[mask, col].str.replace(r'^[,?]+', '', regex=True)  # Remove leading , and ?
+                    
+                    # Remove multiple consecutive unwanted characters
+                    df.loc[mask, col] = df.loc[mask, col].str.replace(r'[,?]{2,}', '', regex=True)  # Remove multiple , or ?
+                    
+                    # Trim whitespace
+                    df.loc[mask, col] = df.loc[mask, col].str.strip()
+                    
+                    # Normalize case
+                    if case == 'lower':
+                        df.loc[mask, col] = df.loc[mask, col].str.lower()
+                    elif case == 'upper':
+                        df.loc[mask, col] = df.loc[mask, col].str.upper()
+                    elif case == 'title':
+                        df.loc[mask, col] = df.loc[mask, col].str.title()
+                    elif case == 'sentence':
+                        df.loc[mask, col] = df.loc[mask, col].str.capitalize()
         
         return df
 
