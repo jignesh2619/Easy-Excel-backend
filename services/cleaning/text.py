@@ -238,7 +238,7 @@ class TextCleaner:
     def normalize_text(df: pd.DataFrame, column: Union[str, List[str]], 
                        case: str = 'lower') -> pd.DataFrame:
         """
-        Normalize text: trim whitespace and normalize case
+        Normalize text: trim whitespace, normalize case, and remove trailing unwanted characters
         
         Args:
             df: DataFrame to clean
@@ -250,11 +250,33 @@ class TextCleaner:
         """
         df = df.copy()
         
-        # First trim whitespace
-        df = TextCleaner.trim_whitespace(df, column)
+        if isinstance(column, str):
+            column = [column]
         
-        # Then normalize case
-        df = TextCleaner.normalize_case(df, column, case=case)
+        for col in column:
+            if col in df.columns:
+                # Convert to string
+                df[col] = df[col].astype(str)
+                
+                # Remove trailing unwanted characters (commas, question marks, etc.)
+                df[col] = df[col].str.replace(r'[,?]+$', '', regex=True)  # Remove trailing , and ?
+                df[col] = df[col].str.replace(r'^[,?]+', '', regex=True)  # Remove leading , and ?
+                
+                # Remove multiple consecutive unwanted characters
+                df[col] = df[col].str.replace(r'[,?]{2,}', '', regex=True)  # Remove multiple , or ?
+                
+                # Trim whitespace
+                df[col] = df[col].str.strip()
+                
+                # Normalize case
+                if case == 'lower':
+                    df[col] = df[col].str.lower()
+                elif case == 'upper':
+                    df[col] = df[col].str.upper()
+                elif case == 'title':
+                    df[col] = df[col].str.title()
+                elif case == 'sentence':
+                    df[col] = df[col].str.capitalize()
         
         return df
 

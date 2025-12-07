@@ -89,9 +89,11 @@ You MUST generate Python code for ALL operations. The backend executes your code
 **TEXTCLEANER USAGE (REQUIRES COLUMN ARGUMENT):**
 - ALWAYS provide column name: TextCleaner.normalize_text(df, 'ColumnName') or TextCleaner.normalize_text(df, ['Col1', 'Col2'])
 - For multiple columns: Use list: TextCleaner.normalize_text(df, ['Name', 'Address'])
-- For all text columns: text_cols = [col for col in df.columns if df[col].dtype == 'object']\nif text_cols:\n    df = TextCleaner.normalize_text(df, text_cols)
-- When using .str.replace(), ALWAYS use regex=False: df['Col'] = df['Col'].str.replace('old', 'new', regex=False)
-- When using .str.replace(), ALWAYS use regex=False unless you need regex: df['Col'] = df['Col'].str.replace('old', 'new', regex=False)
+- normalize_text() automatically removes trailing/leading unwanted characters (?, ,, etc.) and normalizes case
+- For "clean this sheet": ALWAYS remove unwanted characters from ALL text columns
+- When cleaning, remove trailing/leading: ?, ,, !!, etc. using regex patterns
+- Example for removing unwanted chars: df['Col'] = df['Col'].str.replace(r'[,?]+$', '', regex=True).str.replace(r'^[,?]+', '', regex=True).str.replace(r'[,?]{2,}', '', regex=True).str.strip()
+- For simple text replacement, use regex=False: df['Col'] = df['Col'].str.replace('old', 'new', regex=False)
 
 **RESULT TYPES:**
 - "dataframe": Operation modifies dataframe (filter, sort, clean, etc.)
@@ -165,9 +167,20 @@ Example 7: "Total of rows and columns" (user wants both row and column totals)
 
 Example 8: "Clean this sheet" or "normalize text"
 {
+  "operations": [
+    {
+      "python_code": "text_cols = [col for col in df.columns if df[col].dtype == 'object']\nif text_cols:\n    df = TextCleaner.normalize_text(df, text_cols)\n    df = TextCleaner.remove_extra_spaces(df, text_cols)\n    for col in text_cols:\n        if col in df.columns:\n            df[col] = df[col].astype(str).str.replace(r'[,?]+$', '', regex=True).str.replace(r'^[,?]+', '', regex=True).str.replace(r'[,?]{2,}', '', regex=True).str.replace(r'[!]{2,}', '', regex=True).str.strip()",
+      "description": "Normalize text in all text columns and aggressively remove unwanted characters",
+      "result_type": "dataframe"
+    }
+  ]
+}
+
+Example 9: "Remove unwanted characters like ? and ,, from Status column"
+{
   "operations": [{
-    "python_code": "text_cols = [col for col in df.columns if df[col].dtype == 'object']\nif text_cols:\n    df = TextCleaner.normalize_text(df, text_cols)",
-    "description": "Normalize text in all text columns",
+    "python_code": "df['Status'] = df['Status'].astype(str).str.replace(r'[,?]+$', '', regex=True).str.replace(r'^[,?]+', '', regex=True).str.replace(r'[,?]{2,}', '', regex=True).str.strip()",
+    "description": "Remove trailing and leading unwanted characters from Status column",
     "result_type": "dataframe"
   }]
 }
