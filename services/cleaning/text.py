@@ -210,4 +210,28 @@ class TextCleaner:
         df[new_column] = df[existing_cols].astype(str).agg(separator.join, axis=1)
         
         return df
+    
+    @staticmethod
+    def normalize_text(df: pd.DataFrame, column: Union[str, List[str]], 
+                       case: str = 'lower') -> pd.DataFrame:
+        """
+        Normalize text: trim whitespace and normalize case
+        
+        Args:
+            df: DataFrame to clean
+            column: Column name(s) to normalize
+            case: 'lower', 'upper', 'title', 'sentence' (default: 'lower')
+        
+        Returns:
+            DataFrame with normalized text
+        """
+        df = df.copy()
+        
+        # First trim whitespace
+        df = TextCleaner.trim_whitespace(df, column)
+        
+        # Then normalize case
+        df = TextCleaner.normalize_case(df, column, case=case)
+        
+        return df
 
