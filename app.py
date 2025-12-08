@@ -6,7 +6,6 @@ FastAPI server for processing Excel/CSV files with AI-powered prompts.
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Request, Header, Depends
 from fastapi.responses import JSONResponse, FileResponse
-from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -16,7 +15,6 @@ import traceback
 import logging
 from pathlib import Path
 from datetime import datetime
-import json
 
 # Configure logging
 logging.basicConfig(
@@ -55,6 +53,8 @@ app.add_middleware(
     allow_origins=[
         "https://www.easyexcel.in",
         "https://easyexcel.in",
+        "https://lazyexcel.pro",
+        "https://www.lazyexcel.pro",
         "http://localhost:5173",
         "http://localhost:3000",
         "http://127.0.0.1:5173",
@@ -133,14 +133,10 @@ class ProcessFileResponse(BaseModel):
     summary: list
     action_plan: Optional[dict] = None
     message: Optional[str] = None
-    processed_data: Optional[List[Any]] = None  # JSON representation of processed dataframe (list of row dicts) - using Any to allow flexible key types
+    processed_data: Optional[List[Dict[str, Any]]] = None  # JSON representation of processed dataframe (list of row dicts)
     columns: Optional[List[str]] = None  # Column names
     row_count: Optional[int] = None  # Number of rows
     formatting_metadata: Optional[Dict[str, Any]] = None  # Formatting metadata for preview display
-    
-    class Config:
-        # Allow arbitrary types - FastAPI's jsonable_encoder will handle serialization
-        arbitrary_types_allowed = True
     # Formula engine response format
     type: Optional[str] = None  # "summary" | "table" | "value" | "chart" | "transformation"
     operation: Optional[str] = None  # Operation name (e.g., "sum", "average", "filter", etc.)
@@ -166,25 +162,12 @@ async def health():
 
 
 @app.options("/{full_path:path}")
-async def options_handler(full_path: str, request: Request):
+async def options_handler(full_path: str):
     """Handle OPTIONS requests for CORS preflight"""
-    origin = request.headers.get("origin")
-    allowed_origins = [
-        "https://www.easyexcel.in",
-        "https://easyexcel.in",
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ]
-    
-    # Return the origin if it's allowed, otherwise return the first allowed origin
-    allow_origin = origin if origin in allowed_origins else allowed_origins[0]
-    
     return JSONResponse(
         content={},
         headers={
-            "Access-Control-Allow-Origin": allow_origin,
+            "Access-Control-Allow-Origin": "https://www.easyexcel.in",
             "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
             "Access-Control-Allow-Headers": "*",
             "Access-Control-Allow-Credentials": "true",
@@ -212,35 +195,25 @@ async def process_file(
     processed_file_path = None
     chart_path = None
     
-    import time
-    start_time = time.time()
-    logger.info(f"🚀 [TIMING] Process started at {time.time()}")
-    
     try:
         # 1. Validate file
-        step_start = time.time()
         is_valid, error = validator.validate_file_format(file.filename)
-        logger.info(f"⏱️ [TIMING] Step 1 (validate file format): {time.time() - step_start:.2f}s")
         if not is_valid:
             raise HTTPException(status_code=400, detail=error)
         
         # 2. Save uploaded file
-        step_start = time.time()
         try:
             file_content = await file.read()
             if not file_content or len(file_content) == 0:
                 raise HTTPException(status_code=400, detail="Uploaded file is empty")
             temp_file_path = file_manager.save_uploaded_file(file_content, file.filename)
-            logger.info(f"⏱️ [TIMING] Step 2 (save uploaded file): {time.time() - step_start:.2f}s")
         except Exception as e:
             logger.error(f"Error saving uploaded file: {str(e)}")
             raise HTTPException(status_code=400, detail=f"Failed to save uploaded file: {str(e)}")
         
         # 3. Validate file content
-        step_start = time.time()
         try:
             is_valid, error, df = validator.validate_complete_file(temp_file_path, file.filename)
-            logger.info(f"⏱️ [TIMING] Step 3 (validate file content): {time.time() - step_start:.2f}s, rows: {len(df)}, cols: {len(df.columns)}")
             if not is_valid:
                 file_manager.delete_file(temp_file_path)
                 logger.error(f"File validation failed: {error}")
@@ -253,9 +226,7 @@ async def process_file(
             raise HTTPException(status_code=400, detail=f"Error reading file: {str(e)}. Please ensure the file is not corrupted.")
         
         # 4. Get available columns
-        step_start = time.time()
         available_columns = list(df.columns)
-        logger.info(f"⏱️ [TIMING] Step 4 (get columns): {time.time() - step_start:.2f}s, columns: {len(available_columns)}")
         
         # 5. Get user authentication before processing
         user = None
@@ -273,7 +244,6 @@ async def process_file(
                 user = user_service.get_user_by_api_key(token)
         
         # 6. Prepare representative sample data for LLM context
-        step_start = time.time()
         sample_data = None
         sample_explanation = ""
         data_size_estimate = 0
@@ -281,49 +251,17 @@ async def process_file(
             sample_result = sample_selector.build_sample(df)
             sample_df = sample_result.dataframe
             sample_explanation = sample_result.explanation
-            
-            # Limit sample to max 30 rows to save memory (was 50)
-            max_sample_rows = 30
-            if len(sample_df) > max_sample_rows:
-                sample_df = sample_df.head(max_sample_rows)
-            
-            # Convert datetime columns to strings before serialization
-            import pandas as pd
-            from datetime import datetime as dt
-            for col in sample_df.columns:
-                if pd.api.types.is_datetime64_any_dtype(sample_df[col]):
-                    sample_df[col] = sample_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-            
             sample_data = sample_df.to_dict("records")
             
-            # Convert any remaining datetime objects in sample_data
-            for row in sample_data:
-                for key, value in row.items():
-                    if isinstance(value, dt):
-                        row[key] = value.strftime('%Y-%m-%d %H:%M:%S')
-                    elif pd.isna(value):
-                        row[key] = None
-            
-            # Clear sample_df from memory
-            del sample_df
-            
             import json
-            json_start = time.time()
             data_json = json.dumps(sample_data)
-            logger.info(f"⏱️ [TIMING] JSON dumps for sample: {time.time() - json_start:.2f}s")
             data_size_estimate = len(data_json) // 4
             logger.info(
                 "✅ Sample prepared for LLM: %s rows selected from %s total, explanation: %s",
-                max_sample_rows if len(df) > max_sample_rows else len(df),
+                len(sample_df),
                 len(df),
                 sample_explanation
             )
-        logger.info(f"⏱️ [TIMING] Step 6 (prepare sample data): {time.time() - step_start:.2f}s")
-        
-        # 6a. Validate required columns exist (before deleting df)
-        # We need to check columns before LLM call, but we'll validate again after getting action_plan
-        # This is just a preliminary check if we can determine columns needed from prompt
-        # (We'll do full validation after LLM call with the actual action_plan)
         
         # 7. Check token limits before LLM call (account for full Excel data)
         # Estimate includes: user prompt + system prompt + Excel data + response
@@ -345,7 +283,6 @@ async def process_file(
                 )
         
         # 8. Interpret prompt with LLM
-        step_start = time.time()
         if llm_agent is None:
             raise HTTPException(
                 status_code=500, 
@@ -355,63 +292,38 @@ async def process_file(
         # Get user_id for feedback tracking
         user_id = user["user_id"] if user else None
         
-        logger.info(f"⏱️ [TIMING] About to call LLM at {time.time() - start_time:.2f}s total elapsed")
-        # Don't pass full DataFrame to LLM to save memory - only pass sample_data
-        # Clear df from memory before LLM call to free up memory
-        del df
-        import gc
-        gc.collect()  # Force garbage collection to free memory
-        
         llm_result = llm_agent.interpret_prompt(
             prompt,
             available_columns,
             user_id=user_id,
             sample_data=sample_data,
             sample_explanation=sample_explanation,
-            df=None  # Don't pass full DataFrame - save memory
+            df=df  # Pass DataFrame for chart analysis
         )
-        logger.info(f"⏱️ [TIMING] Step 8 (LLM call): {time.time() - step_start:.2f}s")
         action_plan = llm_result.get("action_plan", {})
         # Add user prompt to action plan so processors can check what user explicitly requested
         action_plan["user_prompt"] = prompt
         
         # Get actual token usage from OpenAI API (includes prompt + data + response)
-        # CRITICAL: Only use actual tokens from OpenAI API, never estimates
-        actual_tokens_used = llm_result.get("tokens_used", 0)
-        
-        # Validate token count is reasonable (sanity check)
-        if actual_tokens_used == 0:
-            logger.warning(f"⚠️ No tokens_used in LLM result, using estimate as fallback: {estimated_tokens}")
-            actual_tokens_used = estimated_tokens
-        elif actual_tokens_used > estimated_tokens * 2:
-            logger.warning(f"⚠️ Actual tokens ({actual_tokens_used}) is more than 2x estimate ({estimated_tokens}). This might indicate an issue.")
+        actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)
         
         # Log actual vs estimated for monitoring
         if actual_tokens_used != estimated_tokens:
             logger.info(f"Token usage: estimated={estimated_tokens}, actual={actual_tokens_used}, difference={actual_tokens_used - estimated_tokens}")
         else:
-            logger.info(f"Token usage: {actual_tokens_used} tokens")
+            logger.info(f"Token usage: {actual_tokens_used} tokens (used estimate as fallback)")
         
-        # 8. Validate required columns exist (reload df from temp file for validation)
+        # 8. Validate required columns exist
         columns_needed = action_plan.get("columns_needed", [])
         if columns_needed:
-            # Reload df just for validation, then delete again
-            import pandas as pd
-            if file.filename.endswith('.csv'):
-                validation_df = pd.read_csv(temp_file_path)
-            else:
-                validation_df = pd.read_excel(temp_file_path, keep_default_na=False)
-            is_valid, error, missing = validator.validate_columns_exist(validation_df, columns_needed)
-            del validation_df  # Free memory immediately
+            is_valid, error, missing = validator.validate_columns_exist(df, columns_needed)
             if not is_valid:
                 file_manager.delete_file(temp_file_path)
                 raise HTTPException(status_code=400, detail=error)
         
         # 7. Process file
-        step_start = time.time()
         processor = ExcelProcessor(temp_file_path)
         processor.load_data()
-        logger.info(f"⏱️ [TIMING] Step 7 (load data): {time.time() - step_start:.2f}s")
         
         # Check if user mentioned cleaning operations in prompt
         cleaning_keywords = ['remove duplicates', 'clean', 'fix formatting', 'handle missing', 'duplicate', 'remove empty', 'normalize']
@@ -437,48 +349,18 @@ async def process_file(
         # If user wants visualization but task is summarize (and no cleaning), that's fine
         # But if cleaning is involved, we already set it to "clean" above
         
-        step_start = time.time()
-        logger.info(f"⏱️ [TIMING] About to execute action plan at {time.time() - start_time:.2f}s total elapsed")
-        try:
-            result = processor.execute_action_plan(action_plan)
-            logger.info(f"⏱️ [TIMING] Action plan execution: {time.time() - step_start:.2f}s")
-        except Exception as e:
-            logger.error(f"❌ Error during action plan execution: {str(e)}", exc_info=True)
-            # Try to continue with whatever data we have - formatting might still be applied
-            # Get the current dataframe even if execution partially failed
-            try:
-                processed_df = processor.get_dataframe()
-                result = {
-                    "df": processed_df,
-                    "summary": processor.summary if hasattr(processor, 'summary') else [f"Warning: Partial execution - {str(e)}"],
-                    "chart_path": None,
-                    "chart_needed": False,
-                    "chart_type": "none",
-                    "formula_result": None,
-                    "task": action_plan.get("task", "execute")
-                }
-                logger.warning(f"⚠️ Continuing with partial results after error")
-            except Exception as e2:
-                logger.error(f"❌ Failed to get dataframe after error: {str(e2)}")
-                raise HTTPException(status_code=500, detail=f"Failed to execute action plan: {str(e)}")
+        result = processor.execute_action_plan(action_plan)
         
         # Double-check: If task ended up as "summarize" but user wanted cleaning, 
         # we need to reload and re-execute with clean task
         final_task = result.get("task", original_task)
         if final_task == "summarize" and user_wants_cleaning:
             # This shouldn't happen if override worked, but just in case:
-            step_start = time.time()
             processor.load_data()  # Reload original data
             action_plan["task"] = "clean"
             if user_wants_chart and action_plan.get("chart_type") == "none":
                 action_plan["chart_type"] = "bar"
-            try:
-                result = processor.execute_action_plan(action_plan)
-                logger.info(f"⏱️ [TIMING] Re-execute action plan: {time.time() - step_start:.2f}s")
-            except Exception as e:
-                logger.error(f"❌ Error during re-execution: {str(e)}", exc_info=True)
-                # Continue with current result
-                logger.warning(f"⚠️ Continuing with previous result after re-execution error")
+            result = processor.execute_action_plan(action_plan)
         
         processed_df = result["df"]
         summary = result["summary"]
@@ -489,11 +371,9 @@ async def process_file(
         task = result.get("task", "summarize")
         
         # 8. Save processed file
-        step_start = time.time()
         output_filename = f"processed_{Path(file.filename).stem}.xlsx"
         output_path = file_manager.output_dir / output_filename
         processed_file_path = processor.save_processed_file(str(output_path))
-        logger.info(f"⏱️ [TIMING] Step 8 (save processed file): {time.time() - step_start:.2f}s")
         
         # 10. Clean up temp file
         file_manager.delete_file(temp_file_path)
@@ -503,59 +383,28 @@ async def process_file(
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
         
         # 12. Convert processed dataframe to JSON for preview
-        # Limit to first 300 rows for preview
-        preview_limit = 300
-        preview_df = processed_df.head(preview_limit) if len(processed_df) > preview_limit else processed_df
-        # Only convert column names to strings (fast operation)
-        preview_df.columns = [str(col) for col in preview_df.columns]
-        
-        # Convert datetime columns to strings before to_dict to prevent serialization errors
+        # Limit to first 1000 rows for preview to avoid large responses
         import pandas as pd
-        from datetime import datetime as dt
-        for col in preview_df.columns:
-            if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
-                preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-            elif preview_df[col].dtype == 'object':
-                # Check if column contains datetime objects
-                sample_val = preview_df[col].dropna()
-                if len(sample_val) > 0 and isinstance(sample_val.iloc[0], dt):
-                    preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, dt) and pd.notna(x) else x)
-        
-        # Convert to dict - handle NaN values
-        processed_data = preview_df.to_dict(orient='records')
-        
-        # Convert any remaining datetime objects and NaN values to strings/None
-        for row in processed_data:
-            for key, value in row.items():
-                if isinstance(value, dt):
-                    row[key] = value.strftime('%Y-%m-%d %H:%M:%S')
-                elif pd.isna(value):
-                    row[key] = ""  # Empty string instead of None to preserve structure
-                elif hasattr(value, 'item'):  # numpy types
-                    try:
-                        row[key] = value.item()
-                    except (ValueError, AttributeError):
-                        row[key] = str(value)
-        
-        # Clear preview_df from memory immediately to prevent OOM
-        del preview_df
-        columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
+        import numpy as np
+        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
+        # Replace NaN/None values with null for proper JSON serialization
+        processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
+        columns = list(processed_df.columns)
         row_count = len(processed_df)
         
-        # 12a. Generate formatting metadata for preview (optimized - only for preview rows)
-        # Get formatting metadata from processor before deleting processed_df
-        formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
-        try:
-            # Only generate for preview rows (already limited to 300) to keep it fast
-            preview_df_for_metadata = processed_df.head(300) if len(processed_df) > 300 else processed_df
-            formatting_metadata = processor.get_formatting_metadata(preview_df_for_metadata)
-            logger.info(f"✅ Generated formatting metadata: {len(formatting_metadata.get('cell_formats', {}))} cells")
-        except Exception as e:
-            logger.warning(f"Failed to generate formatting metadata: {e}")
-            formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
+        # 12a. Get formatting metadata for preview display
+        formatting_metadata = processor.get_formatting_metadata(preview_df)
+        logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
         
-        # Clear processed_df after we've extracted what we need
-        del processed_df
+        # 12b. Add formatting info directly to each cell in processed_data for easier frontend rendering
+        if formatting_metadata.get("cell_formats"):
+            for row_idx, row_data in enumerate(processed_data):
+                for col_name in columns:
+                    cell_key = f"{row_idx}_{col_name}"
+                    if cell_key in formatting_metadata["cell_formats"]:
+                        cell_format = formatting_metadata["cell_formats"][cell_key]
+                        # Add _format suffix to avoid conflicts with actual data
+                        row_data[f"{col_name}_format"] = cell_format
         
         # 13. Determine response type and format for formula engine
         response_type = "table"  # Default
@@ -643,27 +492,21 @@ async def process_file(
             except Exception as e:
                 logger.warning(f"Failed to record feedback: {e}")
         
-        # Use jsonable_encoder to ensure all data is JSON serializable before creating response
-        response_data = {
-            "status": "success",
-            "processed_file_url": processed_file_url,
-            "chart_url": chart_url,
-            "summary": summary,
-            "action_plan": action_plan,
-            "message": "File processed successfully",
-            "processed_data": processed_data,
-            "columns": columns,
-            "row_count": row_count,
-            "formatting_metadata": formatting_metadata,
-            "type": response_type,
-            "operation": operation,
-            "result": result_value
-        }
-        
-        # Encode to ensure all types are JSON serializable
-        response_data = jsonable_encoder(response_data)
-        
-        return ProcessFileResponse(**response_data)
+        return ProcessFileResponse(
+            status="success",
+            processed_file_url=processed_file_url,
+            chart_url=chart_url,
+            summary=summary,
+            action_plan=action_plan,
+            message="File processed successfully",
+            processed_data=processed_data,
+            columns=columns,
+            row_count=row_count,
+            formatting_metadata=formatting_metadata,
+            type=response_type,
+            operation=operation,
+            result=result_value
+        )
         
     except HTTPException:
         raise
@@ -725,36 +568,6 @@ async def process_data(
         
         df = pd.DataFrame(request.data)
         
-        # Clean cell values: Remove ANSI escape codes and rich text formatting metadata
-        # Performance optimization: Combine all cleaning operations into single pass
-        # Pattern 1: [48;5;10mText[0m (ANSI escape codes)
-        # Pattern 2: ||48,5,10mText||0m (old format with pipes)
-        import re
-        ansi_pattern = re.compile(r'\[48;5;10m(.*?)\[0m', re.DOTALL)
-        old_format_pattern = re.compile(r'\|\|48,5,10m(.*?)\|\|0m', re.DOTALL)
-        general_ansi_pattern = re.compile(r'\[\d+(?:;\d+)*m', re.DOTALL)
-        
-        def clean_cell_value(x):
-            """Clean cell value in single pass - removes all ANSI codes and formatting metadata"""
-            if pd.notna(x) and isinstance(x, str):
-                # Apply all cleaning patterns in sequence
-                x = ansi_pattern.sub(r'\1', x)
-                x = old_format_pattern.sub(r'\1', x)
-                x = general_ansi_pattern.sub('', x)
-            return x
-        
-        # Performance optimization: For large datasets in chat, limit cleaning to first 1000 rows
-        # This matches the file upload optimization
-        for col in df.columns:
-            if df[col].dtype == 'object':  # Only process string columns
-                if len(df) > 1000:
-                    # Large dataset: clean first 1000 rows only
-                    df[col] = df[col].astype(str)
-                    df.loc[:999, col] = df.loc[:999, col].apply(clean_cell_value)
-                else:
-                    # Small dataset: clean all rows
-                    df[col] = df[col].astype(str).apply(clean_cell_value)
-        
         # Ensure columns match
         if set(df.columns) != set(request.columns):
             # Reorder columns to match request
@@ -795,41 +608,15 @@ async def process_data(
             sample_result = sample_selector.build_sample(df)
             sample_df = sample_result.dataframe
             sample_explanation = sample_result.explanation
-            # Limit sample to max 30 rows to save memory (was 50)
-            max_sample_rows = 30
-            if len(sample_df) > max_sample_rows:
-                sample_df = sample_df.head(max_sample_rows)
-            
-            # Convert datetime columns to strings before serialization
-            import pandas as pd
-            from datetime import datetime as dt
-            for col in sample_df.columns:
-                if pd.api.types.is_datetime64_any_dtype(sample_df[col]):
-                    sample_df[col] = sample_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-            
             sample_data = sample_df.to_dict("records")
-            
-            # Convert any remaining datetime objects in sample_data
-            for row in sample_data:
-                for key, value in row.items():
-                    if isinstance(value, dt):
-                        row[key] = value.strftime('%Y-%m-%d %H:%M:%S')
-                    elif pd.isna(value):
-                        row[key] = None
-            
-            # Clear sample_df from memory
-            del sample_df
             
             import json
             data_json = json.dumps(sample_data)
             data_size_estimate = len(data_json) // 4
-            
-            # Store row count before deleting df
-            total_rows = len(df)
             logger.info(
                 "✅ Sample prepared for LLM: %s rows selected from %s total, explanation: %s",
-                max_sample_rows if total_rows > max_sample_rows else total_rows,
-                total_rows,
+                len(sample_df),
+                len(df),
                 sample_explanation
             )
         
@@ -862,41 +649,23 @@ async def process_data(
         if user:
             user_id = user["user_id"]
         
-        # Clear df from memory before LLM call to free up memory
-        del df
-        import gc
-        gc.collect()  # Force garbage collection to free memory
-        
         llm_result = llm_agent.interpret_prompt(
             request.prompt,
             available_columns,
             user_id=user_id,
             sample_data=sample_data,
             sample_explanation=sample_explanation,
-            df=None  # Don't pass full DataFrame - save memory
+            df=df
         )
         action_plan = llm_result.get("action_plan", {})
         action_plan["user_prompt"] = request.prompt
         
-        # Get actual token usage from OpenAI API
-        # CRITICAL: Only use actual tokens from OpenAI API, never estimates
-        actual_tokens_used = llm_result.get("tokens_used", 0)
+        actual_tokens_used = llm_result.get("tokens_used", estimated_tokens)
         
-        # Validate token count is reasonable (sanity check)
-        if actual_tokens_used == 0:
-            logger.warning(f"⚠️ No tokens_used in LLM result, using estimate as fallback: {estimated_tokens}")
-            actual_tokens_used = estimated_tokens
-        elif actual_tokens_used > estimated_tokens * 2:
-            logger.warning(f"⚠️ Actual tokens ({actual_tokens_used}) is more than 2x estimate ({estimated_tokens}). This might indicate an issue.")
-        
-        # 7. Validate required columns (reload df from temp file for validation)
+        # 7. Validate required columns
         columns_needed = action_plan.get("columns_needed", [])
         if columns_needed:
-            # Reload df just for validation, then delete again
-            import pandas as pd
-            validation_df = pd.read_csv(temp_file_path)
-            is_valid, error, missing = validator.validate_columns_exist(validation_df, columns_needed)
-            del validation_df  # Free memory immediately
+            is_valid, error, missing = validator.validate_columns_exist(df, columns_needed)
             if not is_valid:
                 if temp_file_path and Path(temp_file_path).exists():
                     file_manager.delete_file(temp_file_path)
@@ -952,83 +721,23 @@ async def process_data(
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
         
         # 12. Convert processed dataframe to JSON for preview
-        # Limit to first 300 rows for preview
-        preview_limit = 300
-        preview_df = processed_df.head(preview_limit) if len(processed_df) > preview_limit else processed_df
-        # Only convert column names to strings (fast operation)
-        preview_df.columns = [str(col) for col in preview_df.columns]
-        
-        # Convert datetime columns to strings before to_dict to prevent serialization errors
-        import pandas as pd
-        from datetime import datetime as dt
-        import numpy as np
-        
-        # Convert all datetime columns first
-        for col in preview_df.columns:
-            if pd.api.types.is_datetime64_any_dtype(preview_df[col]):
-                preview_df[col] = preview_df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-            elif preview_df[col].dtype == 'object':
-                # Check if column contains datetime objects
-                sample_val = preview_df[col].dropna()
-                if len(sample_val) > 0:
-                    first_val = sample_val.iloc[0]
-                    if isinstance(first_val, dt):
-                        preview_df[col] = preview_df[col].apply(lambda x: x.strftime('%Y-%m-%d %H:%M:%S') if isinstance(x, dt) and pd.notna(x) else x)
-        
-        # Convert to dict - handle NaN values
-        processed_data = preview_df.to_dict(orient='records')
-        
-        # Clear preview_df from memory immediately to prevent OOM
-        del preview_df
-        import gc
-        gc.collect()
-        
-        # Comprehensive conversion of all non-serializable types
-        def make_json_serializable(obj):
-            """Recursively convert datetime, numpy, and other non-serializable types"""
-            if isinstance(obj, dt):
-                return obj.strftime('%Y-%m-%d %H:%M:%S')
-            elif isinstance(obj, (np.integer, np.int64, np.int32)):
-                return int(obj)
-            elif isinstance(obj, (np.floating, np.float64, np.float32)):
-                return float(obj)
-            elif isinstance(obj, np.bool_):
-                return bool(obj)
-            elif pd.isna(obj):
-                return ""  # Empty string instead of None to preserve structure
-            elif isinstance(obj, dict):
-                return {k: make_json_serializable(v) for k, v in obj.items()}
-            elif isinstance(obj, (list, tuple)):
-                return [make_json_serializable(item) for item in obj]
-            elif hasattr(obj, 'item'):  # numpy scalar types
-                try:
-                    return obj.item()
-                except (ValueError, AttributeError):
-                    return str(obj)
-            else:
-                return obj
-        
-        # Apply conversion to all rows
-        processed_data = [make_json_serializable(row) for row in processed_data]
-        
-        columns = [str(col) for col in processed_df.columns]  # Ensure all column names are strings
+        preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
+        processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
+        columns = list(processed_df.columns)
         row_count = len(processed_df)
         
-        # 13. Generate formatting metadata for preview (optimized - only for preview rows)
-        # Get formatting metadata from processor before deleting processed_df
-        formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
-        try:
-            # Only generate for preview rows (already limited to 300) to keep it fast
-            preview_df_for_metadata = processed_df.head(300) if len(processed_df) > 300 else processed_df
-            formatting_metadata = processor.get_formatting_metadata(preview_df_for_metadata)
-            logger.info(f"✅ Generated formatting metadata: {len(formatting_metadata.get('cell_formats', {}))} cells")
-        except Exception as e:
-            logger.warning(f"Failed to generate formatting metadata: {e}")
-            formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
+        # 13. Get formatting metadata
+        formatting_metadata = processor.get_formatting_metadata(preview_df)
+        logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
         
-        # Clear processed_df after we've extracted what we need
-        del processed_df
-        gc.collect()  # Force garbage collection
+        # 14. Add formatting info to each cell
+        if formatting_metadata.get("cell_formats"):
+            for row_idx, row_data in enumerate(processed_data):
+                for col_name in columns:
+                    cell_key = f"{row_idx}_{col_name}"
+                    if cell_key in formatting_metadata["cell_formats"]:
+                        cell_format = formatting_metadata["cell_formats"][cell_key]
+                        row_data[f"{col_name}_format"] = cell_format
         
         # 15. Determine response type
         response_type = "table"
@@ -1105,27 +814,21 @@ async def process_data(
             except Exception as e:
                 logger.warning(f"Failed to record feedback: {e}")
         
-        # Use jsonable_encoder to ensure all data is JSON serializable before creating response
-        response_data = {
-            "status": "success",
-            "processed_file_url": processed_file_url,
-            "chart_url": chart_url,
-            "summary": summary,
-            "action_plan": action_plan,
-            "message": "Data processed successfully",
-            "processed_data": processed_data,
-            "columns": columns,
-            "row_count": row_count,
-            "formatting_metadata": formatting_metadata,
-            "type": response_type,
-            "operation": operation,
-            "result": result_value
-        }
-        
-        # Encode to ensure all types are JSON serializable
-        response_data = jsonable_encoder(response_data)
-        
-        return ProcessFileResponse(**response_data)
+        return ProcessFileResponse(
+            status="success",
+            processed_file_url=processed_file_url,
+            chart_url=chart_url,
+            summary=summary,
+            action_plan=action_plan,
+            message="Data processed successfully",
+            processed_data=processed_data,
+            columns=columns,
+            row_count=row_count,
+            formatting_metadata=formatting_metadata,
+            type=response_type,
+            operation=operation,
+            result=result_value
+        )
         
     except HTTPException:
         raise
@@ -1362,38 +1065,6 @@ async def get_current_user_info(user: Dict[str, Any] = Depends(get_current_user)
     return JSONResponse(content={
         "status": "success",
         "user": user
-    })
-
-
-@app.get("/api/users/token-usage")
-async def get_token_usage_analytics(
-    user: Dict[str, Any] = Depends(get_current_user),
-    days: int = 30
-):
-    """
-    Get token usage analytics for the current user.
-    
-    Args:
-        user: Current authenticated user (from dependency)
-        days: Number of days to look back (default: 30, max: 90)
-    
-    Returns:
-        Token usage statistics including:
-        - Total tokens used in the period
-        - Current usage and limit
-        - Breakdown by operation type
-        - Daily usage breakdown
-        - Recent usage history
-    """
-    # Limit days to prevent abuse
-    days = min(max(1, days), 90)
-    
-    analytics = user_service.get_token_usage_analytics(user["user_id"], days=days)
-    
-    return JSONResponse(content={
-        "status": "success",
-        "analytics": analytics,
-        "period_days": days
     })
 
 
