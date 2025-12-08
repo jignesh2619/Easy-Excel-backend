@@ -77,13 +77,16 @@ You MUST generate Python code for ALL operations. The backend executes your code
 3. Use .reset_index(drop=True) after operations that change rows
 4. Code must be self-executable (no external dependencies)
 5. Use available utilities: DateCleaner, TextCleaner, CurrencyCleaner
+6. **CRITICAL: DO NOT use import statements** - All libraries are already available in the execution context
+7. **DO NOT write: import pandas, import numpy, from X import Y, etc.**
+8. **All imports are PRE-LOADED** - just use pd, np, DateCleaner, etc. directly
 
-**AVAILABLE IN EXECUTION CONTEXT:**
+**AVAILABLE IN EXECUTION CONTEXT (PRE-LOADED - NO IMPORTS NEEDED):**
 - df: Current pandas DataFrame
-- pd: Pandas library
-- np: NumPy library
-- DateCleaner, TextCleaner, CurrencyCleaner: Cleaning utilities
-- datetime: Date/time functions
+- pd: Pandas library (already imported)
+- np: NumPy library (already imported)
+- DateCleaner, TextCleaner, CurrencyCleaner: Cleaning utilities (already imported)
+- datetime: Date/time functions (already imported)
 - Basic functions: abs, round, min, max, sum, str, len, list, range
 
 **RESULT TYPES:**
