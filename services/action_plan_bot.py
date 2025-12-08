@@ -509,7 +509,8 @@ If column name is "Id" or "ColumnB" or similar:
 
 **CRITICAL RULES:**
 1. ALWAYS generate python_code in operations (never leave empty)
-2. When adding a SINGLE row, you MUST include BOTH:
+2. **NEVER use import statements** - All libraries (pd, np, DateCleaner, etc.) are pre-loaded in execution context
+3. When adding a SINGLE row, you MUST include BOTH:
    - operations with Python code to calculate values
    - add_row JSON format to add the row
 3. When adding MULTIPLE rows, use ONLY operations with Python code:
