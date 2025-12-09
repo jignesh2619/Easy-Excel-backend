@@ -41,19 +41,6 @@ class SampleSelector:
         if df.empty:
             return SampleResult(df.copy(), "Dataset is empty. Returning empty sample.", {})
 
-        # Performance optimization: For small datasets, skip complex selection
-        if len(df) <= self.max_rows * 2:
-            sample_df = df.head(self.max_rows).copy()
-            return SampleResult(
-                sample_df,
-                f"Small dataset ({len(df)} rows); returning first {len(sample_df)} rows.",
-                {
-                    "total_rows": len(df),
-                    "sample_rows": len(sample_df),
-                    "strategy": "simple_head"
-                }
-            )
-
         if len(df) <= self.min_rows:
             return SampleResult(df.copy(), f"Dataset contains <= {self.min_rows} rows; returning all rows.", {
                 "total_rows": len(df),
@@ -110,7 +97,6 @@ class SampleSelector:
         selected = set()
         
         # Strategy 1: Quantile-based sampling for numeric columns (ensures distribution)
-        # Performance optimization: For large datasets, sample first before calculating percentiles
         if numeric_cols:
             # Use percentiles: 0%, 25%, 50%, 75%, 100% for each numeric column
             for col in numeric_cols[:5]:  # Limit to first 5 numeric cols to avoid too many selections
@@ -118,25 +104,13 @@ class SampleSelector:
                 if len(col_data) < 2:
                     continue
                 
-                # Performance: For large datasets, use sample for percentile calculation
-                if len(col_data) > 2000:
-                    sample_data = col_data.sample(min(2000, len(col_data)), random_state=42)
-                    percentiles = [0, 25, 50, 75, 100]
-                    for p in percentiles:
-                        if len(sample_data) > 0:
-                            value = np.percentile(sample_data, p)
-                            # Find row closest to this percentile value in full dataset
-                            closest_idx = (col_data - value).abs().idxmin()
-                            selected.add(int(closest_idx))
-                else:
-                    # Small dataset: use full data
-                    percentiles = [0, 25, 50, 75, 100]
-                    for p in percentiles:
-                        if len(col_data) > 0:
-                            value = np.percentile(col_data, p)
-                            # Find row closest to this percentile value
-                            closest_idx = (col_data - value).abs().idxmin()
-                            selected.add(int(closest_idx))
+                percentiles = [0, 25, 50, 75, 100]
+                for p in percentiles:
+                    if len(col_data) > 0:
+                        value = np.percentile(col_data, p)
+                        # Find row closest to this percentile value
+                        closest_idx = (col_data - value).abs().idxmin()
+                        selected.add(int(closest_idx))
         
         # Strategy 2: Categorical diversity - one row per unique value (up to reasonable limit)
         if categorical_cols:
@@ -169,26 +143,14 @@ class SampleSelector:
                         selected.add(int(mid_idx))
         
         # Strategy 4: Edge cases - rows with most/least missing values
-        # Performance optimization: For large datasets, sample first
-        if len(df) > 2000:
-            sample_df = df.sample(min(2000, len(df)), random_state=42)
-            missing_counts = sample_df.isna().sum(axis=1)
-            if len(missing_counts) > 0:
-                # Row with most missing values (from sample)
-                most_missing_idx = missing_counts.idxmax()
-                selected.add(int(most_missing_idx))
-                # Row with least missing values (from sample)
-                least_missing_idx = missing_counts.idxmin()
-                selected.add(int(least_missing_idx))
-        else:
-            missing_counts = df.isna().sum(axis=1)
-            if len(missing_counts) > 0:
-                # Row with most missing values
-                most_missing_idx = missing_counts.idxmax()
-                selected.add(int(most_missing_idx))
-                # Row with least missing values (most complete)
-                least_missing_idx = missing_counts.idxmin()
-                selected.add(int(least_missing_idx))
+        missing_counts = df.isna().sum(axis=1)
+        if len(missing_counts) > 0:
+            # Row with most missing values
+            most_missing_idx = missing_counts.idxmax()
+            selected.add(int(most_missing_idx))
+            # Row with least missing values (most complete)
+            least_missing_idx = missing_counts.idxmin()
+            selected.add(int(least_missing_idx))
         
         # Strategy 5: Outlier detection for numeric columns
         if numeric_cols:

@@ -77,16 +77,13 @@ You MUST generate Python code for ALL operations. The backend executes your code
 3. Use .reset_index(drop=True) after operations that change rows
 4. Code must be self-executable (no external dependencies)
 5. Use available utilities: DateCleaner, TextCleaner, CurrencyCleaner
-6. **CRITICAL: DO NOT use import statements** - All libraries are already available in the execution context
-7. **DO NOT write: import pandas, import numpy, from X import Y, etc.**
-8. **All imports are PRE-LOADED** - just use pd, np, DateCleaner, etc. directly
 
-**AVAILABLE IN EXECUTION CONTEXT (PRE-LOADED - NO IMPORTS NEEDED):**
+**AVAILABLE IN EXECUTION CONTEXT:**
 - df: Current pandas DataFrame
-- pd: Pandas library (already imported)
-- np: NumPy library (already imported)
-- DateCleaner, TextCleaner, CurrencyCleaner: Cleaning utilities (already imported)
-- datetime: Date/time functions (already imported)
+- pd: Pandas library
+- np: NumPy library
+- DateCleaner, TextCleaner, CurrencyCleaner: Cleaning utilities
+- datetime: Date/time functions
 - Basic functions: abs, round, min, max, sum, str, len, list, range
 
 **RESULT TYPES:**
@@ -160,21 +157,18 @@ Example 7: "Total of rows and columns" (user wants both row and column totals)
 }
 
 **COLUMN REFERENCE HANDLING:**
-When user mentions "column C", "column A", "col B", etc.:
-1. FIRST check if there's a column named "C", "A", "B" (exact name match)
+When user mentions "column C", "column A", etc.:
+1. FIRST check if there's a column named "C" or "A" (exact name match)
 2. If NO column with that name exists, interpret as Excel column letter:
-   - Column A = 1st column (index 0) = df.columns[0]
-   - Column B = 2nd column (index 1) = df.columns[1]
-   - Column C = 3rd column (index 2) = df.columns[2]
+   - Column A = 1st column (index 0)
+   - Column B = 2nd column (index 1)
+   - Column C = 3rd column (index 2)
    - etc.
 3. Use the ACTUAL column name from available_columns list in your Python code
 4. Example: User says "remove column C"
    - Check: Is there a column named "C"? If yes, use it.
-   - If no: Column C = index 2, get actual name: df.columns[2] or available_columns[2]
-   - Generate: df = df.drop(columns=[df.columns[2]])  # NOT df.drop(columns=['C'])
-5. Example: User says "fill col B with 1-20"
-   - Column B = 2nd column (index 1) = df.columns[1]
-   - Generate: df[df.columns[1]].iloc[:20] = range(1, 21)  # Fill first 20 rows
+   - If no: Column C = index 2, get actual name: available_columns[2]
+   - Generate: df = df.drop(columns=['ActualColumnName'])  # NOT df.drop(columns=['C'])
 
 ═══════════════════════════════════════════════════════════════════════════════
 📊 ADDING ROWS AND COLUMNS - CRITICAL INSTRUCTIONS
@@ -357,55 +351,18 @@ Example - Adding total row for Jan column:
 → These mean: Add a total row at the BOTTOM of the column with the sum value
 → Use JSON format with "add_row" and calculate the sum in operations first
 
-**WHEN USER ASKS TO FILL EXISTING COLUMN WITH SEQUENTIAL DATA:**
-- User: "fill column B with 1-20"
-- User: "fill col B with numbers 1 to 20"
-- User: "put 1-20 in column B"
-→ These mean: Fill the EXISTING rows in column B with sequential numbers
-→ If DataFrame has N rows and user wants 1-M (where M < N), fill first M rows with 1-M
-→ If DataFrame has N rows and user wants 1-M (where M >= N), fill all N rows with 1-N
-→ Use operations with Python code to assign values to existing column
-
-**CORRECT - Filling existing column with sequential numbers (e.g., fill column B with 1-20):**
-If DataFrame has 23 rows and user wants 1-20:
-{
-  "operations": [{
-    "python_code": "col_name = df.columns[1] if len(df.columns) > 1 else 'B'; num_rows = min(20, len(df)); df[col_name] = [i+1 if i < num_rows else df[col_name].iloc[i] for i in range(len(df))]",
-    "description": "Fill column B with numbers 1-20 in first 20 rows",
-    "result_type": "dataframe"
-  }]
-}
-
-**CORRECT - Filling existing column with sequential numbers (simpler approach):**
-{
-  "operations": [{
-    "python_code": "col_name = df.columns[1] if len(df.columns) > 1 else 'B'; df[col_name].iloc[:20] = range(1, 21)",
-    "description": "Fill first 20 rows of column B with numbers 1-20",
-    "result_type": "dataframe"
-  }]
-}
-
-**CORRECT - Filling entire column with sequential numbers (1 to N where N = number of rows):**
-{
-  "operations": [{
-    "python_code": "col_name = df.columns[1] if len(df.columns) > 1 else 'B'; df[col_name] = [i+1 for i in range(len(df))]",
-    "description": "Fill column B with sequential numbers 1 to N",
-    "result_type": "dataframe"
-  }]
-}
-
 **WHEN USER ASKS TO ADD MULTIPLE ROWS WITH SEQUENTIAL DATA:**
 - User: "add numbers 1-50 in column B"
 - User: "add 50 rows with numbers 1-50"
-- User: "add 50 new rows with 1 to 50"
+- User: "fill column B with 1 to 50"
 → These mean: Add 50 NEW ROWS to the DataFrame, each with a number in column B
 → Use operations with Python code to add multiple rows at once
 → DO NOT use add_row JSON format for multiple rows - use operations instead
 
-**CORRECT - Adding multiple rows with sequential data (e.g., add 50 new rows with numbers 1-50 in column B):**
+**CORRECT - Adding multiple rows with sequential data (e.g., numbers 1-50 in column B):**
 {
   "operations": [{
-    "python_code": "col_name = df.columns[1] if len(df.columns) > 1 else 'B'; new_rows = [{col_name: i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
+    "python_code": "new_rows = [{'B': i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
     "description": "Add 50 new rows with numbers 1-50 in column B",
     "result_type": "dataframe"
   }]
@@ -421,13 +378,13 @@ If column name is "Id" or "ColumnB" or similar:
   }]
 }
 
-**CRITICAL RULES FOR FILLING COLUMNS:**
-1. When FILLING EXISTING column: Use df[col_name].iloc[:N] = range(1, N+1) or list comprehension
-2. When ADDING NEW rows: Use pd.concat with list of dictionaries
-3. NEVER assign a list directly to df[column] if list length != DataFrame length - this causes "Length of values does not match length of index" error
-4. If user says "fill column X with 1-20" and DataFrame has 23 rows, fill first 20 rows only
-5. If user says "fill column X with 1-20" and DataFrame has 15 rows, fill all 15 rows with 1-15
-6. Always check DataFrame length before assigning values
+**CRITICAL RULES FOR ADDING MULTIPLE ROWS:**
+1. When adding MULTIPLE rows (more than 1), use operations with Python code
+2. Create a list of dictionaries, each dictionary is one row
+3. Each dictionary should contain ONLY the columns you need to fill
+4. Use pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True) to add all rows at once
+5. DO NOT try to assign a list directly to df.loc or df[column] - this causes "Length of values does not match length of index" error
+6. DO NOT use add_row JSON format for multiple rows - it's only for single rows
 
 **EXAMPLE - User asks "sum of column Jan":**
 {
@@ -491,6 +448,9 @@ If column name is "Id" or "ColumnB" or similar:
 4. add_row JSON format is ONLY for adding ONE row at a time
 5. For multiple rows, create a list of dictionaries in operations and use pd.concat
 6. Reference temporary columns in add_row.data using string expressions (e.g., "df['_temp_sum'].iloc[0]")
+   - CRITICAL: Temporary columns MUST be created in operations BEFORE add_row references them
+   - If you create a temporary column, make sure it exists in the DataFrame before using it in add_row
+   - Example: operations creates df['_temp_sum'] = df['Column'].sum(), then add_row can use "df['_temp_sum'].iloc[0]"
 7. Clean up temporary columns after adding the row (add another operation to drop them)
 8. Use position: -1 to add at the end (bottom for rows, right for columns)
 9. In add_row.data, only specify the columns you need to fill - other columns will be empty
@@ -502,6 +462,12 @@ If column name is "Id" or "ColumnB" or similar:
 - Multiple rows = Operations ONLY (with list of dictionaries)
 - NEVER try to assign a list of values directly to a column - always use pd.concat with DataFrame
 
+**CRITICAL RULES FOR TEMPORARY COLUMNS:**
+- ALWAYS create temporary columns in operations BEFORE referencing them in add_row.data
+- Temporary columns must exist in the DataFrame when add_row tries to use them
+- If you create df['_temp_X'] in operations, make sure it's not dropped before add_row runs
+- Verify column names match exactly (case-sensitive, no typos)
+
 **REMEMBER:** The system evaluates DataFrame expressions in add_row.data values, so you can use:
 - "df['ColumnName'].iloc[0]" to get a value from a column
 - "df.columns[0]" to get the first column name
@@ -509,8 +475,7 @@ If column name is "Id" or "ColumnB" or similar:
 
 **CRITICAL RULES:**
 1. ALWAYS generate python_code in operations (never leave empty)
-2. **NEVER use import statements** - All libraries (pd, np, DateCleaner, etc.) are pre-loaded in execution context
-3. When adding a SINGLE row, you MUST include BOTH:
+2. When adding a SINGLE row, you MUST include BOTH:
    - operations with Python code to calculate values
    - add_row JSON format to add the row
 3. When adding MULTIPLE rows, use ONLY operations with Python code:

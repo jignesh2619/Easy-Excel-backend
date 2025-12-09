@@ -107,17 +107,17 @@ class DataValidator:
                 # If sheet_name is None, use 0 to get first sheet
                 try:
                     if sheet_name is None:
-                        df = pd.read_excel(file_path, sheet_name=0, engine='openpyxl' if file_ext == '.xlsx' else None, keep_default_na=False)
+                        df = pd.read_excel(file_path, sheet_name=0, engine='openpyxl' if file_ext == '.xlsx' else None)
                     else:
-                        df = pd.read_excel(file_path, sheet_name=sheet_name, engine='openpyxl' if file_ext == '.xlsx' else None, keep_default_na=False)
+                        df = pd.read_excel(file_path, sheet_name=sheet_name, engine='openpyxl' if file_ext == '.xlsx' else None)
                 except Exception as e:
                     # Try without engine specification for .xls files
                     if file_ext == '.xls':
                         try:
                             if sheet_name is None:
-                                df = pd.read_excel(file_path, sheet_name=0, keep_default_na=False)
+                                df = pd.read_excel(file_path, sheet_name=0)
                             else:
-                                df = pd.read_excel(file_path, sheet_name=sheet_name, keep_default_na=False)
+                                df = pd.read_excel(file_path, sheet_name=sheet_name)
                         except Exception as e2:
                             return False, f"Error reading Excel file. The file may be corrupted or in an unsupported format. Details: {str(e2)}", None
                     else:

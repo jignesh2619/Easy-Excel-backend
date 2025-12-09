@@ -86,27 +86,15 @@ class TextCleaner:
         if isinstance(columns, str):
             columns = [columns]
         
-        if keep is None or keep == '':
+        if keep is None:
             # Default: keep alphanumeric, spaces, and common punctuation
             pattern = r'[^a-zA-Z0-9\s.,!?;:\-()]'
         else:
-            # Escape special regex characters in keep pattern
-            try:
-                # Test if keep is a valid regex pattern
-                re.compile(keep)
-                pattern = f'[^{keep}]'
-            except re.error:
-                # If invalid regex, escape special characters
-                escaped_keep = re.escape(keep)
-                pattern = f'[^{escaped_keep}]'
+            pattern = f'[^{keep}]'
         
         for col in columns:
             if col in df.columns:
-                try:
-                    df[col] = df[col].astype(str).str.replace(pattern, '', regex=True)
-                except re.error:
-                    # Fallback to non-regex replace if pattern is invalid
-                    df[col] = df[col].astype(str).str.replace(pattern, '', regex=False)
+                df[col] = df[col].astype(str).str.replace(pattern, '', regex=True)
         
         return df
     
@@ -129,14 +117,7 @@ class TextCleaner:
         
         for col in columns:
             if col in df.columns:
-                try:
-                    df[col] = df[col].astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
-                except re.error:
-                    # Fallback if regex fails
-                    df[col] = df[col].astype(str).str.replace('  ', ' ', regex=False)
-                    while df[col].str.contains('  ', regex=False).any():
-                        df[col] = df[col].str.replace('  ', ' ', regex=False)
-                    df[col] = df[col].str.strip()
+                df[col] = df[col].astype(str).str.replace(r'\s+', ' ', regex=True).str.strip()
         
         return df
     
@@ -163,14 +144,10 @@ class TextCleaner:
         
         for col in columns:
             if col in df.columns:
-                try:
-                    if case_sensitive:
-                        df[col] = df[col].astype(str).str.replace(old_text, new_text, regex=False)
-                    else:
-                        df[col] = df[col].astype(str).str.replace(old_text, new_text, case=False, regex=False)
-                except Exception:
-                    # Fallback: use simple string replace
-                    df[col] = df[col].astype(str).str.replace(old_text, new_text, regex=False)
+                if case_sensitive:
+                    df[col] = df[col].astype(str).str.replace(old_text, new_text)
+                else:
+                    df[col] = df[col].astype(str).str.replace(old_text, new_text, case=False, regex=False)
         
         return df
     
@@ -231,60 +208,6 @@ class TextCleaner:
         
         # Merge columns
         df[new_column] = df[existing_cols].astype(str).agg(separator.join, axis=1)
-        
-        return df
-    
-    @staticmethod
-    def normalize_text(df: pd.DataFrame, column: Union[str, List[str]], 
-                       case: str = 'lower') -> pd.DataFrame:
-        """
-        Normalize text: trim whitespace, normalize case, and remove trailing unwanted characters
-        
-        Args:
-            df: DataFrame to clean
-            column: Column name(s) to normalize
-            case: 'lower', 'upper', 'title', 'sentence' (default: 'lower')
-        
-        Returns:
-            DataFrame with normalized text
-        """
-        df = df.copy()
-        
-        if isinstance(column, str):
-            column = [column]
-        
-        for col in column:
-            if col in df.columns:
-                # Convert to string, handling NaN and None values
-                df[col] = df[col].fillna('').astype(str)
-                
-                # Replace 'nan' string (from NaN conversion) with empty string
-                df[col] = df[col].replace('nan', '', regex=False)
-                df[col] = df[col].replace('None', '', regex=False)
-                
-                # Only process non-empty strings
-                mask = df[col] != ''
-                
-                if mask.any():
-                    # Remove trailing unwanted characters (commas, question marks, etc.)
-                    df.loc[mask, col] = df.loc[mask, col].str.replace(r'[,?]+$', '', regex=True)  # Remove trailing , and ?
-                    df.loc[mask, col] = df.loc[mask, col].str.replace(r'^[,?]+', '', regex=True)  # Remove leading , and ?
-                    
-                    # Remove multiple consecutive unwanted characters
-                    df.loc[mask, col] = df.loc[mask, col].str.replace(r'[,?]{2,}', '', regex=True)  # Remove multiple , or ?
-                    
-                    # Trim whitespace
-                    df.loc[mask, col] = df.loc[mask, col].str.strip()
-                    
-                    # Normalize case
-                    if case == 'lower':
-                        df.loc[mask, col] = df.loc[mask, col].str.lower()
-                    elif case == 'upper':
-                        df.loc[mask, col] = df.loc[mask, col].str.upper()
-                    elif case == 'title':
-                        df.loc[mask, col] = df.loc[mask, col].str.title()
-                    elif case == 'sentence':
-                        df.loc[mask, col] = df.loc[mask, col].str.capitalize()
         
         return df
 

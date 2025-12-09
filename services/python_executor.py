@@ -115,13 +115,6 @@ class PythonExecutor:
             logger.error(f"Execution error: {error_msg}\nCode: {python_code[:200]}")
             raise RuntimeError(error_msg)
             
-        except re.error as e:
-            error_msg = f"Execution failed: Invalid regex pattern - {str(e)}. Use regex=False for simple string replacements."
-            self.errors.append(error_msg)
-            self.execution_log.append(f"✗ {description}: {error_msg}")
-            logger.error(f"Regex error: {error_msg}\nCode: {python_code[:200]}")
-            raise RuntimeError(error_msg)
-            
         except Exception as e:
             error_msg = f"Execution failed: {str(e)}"
             self.errors.append(error_msg)

@@ -1138,9 +1138,19 @@ class ExcelProcessor:
                             evaluated_data[actual_col] = evaluated_value.item()
                         else:
                             evaluated_data[actual_col] = evaluated_value
+                    except KeyError as e:
+                        # Column not found - provide helpful error message
+                        error_msg = f"Column not found in add_row: {str(e)}. Available columns: {list(self.df.columns)}"
+                        # Check if it's a temporary column that should have been created
+                        if '_temp_' in str(e):
+                            error_msg += f"\nNote: Temporary column {str(e)} was referenced but not found. Make sure operations create this column before add_row uses it."
+                        raise RuntimeError(error_msg)
                     except Exception as e:
-                        # If evaluation fails, use the string value as-is
-                        evaluated_data[actual_col] = value
+                        # If evaluation fails, provide better error message
+                        error_msg = f"Failed to evaluate expression '{value}' in add_row: {str(e)}"
+                        if '_temp_' in value:
+                            error_msg += f"\nNote: Temporary column referenced but may not exist. Available columns: {list(self.df.columns)}"
+                        raise RuntimeError(error_msg)
                 else:
                     evaluated_data[actual_col] = value
             else:

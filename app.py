@@ -53,8 +53,6 @@ app.add_middleware(
     allow_origins=[
         "https://www.easyexcel.in",
         "https://easyexcel.in",
-        "https://lazyexcel.pro",
-        "https://www.lazyexcel.pro",
         "http://localhost:5173",
         "http://localhost:3000",
         "http://127.0.0.1:5173",
