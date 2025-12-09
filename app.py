@@ -1,5 +1,5 @@
 """
-EasyExcel Backend API
+LazyExcel Backend API
 
 FastAPI server for processing Excel/CSV files with AI-powered prompts.
 """
@@ -42,7 +42,7 @@ from services.sample_selector import SampleSelector
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="EasyExcel API",
+    title="LazyExcel API",
     description="AI-powered Excel/CSV processing service",
     version="1.0.0"
 )
