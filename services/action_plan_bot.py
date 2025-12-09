@@ -474,12 +474,12 @@ If column name is "Id" or "ColumnB" or similar:
 - Any valid DataFrame expression that returns a value
 
 **TEXT REPLACEMENT AND CHARACTER REMOVAL:**
-When removing or replacing special characters (*, ?, +, (, ), [, ], {, }, ^, $, |, \, etc.):
+When removing or replacing special characters (asterisk, question mark, plus, parentheses, brackets, braces, caret, dollar, pipe, backslash, etc.):
 - ALWAYS use regex=False for simple character removal/replacement
 - Example: df['Column'] = df['Column'].str.replace('*', '', regex=False)
 - Example: df['Column'] = df['Column'].str.replace('"', '', regex=False)
 - Example: df['Column'] = df['Column'].str.replace('?', '', regex=False)
-- Only use regex=True when you need pattern matching (e.g., r'\d+' for digits)
+- Only use regex=True when you need pattern matching (e.g., r'\\d+' for digits)
 - For removing multiple characters, use multiple str.replace() calls with regex=False
 - Example: df['Column'] = df['Column'].str.replace('*', '', regex=False).str.replace('?', '', regex=False)
 
