@@ -1113,6 +1113,42 @@ class ExcelProcessor:
         # Evaluate DataFrame column references in row_data values
         # This allows add_row.data to reference calculated values from operations
         evaluated_data = {}
+        
+        # First, validate that any temporary columns referenced actually exist
+        temp_columns_referenced = []
+        for col, value in row_data.items():
+            if isinstance(value, str) and '_temp_' in value:
+                # Extract column name from expression like "df['_temp_profit_sum'].iloc[0]"
+                import re
+                matches = re.findall(r"df\['([^']+)'\]|df\[\"([^\"]+)\"\]", value)
+                for match in matches:
+                    temp_col = match[0] or match[1]
+                    if temp_col.startswith('_temp_') and temp_col not in self.df.columns:
+                        temp_columns_referenced.append(temp_col)
+        
+        if temp_columns_referenced:
+            # Try to find similar column names (without _temp_ prefix)
+            available_cols = list(self.df.columns)
+            suggestions = {}
+            for temp_col in temp_columns_referenced:
+                base_name = temp_col.replace('_temp_', '').replace('_sum', '').replace('_', ' ').strip()
+                # Try to find matching column
+                for col in available_cols:
+                    if base_name.lower() in col.lower() or col.lower() in base_name.lower():
+                        suggestions[temp_col] = col
+                        break
+            
+            if suggestions:
+                error_msg = f"Temporary columns not found: {temp_columns_referenced}. "
+                error_msg += f"Available columns: {available_cols}. "
+                error_msg += f"Did you mean to use these columns instead? {suggestions}"
+                raise RuntimeError(error_msg)
+            else:
+                error_msg = f"Temporary columns not found: {temp_columns_referenced}. "
+                error_msg += f"Available columns: {available_cols}. "
+                error_msg += "Make sure operations create these temporary columns before add_row uses them."
+                raise RuntimeError(error_msg)
+        
         for col, value in row_data.items():
             # Handle column name that might be a DataFrame expression (e.g., df.columns[0])
             actual_col = col
