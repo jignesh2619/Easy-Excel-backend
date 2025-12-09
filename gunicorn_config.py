@@ -8,11 +8,12 @@ import os
 bind = "127.0.0.1:8000"
 backlog = 2048
 
-# Worker processes
-workers = multiprocessing.cpu_count() * 2 + 1
+# Worker processes - Reduced for 512MB server
+# Use only 2 workers to prevent OOM on small servers
+workers = 2
 worker_class = "uvicorn.workers.UvicornWorker"
 worker_connections = 1000
-timeout = 120
+timeout = 300  # Increased timeout for large file processing
 keepalive = 5
 
 # Logging
