@@ -473,6 +473,16 @@ If column name is "Id" or "ColumnB" or similar:
 - "df.columns[0]" to get the first column name
 - Any valid DataFrame expression that returns a value
 
+**TEXT REPLACEMENT AND CHARACTER REMOVAL:**
+When removing or replacing special characters (*, ?, +, (, ), [, ], {, }, ^, $, |, \, etc.):
+- ALWAYS use regex=False for simple character removal/replacement
+- Example: df['Column'] = df['Column'].str.replace('*', '', regex=False)
+- Example: df['Column'] = df['Column'].str.replace('"', '', regex=False)
+- Example: df['Column'] = df['Column'].str.replace('?', '', regex=False)
+- Only use regex=True when you need pattern matching (e.g., r'\d+' for digits)
+- For removing multiple characters, use multiple str.replace() calls with regex=False
+- Example: df['Column'] = df['Column'].str.replace('*', '', regex=False).str.replace('?', '', regex=False)
+
 **CRITICAL RULES:**
 1. ALWAYS generate python_code in operations (never leave empty)
 2. When adding a SINGLE row, you MUST include BOTH:
@@ -490,6 +500,7 @@ If column name is "Id" or "ColumnB" or similar:
 9. When using add_row, only specify columns you need in data - other columns will be empty
 10. Calculate values in operations first, then reference them in add_row.data using expressions
 11. NEVER assign a list of values directly to df[column] or df.loc - always use pd.concat with DataFrame
+12. CRITICAL: When removing/replacing special characters (*, ?, +, etc.), ALWAYS use regex=False to avoid regex errors
 """
 
 
