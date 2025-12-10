@@ -670,11 +670,15 @@ Include "operations" array with "python_code" for each operation.
                     raise ValueError(f"Could not parse JSON from response: {content[:200]}")
             
             # Normalize action plan
-            logger.info(f"🔍 Action plan before normalization - operations count: {len(action_plan.get('operations', []))}")
+            ops_before = action_plan.get('operations', [])
+            logger.info(f"🔍 Action plan before normalization - operations count: {len(ops_before)}")
+            if ops_before:
+                logger.info(f"🔍 Operations before normalization: {json.dumps([{'description': op.get('description', 'No desc'), 'python_code': op.get('python_code', '')[:50]} for op in ops_before], indent=2)}")
             normalized_plan = self._normalize_action_plan(action_plan)
-            logger.info(f"🔍 Action plan after normalization - operations count: {len(normalized_plan.get('operations', []))}")
-            if normalized_plan.get('operations'):
-                logger.info(f"🔍 Operations descriptions: {[op.get('description', 'No description') for op in normalized_plan.get('operations', [])]}")
+            ops_after = normalized_plan.get('operations', [])
+            logger.info(f"🔍 Action plan after normalization - operations count: {len(ops_after)}")
+            if ops_after:
+                logger.info(f"🔍 Operations after normalization: {json.dumps([{'description': op.get('description', 'No desc'), 'python_code': op.get('python_code', '')[:50]} for op in ops_after], indent=2)}")
             
             prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
             completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
