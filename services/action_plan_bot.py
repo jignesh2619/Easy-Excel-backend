@@ -483,6 +483,41 @@ When removing or replacing special characters (asterisk, question mark, plus, pa
 - For removing multiple characters, use multiple str.replace() calls with regex=False
 - Example: df['Column'] = df['Column'].str.replace('*', '', regex=False).str.replace('?', '', regex=False)
 
+**EXTRACTING NUMERIC VALUES FROM FORMATTED STRINGS:**
+When a column contains formatted data (e.g., "Name | $1479", "Product: $50.99", "Sales: 1,234") and user wants to extract JUST the numeric value:
+- ALWAYS use str.extract() with regex pattern to extract numeric values
+- DO NOT just copy the entire string - extract only the numeric part
+- Example: df['Sales'] = df['Combined Data'].str.extract(r'\\$([\\d,]+)')[0].str.replace(',', '', regex=False).astype(float)
+- Example: df['Price'] = df['Description'].str.extract(r'\\$([\\d.]+)')[0].astype(float)
+- Example: df['Amount'] = df['Text'].str.extract(r'([\\d,]+)')[0].str.replace(',', '', regex=False).astype(float)
+- Handle commas in numbers: extract first, then remove commas, then convert to float
+- If extraction fails for some rows, they will be NaN - that's okay
+- When user says "fill col B with ref A" and A contains formatted data like "Name | $Value", extract ONLY the numeric part
+
+**CORRECT - Extracting sales numbers from "Name | $Value" format:**
+User: "fill col b with ref a" where column A is "Ellie | $1479"
+{
+  "add_column": {
+    "name": "Sales",
+    "position": 1,
+    "default_value": ""
+  },
+  "operations": [{
+    "python_code": "df['Sales'] = df['Combined Data'].str.extract(r'\\$([\\d,]+)')[0].str.replace(',', '', regex=False).astype(float)",
+    "description": "Extract numeric sales values from Combined Data column",
+    "result_type": "new_column"
+  }]
+}
+
+**WRONG - Just copying the entire string:**
+{
+  "operations": [{
+    "python_code": "df['Sales'] = df['Combined Data']",  // WRONG - copies entire string
+    "description": "Fill Sales column",
+    "result_type": "new_column"
+  }]
+}
+
 **CRITICAL RULES:**
 1. ALWAYS generate python_code in operations (never leave empty)
 2. When adding a SINGLE row, you MUST include BOTH:
@@ -613,6 +648,9 @@ Reasoning: {', '.join(task_suggestions.get('reasoning', []))}
 {column_mapping}
 {similar_examples_text}
 {sample_explanation_text}
+
+**IMPORTANT - ANALYZE DATA FORMAT:**
+Look at the sample data above. If columns contain formatted strings (e.g., "Name | $Value", "Product: $50"), and user wants to extract numeric values, use str.extract() with regex patterns. DO NOT just copy the entire string - extract ONLY the numeric part.
 
 {prompt}
 
