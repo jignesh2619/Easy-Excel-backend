@@ -1602,7 +1602,47 @@ class ExcelProcessor:
         logger.info(f"🔍 _execute_conditional_format called with action_plan keys: {list(action_plan.keys())}")
         conditional_format = action_plan.get("conditional_format", {})
         
-        logger.info(f"🔍 Extracted conditional_format: {conditional_format}")
+        logger.info(f"🔍 Extracted conditional_format: {conditional_format}, type: {type(conditional_format)}")
+        
+        # Handle case where conditional_format is a list
+        if isinstance(conditional_format, list):
+            logger.info(f"⚠️ conditional_format is a list with {len(conditional_format)} items, processing each...")
+            summary_parts = []
+            for cf_item in conditional_format:
+                if isinstance(cf_item, dict):
+                    format_type = cf_item.get("format_type", "")
+                    config = cf_item.get("config", {})
+                    rule = {
+                        "type": "conditional",
+                        "format_type": format_type,
+                        "config": config
+                    }
+                    self.formatting_rules.append(rule)
+                    logger.info(f"✅ Added conditional format rule: {format_type}")
+                    
+                    # Build summary for this rule
+                    if format_type == "greater_than":
+                        column = config.get("column", "unknown")
+                        value = config.get("value", "unknown")
+                        summary_parts.append(f"Highlight values > {value} in column '{column}'")
+                    elif format_type == "less_than":
+                        column = config.get("column", "unknown")
+                        value = config.get("value", "unknown")
+                        summary_parts.append(f"Highlight values < {value} in column '{column}'")
+                    elif format_type == "text_equals":
+                        column = config.get("column", "unknown")
+                        text = config.get("text", "unknown")
+                        summary_parts.append(f"Highlight cells equal to '{text}' in column '{column}'")
+                    else:
+                        column = config.get("column", "unknown")
+                        bg_color = config.get("bg_color", "default")
+                        summary_parts.append(f"Highlight {format_type} in column '{column}' with {bg_color}")
+            
+            if summary_parts:
+                self.summary.append(f"Conditional formatting: {', '.join(summary_parts)}")
+            elif conditional_format:
+                self.summary.append(f"Applied {len(conditional_format)} conditional formatting rule(s)")
+            return
         
         if not conditional_format:
             logger.warning(f"⚠️ conditional_format is empty, trying fallback...")
@@ -1616,7 +1656,7 @@ class ExcelProcessor:
                 self.summary.append("Conditional format: No configuration specified")
                 return
         
-        # Extract conditional formatting details
+        # Extract conditional formatting details (conditional_format is now a dict)
         format_type = conditional_format.get("format_type", "")
         config = conditional_format.get("config", {})
         
