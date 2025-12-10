@@ -670,7 +670,11 @@ Include "operations" array with "python_code" for each operation.
                     raise ValueError(f"Could not parse JSON from response: {content[:200]}")
             
             # Normalize action plan
+            logger.info(f"🔍 Action plan before normalization - operations count: {len(action_plan.get('operations', []))}")
             normalized_plan = self._normalize_action_plan(action_plan)
+            logger.info(f"🔍 Action plan after normalization - operations count: {len(normalized_plan.get('operations', []))}")
+            if normalized_plan.get('operations'):
+                logger.info(f"🔍 Operations descriptions: {[op.get('description', 'No description') for op in normalized_plan.get('operations', [])]}")
             
             prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
             completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
@@ -693,7 +697,22 @@ Include "operations" array with "python_code" for each operation.
             "operations": action_plan.get("operations", []),
         }
         
-        # Add optional fields
+        # Add optional fields - preserve ALL fields from action plan
+        if "add_row" in action_plan:
+            normalized["add_row"] = action_plan["add_row"]
+        
+        if "add_column" in action_plan:
+            normalized["add_column"] = action_plan["add_column"]
+        
+        if "delete_column" in action_plan:
+            normalized["delete_column"] = action_plan["delete_column"]
+        
+        if "delete_rows" in action_plan:
+            normalized["delete_rows"] = action_plan["delete_rows"]
+        
+        if "sort" in action_plan:
+            normalized["sort"] = action_plan["sort"]
+        
         if "conditional_format" in action_plan:
             normalized["conditional_format"] = action_plan["conditional_format"]
         
@@ -702,6 +721,9 @@ Include "operations" array with "python_code" for each operation.
         
         if "filters" in action_plan:
             normalized["filters"] = action_plan["filters"]
+        
+        if "task" in action_plan:
+            normalized["task"] = action_plan["task"]
         
         # Ensure operations is a list
         if not isinstance(normalized["operations"], list):
