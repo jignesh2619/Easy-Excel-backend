@@ -400,6 +400,34 @@ class ExcelProcessor:
             if "format" in action_plan:
                 self._execute_format(action_plan)
             
+            # Handle add_row (must be after operations to use temporary columns)
+            if "add_row" in action_plan:
+                self._execute_add_row(action_plan)
+            
+            # Handle add_column
+            if "add_column" in action_plan:
+                self._execute_add_column(action_plan)
+            
+            # Handle delete_column
+            if "delete_column" in action_plan:
+                self._execute_delete_column(action_plan)
+            
+            # Handle delete_rows
+            if "delete_rows" in action_plan:
+                self._execute_delete_rows(action_plan)
+            
+            # Handle sort
+            if "sort" in action_plan:
+                self._execute_sort(action_plan)
+            
+            # Handle auto_fill
+            if "auto_fill" in action_plan:
+                self._execute_auto_fill(action_plan)
+            
+            # Handle clear_cell
+            if "clear_cell" in action_plan:
+                self._execute_clear_cell(action_plan)
+            
             # Extract chart_type for response
             chart_type_for_response = "none"
             if chart_path:
