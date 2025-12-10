@@ -98,6 +98,28 @@ class PythonExecutor:
             raise RuntimeError(error_msg)
             
         except KeyError as e:
+            error_str = str(e)
+            # Check if this is a drop operation trying to drop non-existent columns
+            # If so, handle gracefully (columns might have been dropped already or never created)
+            if "drop" in python_code.lower() and ("not found in axis" in error_str or "not found" in error_str.lower()):
+                # Extract column names from error if possible
+                import re
+                # Try to extract column names from error message
+                col_match = re.search(r"\[(.*?)\]", error_str)
+                if col_match:
+                    missing_cols = col_match.group(1)
+                    logger.warning(f"⚠️ Drop operation: Columns {missing_cols} not found, skipping drop (may have been dropped already or never created)")
+                    self.execution_log.append(f"⚠ {description}: Columns {missing_cols} not found, skipping (safe to ignore)")
+                    # Return success since this is a cleanup operation
+                    return {
+                        "success": True,
+                        "result": None,
+                        "description": description,
+                        "rows_affected": len(self.df),
+                        "columns": list(self.df.columns),
+                        "warning": f"Columns {missing_cols} not found, operation skipped"
+                    }
+            
             error_msg = f"Column not found: {str(e)}. Available columns: {list(self.df.columns)}"
             self.errors.append(error_msg)
             self.execution_log.append(f"✗ {description}: {error_msg}")
