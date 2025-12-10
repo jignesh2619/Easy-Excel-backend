@@ -376,6 +376,7 @@ class ExcelProcessor:
             operations = action_plan.get("operations", [])
             if operations:
                 logger.info(f"🔍 Executing {len(operations)} operations before add_row")
+                logger.info(f"🔍 Operations list: {[op.get('description', 'No description') for op in operations]}")
                 python_executor = PythonExecutor(self.df)
                 execution_result = python_executor.execute_multiple(operations)
                 self.df = python_executor.get_dataframe()

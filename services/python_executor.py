@@ -294,13 +294,17 @@ class PythonExecutor:
         Returns:
             Dict with execution summary
         """
+        logger.info(f"🔍 execute_multiple called with {len(operations)} operations")
         results = []
         successful = 0
         failed = 0
         
-        for operation in operations:
+        for idx, operation in enumerate(operations):
             python_code = operation.get("python_code")
+            description = operation.get("description", f"Operation {idx+1}")
+            logger.info(f"🔍 Processing operation {idx+1}/{len(operations)}: {description}")
             if not python_code:
+                logger.warning(f"⚠️ Operation {idx+1} has no python_code, skipping")
                 continue
             
             try:
