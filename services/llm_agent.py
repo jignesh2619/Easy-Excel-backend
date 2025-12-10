@@ -512,6 +512,7 @@ Include "operations" array with "execution_instructions" for each operation."""
             "columns_needed": action_plan.get("columns_needed", []),
             "chart_type": action_plan.get("chart_type", "none"),
             "steps": action_plan.get("steps", []),
+            "operations": action_plan.get("operations", []),  # Include operations list
         }
         
         # Add optional fields if present
