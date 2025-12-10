@@ -1180,18 +1180,53 @@ class ExcelProcessor:
             logger = logging.getLogger(__name__)
             logger.error(f"❌ Temporary columns {temp_columns_referenced} not found. Available: {available_cols}")
             
-            if suggestions:
-                error_msg = f"Temporary columns not found: {temp_columns_referenced}. "
-                error_msg += f"Available columns: {available_cols}. "
-                error_msg += f"Did you mean to use these columns instead? {suggestions}. "
-                error_msg += "Make sure operations create these temporary columns (e.g., df['_temp_profit_sum'] = df['Profit'].sum()) before add_row uses them."
-                raise RuntimeError(error_msg)
-            else:
-                error_msg = f"Temporary columns not found: {temp_columns_referenced}. "
-                error_msg += f"Available columns: {available_cols}. "
-                error_msg += "Make sure operations create these temporary columns before add_row uses them. "
-                error_msg += "Example: operations should include 'df['_temp_profit_sum'] = df['Profit'].sum()' before add_row references it."
-                raise RuntimeError(error_msg)
+            # Try to auto-create missing temporary columns from the column names
+            # e.g., _temp_profit_sum -> Profit column
+            auto_created = {}
+            for temp_col in temp_columns_referenced:
+                # Extract base column name from temp column name
+                # _temp_profit_sum -> profit
+                base_name = temp_col.replace('_temp_', '').replace('_sum', '').replace('_', ' ').strip()
+                
+                # Try to find matching column
+                matching_col = None
+                for col in available_cols:
+                    if base_name.lower() in col.lower() or col.lower() in base_name.lower():
+                        matching_col = col
+                        break
+                
+                if matching_col and matching_col in self.df.columns:
+                    # Check if it's a numeric column
+                    if pd.api.types.is_numeric_dtype(self.df[matching_col]):
+                        try:
+                            # Create the temporary column with the sum
+                            self.df[temp_col] = self.df[matching_col].sum()
+                            auto_created[temp_col] = matching_col
+                            logger.info(f"✅ Auto-created {temp_col} = sum of {matching_col}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to auto-create {temp_col}: {str(e)}")
+            
+            # If we auto-created some columns, remove them from the error list
+            temp_columns_referenced = [tc for tc in temp_columns_referenced if tc not in auto_created]
+            
+            if temp_columns_referenced:
+                # Still have missing columns
+                if suggestions:
+                    error_msg = f"Temporary columns not found: {temp_columns_referenced}. "
+                    error_msg += f"Available columns: {available_cols}. "
+                    error_msg += f"Did you mean to use these columns instead? {suggestions}. "
+                    error_msg += "Make sure operations create these temporary columns (e.g., df['_temp_profit_sum'] = df['Profit'].sum()) before add_row uses them."
+                    raise RuntimeError(error_msg)
+                else:
+                    error_msg = f"Temporary columns not found: {temp_columns_referenced}. "
+                    error_msg += f"Available columns: {available_cols}. "
+                    error_msg += "Make sure operations create these temporary columns before add_row uses them. "
+                    error_msg += "Example: operations should include 'df['_temp_profit_sum'] = df['Profit'].sum()' before add_row references it."
+                    raise RuntimeError(error_msg)
+            elif auto_created:
+                # Successfully auto-created columns
+                logger.info(f"✅ Auto-created temporary columns: {list(auto_created.keys())}")
+                self.summary.append(f"Auto-calculated sums for: {', '.join(auto_created.values())}")
         
         for col, value in row_data.items():
             # Handle column name that might be a DataFrame expression (e.g., df.columns[0])
