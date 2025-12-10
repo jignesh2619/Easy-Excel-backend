@@ -1304,9 +1304,18 @@ class ExcelProcessor:
         
         # Check if column already exists
         if column_name in self.df.columns:
-            # If exists, just fill with default value
-            self.df[column_name] = default_value
-            self.summary.append(f"Column '{column_name}' already exists, filled with default value")
+            # If exists, check if it already has values (not all empty/NaN)
+            # Don't overwrite if operations already filled it
+            existing_values = self.df[column_name]
+            has_values = not existing_values.isna().all() and (existing_values != "").any() if default_value == "" else not existing_values.isna().all()
+            
+            if has_values:
+                # Column already has values from operations, don't overwrite
+                self.summary.append(f"Column '{column_name}' already exists with values, keeping existing data")
+            else:
+                # Column exists but is empty, fill with default value
+                self.df[column_name] = default_value
+                self.summary.append(f"Column '{column_name}' already exists, filled with default value")
         else:
             # Add new column
             if position == -1 or position >= len(self.df.columns):
