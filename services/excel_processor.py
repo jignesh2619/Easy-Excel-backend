@@ -1608,10 +1608,23 @@ class ExcelProcessor:
         if isinstance(conditional_format, list):
             logger.info(f"⚠️ conditional_format is a list with {len(conditional_format)} items, processing each...")
             summary_parts = []
+            seen_rules = set()  # Track seen rules to avoid duplicates
+            
             for cf_item in conditional_format:
                 if isinstance(cf_item, dict):
                     format_type = cf_item.get("format_type", "")
                     config = cf_item.get("config", {})
+                    
+                    # Create a unique key for this rule to detect duplicates
+                    rule_key = (format_type, config.get("column"), config.get("text"), config.get("value"))
+                    
+                    # Skip if we've already processed this exact rule
+                    if rule_key in seen_rules:
+                        logger.info(f"⚠️ Skipping duplicate conditional format rule: {format_type}")
+                        continue
+                    
+                    seen_rules.add(rule_key)
+                    
                     rule = {
                         "type": "conditional",
                         "format_type": format_type,
