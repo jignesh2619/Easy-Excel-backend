@@ -298,6 +298,9 @@ class ExcelProcessor:
         Returns:
             Dictionary with processed dataframe and summary
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         if self.df is None:
             raise ValueError("Data not loaded. Call load_data() first.")
         
@@ -372,10 +375,14 @@ class ExcelProcessor:
             # Handle data operations (Python code execution)
             operations = action_plan.get("operations", [])
             if operations:
+                logger.info(f"🔍 Executing {len(operations)} operations before add_row")
                 python_executor = PythonExecutor(self.df)
                 execution_result = python_executor.execute_multiple(operations)
                 self.df = python_executor.get_dataframe()
                 self.summary.extend(python_executor.get_execution_log())
+                
+                # Log columns after operations for debugging
+                logger.info(f"🔍 Columns after operations: {list(self.df.columns)}")
                 
                 # Store formula result if present
                 if execution_result.get("results"):
@@ -383,6 +390,8 @@ class ExcelProcessor:
                         if result.get("result") is not None:
                             self.formula_result = result["result"]
                             break
+            else:
+                logger.warning(f"⚠️ No operations found in action_plan before add_row")
             
             # Handle formula operations (sets formula_result)
             if "formula" in action_plan:
@@ -402,6 +411,7 @@ class ExcelProcessor:
             
             # Handle add_row (must be after operations to use temporary columns)
             if "add_row" in action_plan:
+                logger.info(f"🔍 Executing add_row, current columns: {list(self.df.columns)}")
                 self._execute_add_row(action_plan)
             
             # Handle add_column
@@ -1166,15 +1176,21 @@ class ExcelProcessor:
                         suggestions[temp_col] = col
                         break
             
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"❌ Temporary columns {temp_columns_referenced} not found. Available: {available_cols}")
+            
             if suggestions:
                 error_msg = f"Temporary columns not found: {temp_columns_referenced}. "
                 error_msg += f"Available columns: {available_cols}. "
-                error_msg += f"Did you mean to use these columns instead? {suggestions}"
+                error_msg += f"Did you mean to use these columns instead? {suggestions}. "
+                error_msg += "Make sure operations create these temporary columns (e.g., df['_temp_profit_sum'] = df['Profit'].sum()) before add_row uses them."
                 raise RuntimeError(error_msg)
             else:
                 error_msg = f"Temporary columns not found: {temp_columns_referenced}. "
                 error_msg += f"Available columns: {available_cols}. "
-                error_msg += "Make sure operations create these temporary columns before add_row uses them."
+                error_msg += "Make sure operations create these temporary columns before add_row uses them. "
+                error_msg += "Example: operations should include 'df['_temp_profit_sum'] = df['Profit'].sum()' before add_row references it."
                 raise RuntimeError(error_msg)
         
         for col, value in row_data.items():
