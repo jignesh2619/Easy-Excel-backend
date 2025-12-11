@@ -8,11 +8,16 @@ Adapted from excelaiagent's knowledge_base.py
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
 import pandas as pd
 import hashlib
+from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,15 @@ class FileKnowledgeBase:
         """
         self.metadata_file = Path(metadata_file)
         self.metadata: Dict = self._load_metadata()
+        
+        # Initialize OpenAI client for summary generation (optional)
+        self.openai_client = None
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key:
+            try:
+                self.openai_client = OpenAI(api_key=api_key)
+            except Exception as e:
+                logger.warning(f"Could not initialize OpenAI client for summaries: {e}")
     
     def _load_metadata(self) -> Dict:
         """Load metadata from file"""
@@ -77,7 +91,8 @@ class FileKnowledgeBase:
         self, 
         file_path: str, 
         df: pd.DataFrame,
-        file_hash: Optional[str] = None
+        file_hash: Optional[str] = None,
+        generate_summary: bool = True
     ) -> Dict:
         """
         Index an Excel file and store metadata
@@ -86,38 +101,63 @@ class FileKnowledgeBase:
             file_path: Path to the file
             df: DataFrame with the file data
             file_hash: Optional file hash (will be calculated if not provided)
+            generate_summary: Whether to generate LLM summary (default: True)
             
         Returns:
             File metadata dictionary
         """
         file_name = Path(file_path).name
         
+        # Check if metadata already exists
+        existing_metadata = self.metadata.get(file_name)
+        
         # Calculate file hash if not provided
         if not file_hash:
             file_hash = self._calculate_file_hash(file_path)
         
-        # Analyze columns
+        # Use sample for large files to reduce memory usage (max 1000 rows for metadata extraction)
+        MAX_ROWS_FOR_METADATA = 1000
+        metadata_df = df.head(MAX_ROWS_FOR_METADATA) if len(df) > MAX_ROWS_FOR_METADATA else df
+        
+        # Analyze columns (using sample for large files)
         column_info = []
-        for col in df.columns:
-            col_data = df[col]
+        for col in metadata_df.columns:
+            col_data = metadata_df[col]
             column_info.append({
                 "name": str(col),
                 "dtype": str(col_data.dtype),
                 "null_count": int(col_data.isnull().sum()),
                 "unique_count": int(col_data.nunique()),
-                "sample_values": self._get_sample_values(col_data)
+                "sample_values": self._get_sample_values(col_data, max_samples=5)
             })
+        
+        # Generate LLM summary if requested and not already cached
+        summary = None
+        if generate_summary:
+            if existing_metadata and existing_metadata.get("summary"):
+                # Use cached summary
+                summary = existing_metadata.get("summary")
+                logger.debug(f"Using cached summary for {file_name}")
+            else:
+                # Generate new summary
+                summary = self.generate_summary(file_path, df)
+                if summary:
+                    logger.info(f"Generated new summary for {file_name}")
         
         file_metadata = {
             "file_name": file_name,
             "file_path": file_path,
             "file_hash": file_hash,
-            "row_count": len(df),
+            "row_count": len(df),  # Store actual row count, not sample
             "column_count": len(df.columns),
             "columns": column_info,
             "indexed_at": datetime.now().isoformat(),
             "last_accessed": datetime.now().isoformat()
         }
+        
+        # Add summary if available
+        if summary:
+            file_metadata["summary"] = summary
         
         # Store by file name (could also use hash as key)
         self.metadata[file_name] = file_metadata
@@ -211,4 +251,192 @@ class FileKnowledgeBase:
             del self.metadata[file_name]
             self._save_metadata()
             logger.info(f"Deleted metadata for: {file_name}")
+    
+    def detect_patterns(self, col_data: pd.Series, col_name: str) -> Dict:
+        """
+        Detect data patterns without domain assumptions (lightweight, sample-based)
+        
+        Args:
+            col_data: Column data series
+            col_name: Column name
+            
+        Returns:
+            Dictionary with pattern information
+        """
+        patterns = {}
+        
+        # Temporal patterns
+        if col_data.dtype == 'datetime64[ns]' or 'date' in str(col_name).lower() or 'time' in str(col_name).lower():
+            patterns["type"] = "temporal"
+            if len(col_data) > 0:
+                try:
+                    patterns["range"] = {
+                        "earliest": str(col_data.min()),
+                        "latest": str(col_data.max())
+                    }
+                except Exception:
+                    pass
+        
+        # Numeric patterns
+        elif col_data.dtype in ['int64', 'float64']:
+            patterns["type"] = "numeric"
+            try:
+                patterns["range"] = {
+                    "min": float(col_data.min()),
+                    "max": float(col_data.max())
+                }
+                if len(col_data) > 0:
+                    patterns["mean"] = float(col_data.mean())
+            except Exception:
+                pass
+            
+            # Currency detection (any domain)
+            sample_str = str(col_data.head(1).values[0]) if len(col_data) > 0 else ""
+            if any(symbol in sample_str for symbol in ['$', '€', '₹', '£', '¥']):
+                patterns["format"] = "currency"
+            
+            # Identifier detection (any domain)
+            if col_data.nunique() == len(col_data) and col_data.dtype == 'int64':
+                patterns["likely_identifier"] = True
+        
+        # Categorical vs text
+        elif col_data.dtype == 'object':
+            unique_ratio = col_data.nunique() / len(col_data) if len(col_data) > 0 else 0
+            if unique_ratio < 0.2:  # Less than 20% unique = categorical
+                patterns["type"] = "categorical"
+                try:
+                    patterns["top_categories"] = col_data.value_counts().head(5).to_dict()
+                except Exception:
+                    pass
+            else:
+                patterns["type"] = "text"
+        
+        return patterns
+    
+    def generate_summary(self, file_path: str, df: pd.DataFrame) -> Optional[str]:
+        """
+        Generate domain-agnostic LLM summary for ANY Excel file type
+        
+        Args:
+            file_path: Path to the file
+            df: DataFrame with file data (may be limited to 1000 rows)
+            
+        Returns:
+            Semantic summary string or None if generation fails
+        """
+        if not self.openai_client:
+            logger.debug("OpenAI client not available, skipping summary generation")
+            return None
+        
+        try:
+            # Use sample for large files (max 1000 rows for analysis)
+            MAX_ROWS_FOR_ANALYSIS = 1000
+            analysis_df = df.head(MAX_ROWS_FOR_ANALYSIS) if len(df) > MAX_ROWS_FOR_ANALYSIS else df
+            
+            # Build column analysis with pattern detection
+            column_analysis = []
+            for col in analysis_df.columns:
+                col_data = analysis_df[col]
+                patterns = self.detect_patterns(col_data, str(col))
+                
+                col_info = {
+                    "name": str(col),
+                    "data_type": str(col_data.dtype),
+                    "unique_count": int(col_data.nunique()),
+                    "null_count": int(col_data.isnull().sum()),
+                    "sample_values": self._get_sample_values(col_data, max_samples=5),
+                    "patterns": patterns
+                }
+                
+                # Add numeric range if available
+                if col_data.dtype in ['int64', 'float64'] and len(col_data) > 0:
+                    try:
+                        col_info["numeric_range"] = {
+                            "min": float(col_data.min()),
+                            "max": float(col_data.max())
+                        }
+                    except Exception:
+                        pass
+                
+                column_analysis.append(col_info)
+            
+            # Get diverse sample rows (first, middle, last if available)
+            sample_rows = []
+            if len(analysis_df) > 0:
+                indices = [0]
+                if len(analysis_df) > 1:
+                    indices.append(len(analysis_df) // 2)
+                if len(analysis_df) > 2:
+                    indices.append(len(analysis_df) - 1)
+                
+                for idx in indices[:5]:  # Max 5 samples
+                    row_dict = {}
+                    for col in analysis_df.columns:
+                        val = analysis_df.iloc[idx][col]
+                        if pd.isna(val):
+                            row_dict[str(col)] = None
+                        elif isinstance(val, (pd.Timestamp, pd.DatetimeTZDtype)):
+                            row_dict[str(col)] = str(val)
+                        elif hasattr(val, 'item'):
+                            row_dict[str(col)] = val.item()
+                        else:
+                            row_dict[str(col)] = str(val)[:200]  # Limit length
+                    sample_rows.append(row_dict)
+            
+            # Build domain-agnostic prompt
+            prompt = f"""Analyze this Excel file and generate a semantic summary that helps an AI assistant understand the file's structure and data patterns. DO NOT assume any specific business domain - analyze based purely on column names, data types, and sample values.
+
+FILE INFORMATION:
+- File name: {Path(file_path).name}
+- Total rows: {len(df):,}
+- Total columns: {len(df.columns)}
+
+COLUMN ANALYSIS:
+{json.dumps(column_analysis, indent=2, default=str)}
+
+SAMPLE DATA (representative rows):
+{json.dumps(sample_rows, indent=2, default=str)}
+
+YOUR TASK:
+Generate a concise, domain-agnostic summary (60-80 words) that describes:
+
+1. **Data Structure**: What types of data are present? (temporal, numeric, categorical, text, identifiers)
+2. **Column Roles**: What role does each column likely play? (identifiers, measurements, categories, descriptions, dates, etc.)
+3. **Data Patterns**: What patterns are visible? (ranges, formats, relationships between columns)
+4. **File Purpose**: What kind of dataset is this? (infer from structure, not assume domain)
+
+IMPORTANT GUIDELINES:
+- DO NOT assume it's financial/sales data unless column names explicitly indicate it
+- DO NOT use domain-specific terms unless clearly evident from column names
+- Focus on DATA STRUCTURE and PATTERNS, not business context
+- Use generic terms: "dataset", "records", "measurements", "categories", "identifiers"
+- If column names suggest a domain (e.g., "Patient ID", "Temperature", "Product Code"), mention it, but don't assume
+- Describe what the data CONTAINS, not what it's USED FOR
+
+OUTPUT FORMAT:
+Write only the summary text (60-80 words), no explanations. Be specific about data types and patterns, but generic about domain.
+
+Generate the summary now:"""
+            
+            # Call LLM
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert data structure analyst. You analyze Excel files across ALL domains (scientific, business, medical, educational, etc.) without assuming any specific domain. Focus on data types, patterns, and structure, not business context."
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=250
+            )
+            
+            summary = response.choices[0].message.content.strip()
+            logger.info(f"Generated summary for {Path(file_path).name}: {summary[:100]}...")
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Error generating summary: {e}", exc_info=True)
+            return None
 

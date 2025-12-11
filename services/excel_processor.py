@@ -319,6 +319,20 @@ class ExcelProcessor:
             if not isinstance(self.df, pd.DataFrame):
                 raise ValueError(f"Expected DataFrame, got {type(self.df)}")
             
+            # Limit rows to prevent OOM on 512MB server
+            MAX_ROWS_FOR_PROCESSING = 1000
+            if len(self.df) > MAX_ROWS_FOR_PROCESSING:
+                original_row_count = len(self.df)
+                logger.warning(
+                    f"File has {original_row_count} rows, limiting to {MAX_ROWS_FOR_PROCESSING} rows "
+                    f"to prevent memory issues on low-memory servers"
+                )
+                self.df = self.df.head(MAX_ROWS_FOR_PROCESSING).copy()
+                self.summary.append(
+                    f"⚠️ File limited from {original_row_count} rows to {MAX_ROWS_FOR_PROCESSING} rows "
+                    f"for memory safety"
+                )
+            
             # Keep original copy
             self.original_df = self.df.copy()
             self.summary.append(f"Loaded {len(self.df)} rows and {len(self.df.columns)} columns")
