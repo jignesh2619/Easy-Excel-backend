@@ -11,7 +11,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 import hashlib
 from openai import OpenAI
@@ -245,12 +245,212 @@ class FileKnowledgeBase:
             self.metadata[file_name]["last_accessed"] = datetime.now().isoformat()
             self._save_metadata()
     
-    def delete_file_metadata(self, file_name: str):
-        """Delete metadata for a file"""
+    def delete_file_metadata(self, file_name: str) -> bool:
+        """
+        Delete metadata for a specific file
+        
+        Args:
+            file_name: Name of the file to delete metadata for
+            
+        Returns:
+            True if deleted, False if not found
+        """
         if file_name in self.metadata:
             del self.metadata[file_name]
             self._save_metadata()
             logger.info(f"Deleted metadata for: {file_name}")
+            return True
+        return False
+    
+    def cleanup_expired_metadata(self, days: int = 1) -> int:
+        """
+        Delete metadata for files not accessed in specified days
+        
+        Args:
+            days: Number of days of inactivity before deletion (default: 1 for daily cleanup)
+            
+        Returns:
+            Number of metadata entries deleted
+        """
+        cutoff_date = datetime.now() - timedelta(days=days)
+        deleted_count = 0
+        files_to_delete = []
+        
+        for file_name, metadata in self.metadata.items():
+            last_accessed_str = metadata.get("last_accessed")
+            if last_accessed_str:
+                try:
+                    last_accessed = datetime.fromisoformat(last_accessed_str)
+                    if last_accessed < cutoff_date:
+                        files_to_delete.append(file_name)
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Invalid last_accessed date for {file_name}: {e}")
+                    # If date is invalid, consider it old and delete
+                    files_to_delete.append(file_name)
+            else:
+                # No last_accessed date, check indexed_at
+                indexed_at_str = metadata.get("indexed_at")
+                if indexed_at_str:
+                    try:
+                        indexed_at = datetime.fromisoformat(indexed_at_str)
+                        if indexed_at < cutoff_date:
+                            files_to_delete.append(file_name)
+                    except (ValueError, TypeError):
+                        # If both dates are invalid, delete
+                        files_to_delete.append(file_name)
+                else:
+                    # No dates at all, delete
+                    files_to_delete.append(file_name)
+        
+        # Delete expired entries
+        for file_name in files_to_delete:
+            if file_name in self.metadata:
+                del self.metadata[file_name]
+                deleted_count += 1
+        
+        if deleted_count > 0:
+            self._save_metadata()
+            logger.info(f"Cleaned up {deleted_count} expired metadata entries (older than {days} days)")
+        
+        return deleted_count
+    
+    def cleanup_missing_files(self, base_path: Optional[str] = None) -> int:
+        """
+        Delete metadata for files that no longer exist on disk
+        
+        Args:
+            base_path: Base path to check for files (if None, uses file_path from metadata)
+            
+        Returns:
+            Number of metadata entries deleted
+        """
+        deleted_count = 0
+        files_to_delete = []
+        
+        for file_name, metadata in self.metadata.items():
+            file_path = metadata.get("file_path")
+            
+            # If no file_path in metadata, try to construct from base_path
+            if not file_path and base_path:
+                file_path = os.path.join(base_path, file_name)
+            elif not file_path:
+                # No way to check, skip
+                continue
+            
+            # Check if file exists
+            if not os.path.exists(file_path):
+                files_to_delete.append(file_name)
+                logger.debug(f"File not found, marking for deletion: {file_path}")
+        
+        # Delete metadata for missing files
+        for file_name in files_to_delete:
+            if file_name in self.metadata:
+                del self.metadata[file_name]
+                deleted_count += 1
+        
+        if deleted_count > 0:
+            self._save_metadata()
+            logger.info(f"Cleaned up {deleted_count} metadata entries for missing files")
+        
+        return deleted_count
+    
+    def cleanup_all(self, days: int = 1, check_missing_files: bool = True, base_path: Optional[str] = None) -> Dict[str, int]:
+        """
+        Comprehensive cleanup: removes expired and missing file metadata
+        
+        Args:
+            days: Days of inactivity before deletion (default: 1 for daily cleanup)
+            check_missing_files: Whether to check for missing files (default: True)
+            base_path: Base path for file existence check (optional)
+            
+        Returns:
+            Dictionary with cleanup statistics
+        """
+        stats = {
+            "expired_deleted": 0,
+            "missing_deleted": 0,
+            "total_deleted": 0
+        }
+        
+        # Cleanup expired metadata
+        stats["expired_deleted"] = self.cleanup_expired_metadata(days=days)
+        
+        # Cleanup missing files
+        if check_missing_files:
+            stats["missing_deleted"] = self.cleanup_missing_files(base_path=base_path)
+        
+        stats["total_deleted"] = stats["expired_deleted"] + stats["missing_deleted"]
+        
+        if stats["total_deleted"] > 0:
+            logger.info(
+                f"Cleanup complete: {stats['expired_deleted']} expired, "
+                f"{stats['missing_deleted']} missing, {stats['total_deleted']} total deleted"
+            )
+        
+        return stats
+    
+    def get_metadata_stats(self) -> Dict[str, any]:
+        """
+        Get statistics about stored metadata
+        
+        Returns:
+            Dictionary with metadata statistics
+        """
+        total_files = len(self.metadata)
+        
+        # Count by age
+        now = datetime.now()
+        files_by_age = {
+            "last_7_days": 0,
+            "last_30_days": 0,
+            "last_90_days": 0,
+            "older_than_90_days": 0,
+            "no_date": 0
+        }
+        
+        total_size = 0
+        files_with_summaries = 0
+        
+        for file_name, metadata in self.metadata.items():
+            # Check file size if available
+            file_path = metadata.get("file_path")
+            if file_path and os.path.exists(file_path):
+                try:
+                    total_size += os.path.getsize(file_path)
+                except Exception:
+                    pass
+            
+            # Count summaries
+            if metadata.get("summary"):
+                files_with_summaries += 1
+            
+            # Count by age
+            last_accessed_str = metadata.get("last_accessed")
+            if last_accessed_str:
+                try:
+                    last_accessed = datetime.fromisoformat(last_accessed_str)
+                    age_days = (now - last_accessed).days
+                    
+                    if age_days <= 7:
+                        files_by_age["last_7_days"] += 1
+                    elif age_days <= 30:
+                        files_by_age["last_30_days"] += 1
+                    elif age_days <= 90:
+                        files_by_age["last_90_days"] += 1
+                    else:
+                        files_by_age["older_than_90_days"] += 1
+                except (ValueError, TypeError):
+                    files_by_age["no_date"] += 1
+            else:
+                files_by_age["no_date"] += 1
+        
+        return {
+            "total_files": total_files,
+            "files_with_summaries": files_with_summaries,
+            "files_by_age": files_by_age,
+            "total_size_bytes": total_size,
+            "total_size_mb": round(total_size / (1024 * 1024), 2) if total_size > 0 else 0
+        }
     
     def detect_patterns(self, col_data: pd.Series, col_name: str) -> Dict:
         """

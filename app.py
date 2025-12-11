@@ -77,6 +77,14 @@ user_service = UserService()
 sample_selector = SampleSelector()
 file_kb = FileKnowledgeBase(metadata_file="file_metadata.json")  # Persistent file knowledge base
 
+# Automatic metadata cleanup on startup (delete all metadata older than 1 day)
+try:
+    cleanup_stats = file_kb.cleanup_all(days=1, check_missing_files=True, base_path=str(file_manager.temp_dir))
+    if cleanup_stats["total_deleted"] > 0:
+        logger.info(f"Startup cleanup: Removed {cleanup_stats['total_deleted']} expired/missing metadata entries")
+except Exception as e:
+    logger.warning(f"Startup metadata cleanup failed (non-critical): {e}")
+
 # Security
 security = HTTPBearer(auto_error=False)
 
@@ -380,6 +388,7 @@ async def process_file(
         chart_type = result.get("chart_type", "none")
         formula_result = result.get("formula_result")
         task = result.get("task", "summarize")
+        trace_report = result.get("trace_report", {})  # Get trace report from processor result
         
         # 8. Save processed file
         output_filename = f"processed_{Path(file.filename).stem}.xlsx"
@@ -502,9 +511,6 @@ async def process_file(
                 )
             except Exception as e:
                 logger.warning(f"Failed to record feedback: {e}")
-        
-        # Get trace report from execution result
-        trace_report = execution_result.get("trace_report", {})
         
         return ProcessFileResponse(
             status="success",
@@ -721,6 +727,7 @@ async def process_data(
         chart_type = result.get("chart_type", "none")
         formula_result = result.get("formula_result")
         task = result.get("task", "summarize")
+        trace_report = result.get("trace_report", {})  # Get trace report from processor result
         
         # 9. Save processed file
         output_filename = f"processed_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
@@ -828,9 +835,6 @@ async def process_data(
                 )
             except Exception as e:
                 logger.warning(f"Failed to record feedback: {e}")
-        
-        # Get trace report from execution result
-        trace_report = execution_result.get("trace_report", {})
         
         return ProcessFileResponse(
             status="success",
@@ -1321,6 +1325,127 @@ async def run_subscription_maintenance():
     except Exception as e:
         logger.error(f"Error running subscription maintenance: {e}")
         raise HTTPException(status_code=500, detail=f"Maintenance failed: {str(e)}")
+
+
+@app.post("/api/metadata/cleanup")
+async def cleanup_metadata(
+    days: int = 1,
+    check_missing_files: bool = True,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Cleanup metadata: remove expired and missing file metadata
+    
+    Args:
+        days: Days of inactivity before deletion (default: 1 for daily cleanup)
+        check_missing_files: Whether to check for missing files (default: True)
+    
+    Returns:
+        Cleanup statistics
+    """
+    try:
+        # Get temp directory for file existence check
+        base_path = str(file_manager.temp_dir) if hasattr(file_manager, 'temp_dir') else None
+        
+        stats = file_kb.cleanup_all(
+            days=days,
+            check_missing_files=check_missing_files,
+            base_path=base_path
+        )
+        
+        return JSONResponse(content={
+            "status": "success",
+            "expired_deleted": stats["expired_deleted"],
+            "missing_deleted": stats["missing_deleted"],
+            "total_deleted": stats["total_deleted"]
+        })
+    except Exception as e:
+        logger.error(f"Error cleaning up metadata: {e}")
+        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
+
+
+@app.post("/api/metadata/cleanup/daily")
+async def daily_cleanup_metadata():
+    """
+    Daily metadata cleanup endpoint (can be called by cron job)
+    Deletes all metadata older than 1 day and missing files
+    
+    No authentication required (for cron job access)
+    
+    Returns:
+        Cleanup statistics
+    """
+    try:
+        # Get temp directory for file existence check
+        base_path = str(file_manager.temp_dir) if hasattr(file_manager, 'temp_dir') else None
+        
+        stats = file_kb.cleanup_all(
+            days=1,  # Delete everything older than 1 day
+            check_missing_files=True,
+            base_path=base_path
+        )
+        
+        logger.info(f"Daily cleanup completed: {stats['total_deleted']} entries deleted")
+        
+        return JSONResponse(content={
+            "status": "success",
+            "expired_deleted": stats["expired_deleted"],
+            "missing_deleted": stats["missing_deleted"],
+            "total_deleted": stats["total_deleted"],
+            "message": "Daily cleanup completed"
+        })
+    except Exception as e:
+        logger.error(f"Error in daily cleanup: {e}")
+        raise HTTPException(status_code=500, detail=f"Daily cleanup failed: {str(e)}")
+
+
+@app.delete("/api/metadata/{file_name}")
+async def delete_file_metadata(
+    file_name: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Delete metadata for a specific file
+    
+    Args:
+        file_name: Name of the file to delete metadata for
+    
+    Returns:
+        Success status
+    """
+    try:
+        deleted = file_kb.delete_file_metadata(file_name)
+        if deleted:
+            return JSONResponse(content={
+                "status": "success",
+                "message": f"Metadata deleted for {file_name}"
+            })
+        else:
+            raise HTTPException(status_code=404, detail=f"Metadata not found for {file_name}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting metadata: {e}")
+        raise HTTPException(status_code=500, detail=f"Deletion failed: {str(e)}")
+
+
+@app.get("/api/metadata/stats")
+async def get_metadata_stats(user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Get statistics about stored metadata
+    
+    Returns:
+        Metadata statistics
+    """
+    try:
+        stats = file_kb.get_metadata_stats()
+        return JSONResponse(content={
+            "status": "success",
+            "stats": stats
+        })
+    except Exception as e:
+        logger.error(f"Error getting metadata stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
 
 
 if __name__ == "__main__":
