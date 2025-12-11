@@ -39,6 +39,7 @@ from services.paypal_service import PayPalService
 from services.user_service import UserService
 from utils.validator import DataValidator
 from services.sample_selector import SampleSelector
+from services.file_knowledge_base import FileKnowledgeBase
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -74,6 +75,7 @@ chart_builder = ChartBuilder(output_dir=str(file_manager.charts_dir))
 paypal_service = PayPalService()
 user_service = UserService()
 sample_selector = SampleSelector()
+file_kb = FileKnowledgeBase(metadata_file="file_metadata.json")  # Persistent file knowledge base
 
 # Security
 security = HTTPBearer(auto_error=False)
@@ -141,6 +143,7 @@ class ProcessFileResponse(BaseModel):
     type: Optional[str] = None  # "summary" | "table" | "value" | "chart" | "transformation"
     operation: Optional[str] = None  # Operation name (e.g., "sum", "average", "filter", etc.)
     result: Optional[Any] = None  # Result value, dataset, or chart instruction
+    trace_report: Optional[Dict[str, Any]] = None  # Data traceability report
 
 
 class ProcessDataRequest(BaseModel):
@@ -227,6 +230,14 @@ async def process_file(
         
         # 4. Get available columns
         available_columns = list(df.columns)
+        
+        # 4a. Index file in knowledge base (for faster future access)
+        try:
+            file_metadata = file_kb.index_file(temp_file_path, df)
+            logger.info(f"File indexed in knowledge base: {file_metadata.get('file_name')}")
+        except Exception as e:
+            logger.warning(f"Failed to index file in knowledge base: {e}")
+            # Continue without indexing - not critical
         
         # 5. Get user authentication before processing
         user = None
@@ -492,6 +503,9 @@ async def process_file(
             except Exception as e:
                 logger.warning(f"Failed to record feedback: {e}")
         
+        # Get trace report from execution result
+        trace_report = execution_result.get("trace_report", {})
+        
         return ProcessFileResponse(
             status="success",
             processed_file_url=processed_file_url,
@@ -505,7 +519,8 @@ async def process_file(
             formatting_metadata=formatting_metadata,
             type=response_type,
             operation=operation,
-            result=result_value
+            result=result_value,
+            trace_report=trace_report
         )
         
     except HTTPException:
@@ -814,6 +829,9 @@ async def process_data(
             except Exception as e:
                 logger.warning(f"Failed to record feedback: {e}")
         
+        # Get trace report from execution result
+        trace_report = execution_result.get("trace_report", {})
+        
         return ProcessFileResponse(
             status="success",
             processed_file_url=processed_file_url,
@@ -827,6 +845,7 @@ async def process_data(
             formatting_metadata=formatting_metadata,
             type=response_type,
             operation=operation,
+            trace_report=trace_report,
             result=result_value
         )
         

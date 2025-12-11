@@ -11,7 +11,10 @@ from typing import Dict, List, Tuple, Optional, Any
 from pathlib import Path
 import re
 import xlsxwriter
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 from services.formula_engine import FormulaEngine
 # New modular imports
 from services.excel_writer.write_xlsx import XlsxWriter
@@ -22,6 +25,8 @@ from services.cleaning.text import TextCleaner
 from services.dflib import default_engine, DataFrameWrapper
 from services.python_executor import PythonExecutor
 from services.chart_executor import ChartExecutor
+from services.data_tracer import DataTracer
+from services.excel_preprocessor import ExcelPreprocessor
 
 
 class ExcelProcessor:
@@ -41,7 +46,42 @@ class ExcelProcessor:
         self.formatting_rules: List[Dict] = []  # Store formatting instructions
         self.formula_result: Optional[Any] = None  # Store formula computation result
         self.file_summary: Optional[Dict] = None  # Store file summary from ExcelSummarizer
+        self.tracer = DataTracer()  # Data traceability tracker
 
+    def _extract_columns_from_code(self, code: str) -> List[str]:
+        """
+        Extract column names from Python code using simple pattern matching.
+        Looks for patterns like df['Column'], df.Column, etc.
+        """
+        if not code or self.df is None:
+            return []
+        
+        columns_used = []
+        available_columns = [str(col) for col in self.df.columns]
+        
+        # Pattern 1: df['Column'] or df["Column"]
+        pattern1 = r"df\[['\"]([^'\"]+)['\"]\]"
+        matches = re.findall(pattern1, code)
+        for match in matches:
+            if match in available_columns:
+                columns_used.append(match)
+        
+        # Pattern 2: df.Column (simple attribute access)
+        for col in available_columns:
+            # Check if column name appears as df.column_name (with word boundaries)
+            pattern2 = rf"df\.{re.escape(col)}\b"
+            if re.search(pattern2, code):
+                columns_used.append(col)
+        
+        # Pattern 3: Column name in quotes (for operations like groupby, etc.)
+        for col in available_columns:
+            pattern3 = rf"['\"]{re.escape(col)}['\"]"
+            if re.search(pattern3, code):
+                if col not in columns_used:
+                    columns_used.append(col)
+        
+        return list(set(columns_used))  # Remove duplicates
+    
     def _extract_text_from_prompt(self, prompt: str) -> Optional[str]:
         """Extract quoted or keyword text from user prompt."""
         if not prompt:
@@ -223,33 +263,45 @@ class ExcelProcessor:
                     raise RuntimeError(f"Failed to read CSV file with multiple encodings. Last error: {str(last_error)}")
                     
             elif file_ext in ['.xlsx', '.xls']:
-                # Always specify sheet_name to avoid getting a dict
-                # If sheet_name is None, use 0 to get first sheet
+                # Excel file - try preprocessing first for complex files (merged cells, headers)
+                preprocessor = ExcelPreprocessor()
                 try:
-                    if sheet_name is None:
-                        loaded_data = pd.read_excel(
-                            self.file_path, 
-                            sheet_name=0,
-                            engine='openpyxl' if file_ext == '.xlsx' else None
-                        )
+                    # Try preprocessing (handles merged cells, headers)
+                    preprocessed_df = preprocessor.preprocess(self.file_path)
+                    if preprocessed_df is not None and len(preprocessed_df) > 0:
+                        loaded_data = preprocessed_df
+                        logger.info("Successfully preprocessed Excel file (merged cells, headers fixed)")
                     else:
-                        loaded_data = pd.read_excel(
-                            self.file_path, 
-                            sheet_name=sheet_name,
-                            engine='openpyxl' if file_ext == '.xlsx' else None
-                        )
-                except Exception as e:
-                    # Try without engine specification for .xls files
-                    if file_ext == '.xls':
-                        try:
-                            if sheet_name is None:
-                                loaded_data = pd.read_excel(self.file_path, sheet_name=0)
-                            else:
-                                loaded_data = pd.read_excel(self.file_path, sheet_name=sheet_name)
-                        except Exception as e2:
-                            raise RuntimeError(f"Failed to read Excel file. The file may be corrupted. Error: {str(e2)}")
-                    else:
-                        raise RuntimeError(f"Failed to read Excel file. The file may be corrupted. Error: {str(e)}")
+                        # Preprocessing didn't work, fall back to standard read
+                        raise Exception("Preprocessing returned empty DataFrame")
+                except Exception as preprocess_error:
+                    logger.debug(f"Preprocessing failed or skipped, using standard read: {preprocess_error}")
+                    # Fall back to standard pandas read
+                    try:
+                        if sheet_name is None:
+                            loaded_data = pd.read_excel(
+                                self.file_path, 
+                                sheet_name=0,
+                                engine='openpyxl' if file_ext == '.xlsx' else None
+                            )
+                        else:
+                            loaded_data = pd.read_excel(
+                                self.file_path, 
+                                sheet_name=sheet_name,
+                                engine='openpyxl' if file_ext == '.xlsx' else None
+                            )
+                    except Exception as e:
+                        # Try without engine specification for .xls files
+                        if file_ext == '.xls':
+                            try:
+                                if sheet_name is None:
+                                    loaded_data = pd.read_excel(self.file_path, sheet_name=0)
+                                else:
+                                    loaded_data = pd.read_excel(self.file_path, sheet_name=sheet_name)
+                            except Exception as e2:
+                                raise RuntimeError(f"Failed to read Excel file. The file may be corrupted. Error: {str(e2)}")
+                        else:
+                            raise RuntimeError(f"Failed to read Excel file. The file may be corrupted. Error: {str(e)}")
                 
                 # Check if we got a dict (shouldn't happen with sheet_name specified, but double-check)
                 if isinstance(loaded_data, dict):
@@ -270,6 +322,11 @@ class ExcelProcessor:
             # Keep original copy
             self.original_df = self.df.copy()
             self.summary.append(f"Loaded {len(self.df)} rows and {len(self.df.columns)} columns")
+            
+            # Track data source
+            self.tracer.reset()
+            self.tracer.track_data_source(self.file_path, list(self.df.columns))
+            self.tracer.set_dataframe_state(len(self.df), list(self.df.columns), "before")
             
             # Generate summary using new summarizer module
             try:
@@ -385,6 +442,24 @@ class ExcelProcessor:
                 # Log columns after operations for debugging
                 logger.info(f"🔍 Columns after operations: {list(self.df.columns)}")
                 
+                # Track operations and columns used
+                for op in operations:
+                    op_type = op.get("type", "unknown")
+                    description = op.get("description", "")
+                    python_code = op.get("python_code", "")
+                    
+                    # Extract column names from python_code (simple pattern matching)
+                    columns_used = self._extract_columns_from_code(python_code)
+                    self.tracer.track_operation(
+                        operation_type=op_type,
+                        columns=columns_used,
+                        description=description,
+                        rows_affected=len(self.df)
+                    )
+                
+                # Update final state
+                self.tracer.set_dataframe_state(len(self.df), list(self.df.columns), "after")
+                
                 # Store formula result if present
                 if execution_result.get("results"):
                     for result in execution_result["results"]:
@@ -449,6 +524,9 @@ class ExcelProcessor:
                     # Single chart
                     chart_type_for_response = action_plan["chart_config"].get("chart_type", "chart")
             
+            # Get trace report before returning
+            trace_report = self.tracer.get_trace_report()
+            
             return {
                 "df": self.df,
                 "summary": self.summary,
@@ -456,7 +534,8 @@ class ExcelProcessor:
                 "chart_needed": chart_path is not None,
                 "chart_type": chart_type_for_response,
                 "formula_result": self.formula_result,
-                "task": task
+                "task": task,
+                "trace_report": trace_report  # Add traceability report
             }
             
         except Exception as e:
