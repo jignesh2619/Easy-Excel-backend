@@ -20,6 +20,7 @@ from utils.prompts import get_prompt_with_context, get_column_mapping_info
 from utils.knowledge_base import get_knowledge_base_summary, get_task_decision_guide
 from services.feedback_learner import FeedbackLearner
 from services.training_data_loader import TrainingDataLoader
+from services.extraction_pattern_analyzer import ExtractionPatternAnalyzer
 
 load_dotenv()
 
@@ -483,40 +484,47 @@ When removing or replacing special characters (asterisk, question mark, plus, pa
 - For removing multiple characters, use multiple str.replace() calls with regex=False
 - Example: df['Column'] = df['Column'].str.replace('*', '', regex=False).str.replace('?', '', regex=False)
 
-**EXTRACTING NUMERIC VALUES FROM FORMATTED STRINGS:**
-When a column contains formatted data (e.g., "Name | $1479", "Product: $50.99", "Sales: 1,234") and user wants to extract JUST the numeric value:
-- ALWAYS use str.extract() with regex pattern to extract numeric values
-- DO NOT just copy the entire string - extract only the numeric part
-- Example: df['Sales'] = df['Combined Data'].str.extract(r'\\$([\\d,]+)')[0].str.replace(',', '', regex=False).astype(float)
-- Example: df['Price'] = df['Description'].str.extract(r'\\$([\\d.]+)')[0].astype(float)
-- Example: df['Amount'] = df['Text'].str.extract(r'([\\d,]+)')[0].str.replace(',', '', regex=False).astype(float)
-- Handle commas in numbers: extract first, then remove commas, then convert to float
-- If extraction fails for some rows, they will be NaN - that's okay
-- When user says "fill col B with ref A" and A contains formatted data like "Name | $Value", extract ONLY the numeric part
+**EXTRACTION OPERATIONS (GENERALIZED PATTERN RECOGNITION):**
 
-**CORRECT - Extracting sales numbers from "Name | $Value" format:**
-User: "fill col b with ref a" where column A is "Ellie | $1479"
-{
-  "add_column": {
-    "name": "Sales",
-    "position": 1,
-    "default_value": ""
-  },
-  "operations": [{
-    "python_code": "df['Sales'] = df['Combined Data'].str.extract(r'\\$([\\d,]+)')[0].str.replace(',', '', regex=False).astype(float)",
-    "description": "Extract numeric sales values from Combined Data column",
-    "result_type": "new_column"
-  }]
-}
+When extracting values between columns, follow this pattern recognition workflow:
 
-**WRONG - Just copying the entire string:**
-{
-  "operations": [{
-    "python_code": "df['Sales'] = df['Combined Data']",  // WRONG - copies entire string
-    "description": "Fill Sales column",
-    "result_type": "new_column"
-  }]
-}
+STEP 1: ANALYZE SOURCE COLUMN FORMAT (from sample data)
+- Scan sample rows to identify: separators (|, :, -, space, parentheses), value position (before/after separator), format type (currency, number, text, date)
+- Pattern types: "Text | Value", "Label: Value", "Value (Text)", "Text-Value", "Value$", "Text Value", etc.
+- Identify value characteristics: numeric (with/without commas/decimals), currency ($, €, ₹, £, ¥), text, date, mixed
+
+STEP 2: DETERMINE TARGET SEMANTICS (from column name)
+- Column name hints at expected type:
+  * Numeric indicators: "Sales", "Amount", "Price", "Cost", "Revenue", "Profit", "Total", "Sum", "Value", "Number", "Qty", "Quantity"
+  * Text indicators: "Name", "Description", "Label", "Title", "Category", "Type"
+  * Date indicators: "Date", "Time", "Created", "Updated"
+- If target name suggests numeric but source has formatted string → extract numeric part only
+- If target name suggests text but source has mixed → extract text part only
+- If target name suggests date but source has mixed → extract date part only
+
+STEP 3: GENERATE EXTRACTION CODE (pattern-based)
+- For numeric extraction: Use str.extract() with regex pattern matching value position
+- Pattern template: df['Target'] = df['Source'].str.extract(r'PATTERN')[0].str.replace(',', '', regex=False).astype(float)
+- Common regex patterns (apply to similar formats):
+  * Currency after separator: r'\\$([\\d,]+(?:\\.\\d+)?)' → remove commas → float
+  * Currency with decimals: r'\\$([\\d.]+)' → float
+  * Number after separator (|, :, -): r'[|:-]\\s*([\\d,]+(?:\\.\\d+)?)' → remove commas → float
+  * Number with commas: r'([\\d,]+)' → remove commas → float
+  * Text before separator: r'^([^|:]+)' or r'(.+?)\\s*[|:]' → string
+  * Date extraction: r'(\\d{4}-\\d{2}-\\d{2})' or r'(\\d{1,2}/\\d{1,2}/\\d{4})' → datetime
+- Always handle commas: extract → remove commas → convert to float
+- Handle NaN: extraction may fail for some rows (acceptable, will be NaN)
+
+STEP 4: VALIDATION RULE
+- If source column contains formatted data (has separators/currency/text mix) AND target column name suggests single type (Sales, Amount, Name, Date) → MUST extract, not copy
+- WRONG: df['Sales'] = df['Combined Data'] (copies formatted string like "Name | $Value")
+- CORRECT: df['Sales'] = df['Combined Data'].str.extract(r'\\$([\\d,]+)')[0].str.replace(',', '', regex=False).astype(float) (extracts numeric value)
+
+PATTERN RECOGNITION PRINCIPLES:
+- Apply pattern recognition to ANY format, not just memorized examples
+- Analyze sample data FIRST to determine the correct extraction pattern
+- Use column name semantics to guide extraction type
+- Handle edge cases: missing values, different formats in same column, special characters
 
 **CRITICAL RULES:**
 1. ALWAYS generate python_code in operations (never leave empty)
@@ -635,6 +643,41 @@ class ActionPlanBot:
             # Get column mapping info (Excel letters → actual column names)
             column_mapping = get_column_mapping_info(available_columns)
             
+            # Detect extraction operations and generate pattern hints (token-efficient)
+            extraction_hint = ""
+            is_extraction_operation = any(keyword in user_prompt.lower() for keyword in 
+                                        ["fill", "extract", "copy from", "get from", "ref", "reference", "with ref"])
+            
+            if is_extraction_operation and sample_data and available_columns:
+                try:
+                    # Lightweight pattern analysis: analyze first 2 columns as potential source/target
+                    # This is a heuristic - the LLM will use sample data to make final decision
+                    if len(available_columns) >= 2:
+                        potential_source = available_columns[0]  # First column often source
+                        potential_target = available_columns[1]  # Second column often target
+                        
+                        hint = ExtractionPatternAnalyzer.get_pattern_hint(
+                            potential_source, 
+                            potential_target,
+                            sample_data,
+                            available_columns
+                        )
+                        if hint:
+                            extraction_hint = hint
+                    elif len(available_columns) == 1:
+                        # Single column - might be extracting from it
+                        hint = ExtractionPatternAnalyzer.get_pattern_hint(
+                            available_columns[0],
+                            "Target",
+                            sample_data,
+                            available_columns
+                        )
+                        if hint:
+                            extraction_hint = hint
+                except Exception as e:
+                    logger.debug(f"Could not generate extraction hint: {e}")
+                    # Continue without hint - not critical, LLM will still analyze sample data
+            
             full_prompt = f"""You are a data operations assistant. Return ONLY valid JSON.
 
 CRITICAL: Generate Python code for ALL operations. The backend will execute your code directly.
@@ -648,9 +691,9 @@ Reasoning: {', '.join(task_suggestions.get('reasoning', []))}
 {column_mapping}
 {similar_examples_text}
 {sample_explanation_text}
-
-**IMPORTANT - ANALYZE DATA FORMAT:**
-Look at the sample data above. If columns contain formatted strings (e.g., "Name | $Value", "Product: $50"), and user wants to extract numeric values, use str.extract() with regex patterns. DO NOT just copy the entire string - extract ONLY the numeric part.
+{extraction_hint}
+**IMPORTANT - PATTERN RECOGNITION FOR EXTRACTION:**
+When extracting values: 1) Analyze source format from sample data (separators, value position, type), 2) Determine target type from column name semantics, 3) Generate str.extract() regex matching the pattern, 4) Handle commas/currency, 5) Convert to appropriate type. NEVER copy formatted strings when target suggests extracted type.
 
 {prompt}
 
