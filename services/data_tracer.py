@@ -149,3 +149,4 @@ class DataTracer:
         
         return ". ".join(summary_parts) if summary_parts else "No operations tracked"
 
+

@@ -22,3 +22,4 @@ echo "Daily metadata cleanup cron job installed successfully!"
 echo "Metadata will be deleted every day at 2 AM"
 echo "Logs will be written to /var/log/metadata-cleanup.log"
 
+
