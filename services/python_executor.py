@@ -55,15 +55,19 @@ class PythonExecutor:
             error_msg = f"Code validation failed: {validation_result['error']}"
             self.errors.append(error_msg)
             self.execution_log.append(f"✗ {description}: {error_msg}")
+            logger.error(f"Code validation failed for: {description}\nOriginal code: {python_code[:500]}")
             raise RuntimeError(error_msg)
+        
+        # Use cleaned code if available, otherwise use original
+        code_to_execute = validation_result.get("cleaned_code", python_code)
         
         # Step 2: Prepare execution environment
         exec_globals = self._build_execution_environment()
         
         # Step 3: Execute code
         try:
-            # Execute the code
-            exec(python_code, exec_globals)
+            # Execute the cleaned code
+            exec(code_to_execute, exec_globals)
             
             # Step 4: Extract results
             result = self._extract_results(exec_globals, result_type)
@@ -207,6 +211,38 @@ class PythonExecutor:
             'merge': pd.merge,
         }
     
+    def _clean_code(self, python_code: str) -> str:
+        """
+        Clean code by removing markdown formatting and extra whitespace
+        
+        Args:
+            python_code: Raw code string that might contain markdown
+            
+        Returns:
+            Cleaned code string
+        """
+        code = python_code.strip()
+        
+        # Remove markdown code blocks (```python ... ```)
+        if code.startswith('```'):
+            # Find the closing ```
+            lines = code.split('\n')
+            # Remove first line if it's ```python or ```
+            if lines[0].startswith('```'):
+                lines = lines[1:]
+            # Remove last line if it's ```
+            if lines and lines[-1].strip() == '```':
+                lines = lines[:-1]
+            code = '\n'.join(lines)
+        
+        # Remove any remaining ``` markers
+        code = re.sub(r'```[a-z]*\n?', '', code)
+        
+        # Clean up whitespace
+        code = code.strip()
+        
+        return code
+    
     def _validate_code(self, python_code: str) -> Dict[str, Any]:
         """
         Validate code before execution
@@ -214,8 +250,15 @@ class PythonExecutor:
         Returns:
             {"valid": bool, "error": str}
         """
+        # Clean the code first (remove markdown, etc.)
+        cleaned_code = self._clean_code(python_code)
+        
+        # Check if code is empty after cleaning
+        if not cleaned_code or not cleaned_code.strip():
+            return {"valid": False, "error": "Code is empty after cleaning"}
+        
         # Check 1: No import statements
-        if re.search(r'\bimport\s+\w+|from\s+\w+\s+import', python_code):
+        if re.search(r'\bimport\s+\w+|from\s+\w+\s+import', cleaned_code):
             return {"valid": False, "error": "Import statements are not allowed"}
         
         # Check 2: No file operations
@@ -224,20 +267,27 @@ class PythonExecutor:
             r'__file__', r'__import__', r'eval\s*\(', r'exec\s*\(',
         ]
         for pattern in dangerous_patterns:
-            if re.search(pattern, python_code):
+            if re.search(pattern, cleaned_code):
                 return {"valid": False, "error": f"Dangerous operation detected: {pattern}"}
         
         # Check 3: No system operations
-        if re.search(r'\bos\.|sys\.|subprocess\.|shutil\.', python_code):
+        if re.search(r'\bos\.|sys\.|subprocess\.|shutil\.', cleaned_code):
             return {"valid": False, "error": "System operations are not allowed"}
         
         # Check 4: Basic syntax validation
         try:
-            compile(python_code, '<string>', 'exec')
+            compile(cleaned_code, '<string>', 'exec')
         except SyntaxError as e:
-            return {"valid": False, "error": f"Syntax error: {str(e)}"}
+            # Include the problematic code in error message
+            error_line = getattr(e, 'lineno', 'unknown')
+            error_text = getattr(e, 'text', '')
+            code_preview = cleaned_code[:300] if len(cleaned_code) > 300 else cleaned_code
+            return {
+                "valid": False, 
+                "error": f"Syntax error at line {error_line}: {str(e)}\nCode preview:\n{code_preview}"
+            }
         
-        return {"valid": True, "error": None}
+        return {"valid": True, "error": None, "cleaned_code": cleaned_code}
     
     def _extract_results(self, exec_globals: Dict, result_type: str) -> Any:
         """Extract results from execution environment"""
