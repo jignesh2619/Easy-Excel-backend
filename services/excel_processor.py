@@ -378,20 +378,20 @@ class ExcelProcessor:
         task = action_plan.get("task", "execute")
         chart_path = None
         
-        # Check if user actually requested a chart
+        # Check if user actually requested a chart in their prompt
         user_prompt = action_plan.get("user_prompt", "").lower() if action_plan.get("user_prompt") else ""
         chart_keywords = ["chart", "graph", "plot", "visualize", "visualization", "dashboard", "show me"]
         user_wants_chart = any(keyword in user_prompt for keyword in chart_keywords)
         
         try:
-            # Only handle chart requests if:
-            # 1. Task is explicitly "chart", OR
-            # 2. User explicitly requested a chart in their prompt AND chart_config exists
+            # STRICT: Only generate charts if user explicitly requested them in their prompt
+            # Ignore task="chart" and chart_configs from LLM if user didn't ask for charts
             should_generate_chart = (
-                task == "chart" or 
-                (user_wants_chart and ("chart_config" in action_plan or "chart_configs" in action_plan))
+                user_wants_chart and 
+                (task == "chart" or "chart_config" in action_plan or "chart_configs" in action_plan)
             )
             
+            # Handle chart requests (single or multiple) - ONLY if user requested
             if should_generate_chart:
                 import logging
                 logger = logging.getLogger(__name__)
@@ -432,40 +432,32 @@ class ExcelProcessor:
                         logger.warning("chart_configs is empty")
                         chart_path = None
                 else:
-                    # Single chart - only generate if chart_config has valid data
+                    # Single chart
                     chart_config = action_plan.get("chart_config", {})
-                    chart_type = chart_config.get("chart_type", "none") if chart_config else "none"
-                    
-                    # Only generate if chart_config exists, is not empty, and chart_type is not "none"
-                    if chart_config and chart_type != "none":
-                        # Validate that chart_config has required fields
-                        x_column = chart_config.get("x_column", "")
-                        y_column = chart_config.get("y_column", "")
-                        
-                        # Only proceed if we have valid columns or if it's a valid chart type
-                        if x_column or y_column or chart_type in ["bar", "line", "pie", "histogram", "scatter"]:
-                            try:
-                                chart_path = chart_executor.execute(chart_config)
-                                self.summary.extend(chart_executor.get_execution_log())
-                                title = chart_config.get("title", "")
-                                
-                                # Create descriptive summary message
-                                if x_column and y_column:
-                                    self.summary.append(f"Generated {chart_type} chart: {title or f'{x_column} vs {y_column}'}")
-                                else:
-                                    self.summary.append(f"Generated {chart_type} chart")
-                            except Exception as e:
-                                logger.error(f"Failed to generate single chart: {str(e)}", exc_info=True)
-                                raise RuntimeError(f"Chart generation failed: {str(e)}")
-                        else:
-                            logger.info("Skipping chart generation: chart_config has no valid columns")
-                            chart_path = None
+                    if chart_config:
+                        try:
+                            chart_path = chart_executor.execute(chart_config)
+                            self.summary.extend(chart_executor.get_execution_log())
+                            chart_type = chart_config.get("chart_type", "chart")
+                            x_column = chart_config.get("x_column", "")
+                            y_column = chart_config.get("y_column", "")
+                            title = chart_config.get("title", "")
+                            
+                            # Create descriptive summary message
+                            if x_column and y_column:
+                                self.summary.append(f"Generated {chart_type} chart: {title or f'{x_column} vs {y_column}'}")
+                            else:
+                                self.summary.append(f"Generated {chart_type} chart")
+                        except Exception as e:
+                            logger.error(f"Failed to generate single chart: {str(e)}", exc_info=True)
+                            raise RuntimeError(f"Chart generation failed: {str(e)}")
                     else:
-                        if chart_config:
-                            logger.info(f"Skipping chart generation: chart_type is '{chart_type}' (user didn't request chart)")
-                        else:
-                            logger.info("Skipping chart generation: no chart_config provided")
+                        logger.warning("chart_config is empty")
                         chart_path = None
+            else:
+                # User didn't request charts, but LLM added chart_config - skip it
+                if "chart_config" in action_plan or "chart_configs" in action_plan:
+                    logger.info(f"Skipping chart generation: user didn't request charts (prompt: '{action_plan.get('user_prompt', '')[:50]}...')")
             
             # Handle data operations (Python code execution)
             operations = action_plan.get("operations", [])
