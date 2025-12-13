@@ -9,8 +9,8 @@ bind = "127.0.0.1:8000"
 backlog = 2048
 
 # Worker processes - Reduced for 512MB server
-# Use only 2 workers to prevent OOM on small servers
-workers = 2
+# Use only 1 worker to prevent OOM on small servers (training data is now lazy loaded)
+workers = 1
 worker_class = "uvicorn.workers.UvicornWorker"
 worker_connections = 1000
 timeout = 300  # Increased timeout for large file processing
