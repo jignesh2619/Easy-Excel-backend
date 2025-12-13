@@ -32,7 +32,9 @@ class TrainingDataLoader:
         self.embedding_service = None  # Lazy load
         self.embeddings_cache: Dict[str, np.ndarray] = {}  # Cache embeddings
         self._embeddings_generated = False  # Lazy loading flag
-        self._load_datasets()
+        self._datasets_loaded = False  # Track if datasets have been loaded
+        # Don't load datasets on init - do it lazily on first use to save memory
+        # self._load_datasets()
         # Don't generate embeddings on init - do it lazily on first use
         # self._generate_embeddings()
     
@@ -235,6 +237,12 @@ class TrainingDataLoader:
         
         return examples
     
+    def _ensure_datasets_loaded(self):
+        """Lazy load datasets only when needed"""
+        if not self._datasets_loaded:
+            self._load_datasets()
+            self._datasets_loaded = True
+    
     def get_examples_for_prompt(
         self, 
         user_prompt: str, 
@@ -244,6 +252,7 @@ class TrainingDataLoader:
     ) -> List[Dict]:
         """
         Get relevant examples for a user prompt using semantic search
+        Loads datasets lazily on first use to save memory
         
         Args:
             user_prompt: User's prompt to find similar examples for
@@ -254,6 +263,9 @@ class TrainingDataLoader:
         Returns:
             List of similar examples
         """
+        # Lazy load datasets only when needed
+        self._ensure_datasets_loaded()
+        
         if not self.datasets:
             return []
         
