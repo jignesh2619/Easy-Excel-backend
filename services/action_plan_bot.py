@@ -766,8 +766,7 @@ Include "operations" array with "python_code" for each operation.
                     {"role": "system", "content": ACTION_PLAN_SYSTEM_PROMPT},
                     {"role": "user", "content": full_prompt}
                 ],
-                # Note: GPT-5 models only support default temperature (1)
-                top_p=0.95,
+                # Note: GPT-5 models only support default parameters (no temperature, top_p, etc.)
             )
             
             content = response.choices[0].message.content.strip()
