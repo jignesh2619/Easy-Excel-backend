@@ -292,6 +292,89 @@ class PythonExecutor:
         # Fix: foridx -> for idx
         code = re.sub(r'\bforidx\b', 'for idx', code)
         
+        # Fix: Convert semicolon-separated nested if statements to properly indented code
+        # Pattern: "for i in range(...): if condition: if condition2: statement"
+        # This is invalid Python - nested if statements need proper indentation
+        # We'll convert it to multi-line code with proper indentation
+        if ';' in code and re.search(r'for\s+\w+\s+in\s+range[^:]+:\s*if\s+.*:\s*if\s+', code):
+            # Split by semicolons but preserve structure
+            lines = []
+            current_line = ''
+            paren_count = 0
+            bracket_count = 0
+            in_string = False
+            string_char = None
+            
+            i = 0
+            while i < len(code):
+                char = code[i]
+                
+                # Track string boundaries
+                if char in ('"', "'") and (i == 0 or code[i-1] != '\\'):
+                    if not in_string:
+                        in_string = True
+                        string_char = char
+                    elif char == string_char:
+                        in_string = False
+                        string_char = None
+                
+                if not in_string:
+                    if char == '(':
+                        paren_count += 1
+                    elif char == ')':
+                        paren_count -= 1
+                    elif char == '[':
+                        bracket_count += 1
+                    elif char == ']':
+                        bracket_count -= 1
+                    elif char == ';' and paren_count == 0 and bracket_count == 0:
+                        # Safe to split here
+                        if current_line.strip():
+                            lines.append(current_line.strip())
+                        current_line = ''
+                        i += 1
+                        continue
+                
+                current_line += char
+                i += 1
+            
+            if current_line.strip():
+                lines.append(current_line.strip())
+            
+            # Now convert lines with nested if statements to properly indented code
+            fixed_lines = []
+            for line in lines:
+                # Check if this line has nested if statements
+                if re.search(r'for\s+\w+\s+in\s+range[^:]+:\s*if\s+.*:\s*if\s+', line):
+                    # Convert to multi-line with proper indentation
+                    # Pattern: "for i in range(...): if condition: if condition2: statement"
+                    match = re.match(r'(for\s+\w+\s+in\s+range[^:]+):\s*(if\s+[^:]+):\s*(if\s+[^:]+):\s*(.+)', line)
+                    if match:
+                        for_loop = match.group(1)
+                        if1 = match.group(2)
+                        if2 = match.group(3)
+                        statement = match.group(4)
+                        fixed_lines.append(f'{for_loop}:')
+                        fixed_lines.append(f'    {if1}:')
+                        fixed_lines.append(f'        {if2}:')
+                        fixed_lines.append(f'            {statement}')
+                    else:
+                        # Try simpler pattern: "for i in range(...): if condition: statement"
+                        match = re.match(r'(for\s+\w+\s+in\s+range[^:]+):\s*(if\s+[^:]+):\s*(.+)', line)
+                        if match:
+                            for_loop = match.group(1)
+                            if1 = match.group(2)
+                            statement = match.group(3)
+                            fixed_lines.append(f'{for_loop}:')
+                            fixed_lines.append(f'    {if1}:')
+                            fixed_lines.append(f'        {statement}')
+                        else:
+                            fixed_lines.append(line)
+                else:
+                    fixed_lines.append(line)
+            
+            code = '\n'.join(fixed_lines)
+        
         # Fix: Incorrect blank row insertion pattern
         # Pattern: df = pd.concat([df, pd.DataFrame([{}] * len(df))], ignore_index=True)
         # This appends blank rows at the end instead of inserting them between rows
@@ -590,6 +673,10 @@ df = pd.concat(new_rows, ignore_index=True)''',
         """
         # Clean the code first (remove markdown, etc.)
         cleaned_code = self._clean_code(python_code)
+        
+        # Log the full cleaned code for debugging (first 1000 chars)
+        logger.info(f"🔍 Full cleaned code (first 1000 chars): {cleaned_code[:1000]}")
+        logger.info(f"🔍 Full cleaned code length: {len(cleaned_code)}")
         
         # Check if code is empty after cleaning
         if not cleaned_code or not cleaned_code.strip():
