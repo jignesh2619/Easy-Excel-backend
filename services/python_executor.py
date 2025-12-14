@@ -488,6 +488,46 @@ class PythonExecutor:
             
             code = '\n'.join(fixed_lines)
         
+        # Post-processing: Fix incorrectly indented increment statements
+        # Pattern: increment statement (name_idx += 1, contact_idx += 1) that's at wrong indentation
+        # It should be inside the inner if block, not at the same level as the outer if
+        lines = code.split('\n')
+        fixed_code_lines = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            # Check if this is an increment statement at the wrong indentation level
+            # It should be inside an if block, not at the same level as the if
+            if re.match(r'^\s*(\w+_idx\s*[+\-*/]=\s*[^;]+)$', line.strip()):
+                # This is an increment statement
+                # Check if previous lines form a nested if structure
+                # Look back to see if we have: assignment -> inner if -> outer if -> for loop
+                if (i >= 3 and 
+                    'df.iloc' in lines[i - 1] and
+                    re.match(r'^\s*if\s+', lines[i - 2]) and
+                    re.match(r'^\s*if\s+', lines[i - 3])):
+                    # We have: for -> if -> if -> assignment -> increment
+                    # The increment should be indented to match the assignment (inside inner if)
+                    assignment_indent = len(lines[i - 1]) - len(lines[i - 1].lstrip())
+                    increment_content = line.strip()
+                    fixed_code_lines.append(' ' * assignment_indent + increment_content)
+                    i += 1
+                    continue
+                elif (i >= 2 and
+                      'df.iloc' in lines[i - 1] and
+                      re.match(r'^\s*if\s+', lines[i - 2])):
+                    # We have: for -> if -> assignment -> increment
+                    # The increment should be indented to match the assignment (inside if)
+                    assignment_indent = len(lines[i - 1]) - len(lines[i - 1].lstrip())
+                    increment_content = line.strip()
+                    fixed_code_lines.append(' ' * assignment_indent + increment_content)
+                    i += 1
+                    continue
+            fixed_code_lines.append(line)
+            i += 1
+        
+        code = '\n'.join(fixed_code_lines)
+        
         # Fix: Incorrect blank row insertion pattern
         # Pattern: df = pd.concat([df, pd.DataFrame([{}] * len(df))], ignore_index=True)
         # This appends blank rows at the end instead of inserting them between rows
