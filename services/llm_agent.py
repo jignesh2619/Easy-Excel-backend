@@ -413,7 +413,7 @@ Answer:"""
                     pass
             
             if all_examples:
-            similar_examples_text = "\n\nFEW-SHOT LEARNING EXAMPLES (from training data and past executions):\n"
+                similar_examples_text = "\n\nFEW-SHOT LEARNING EXAMPLES (from training data and past executions):\n"
                 for i, ex in enumerate(all_examples[:5], 1):
                     similar_examples_text += f"\nExample {i}:\n"
                     similar_examples_text += f"User: {ex['prompt']}\n"
