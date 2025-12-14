@@ -254,6 +254,42 @@ class PythonExecutor:
         # Remove any remaining ``` markers
         code = re.sub(r'```[a-z]*\n?', '', code)
         
+        # Fix: Replace df.loc[i, ...] with df.iloc[i, ...] to avoid index issues
+        # This is critical - loc uses the index label (which might not be 0,1,2,3...), 
+        # while iloc uses position (which is always 0,1,2,3...)
+        # Pattern: df.loc[i, 'Column'] or df.loc[i, "Column"]
+        code = re.sub(r'df\.loc\[(\w+),\s*', r'df.iloc[\1, ', code)
+        
+        # Fix: Convert semicolon-separated nested if statements to proper multi-line code
+        # The LLM often generates: "for i in range(...): if condition: if condition: statement; statement"
+        # This needs to be properly indented
+        # First, let's handle the case where we have nested ifs in a for loop on one line
+        if ';' in code and 'for ' in code and 'if ' in code:
+            # Try to convert semicolon-separated code with nested ifs to proper format
+            # Pattern: for i in range(...): if ...: if ...: statement; statement
+            pattern = r'(for\s+\w+\s+in\s+range\([^)]+\)):\s+(if\s+[^:]+):\s+(if\s+[^:]+):\s+([^;]+(?:;[^;]+)*)'
+            def fix_nested_ifs(match):
+                loop = match.group(1)
+                if1 = match.group(2)
+                if2 = match.group(3)
+                actions = match.group(4)
+                # Split actions by semicolon
+                action_list = [a.strip() for a in actions.split(';') if a.strip()]
+                action_str = '\n            '.join(action_list)
+                return f"{loop}:\n    {if1}:\n        {if2}:\n            {action_str}"
+            code = re.sub(pattern, fix_nested_ifs, code)
+            
+            # Also handle single if in for loop
+            pattern2 = r'(for\s+\w+\s+in\s+range\([^)]+\)):\s+(if\s+[^:]+):\s+([^;]+(?:;[^;]+)*)'
+            def fix_single_if(match):
+                loop = match.group(1)
+                if_stmt = match.group(2)
+                actions = match.group(3)
+                action_list = [a.strip() for a in actions.split(';') if a.strip()]
+                action_str = '\n        '.join(action_list)
+                return f"{loop}:\n    {if_stmt}:\n        {action_str}"
+            code = re.sub(pattern2, fix_single_if, code)
+        
         # Fix common syntax errors
         # Fix: for_in -> for _ in (common LLM mistake)
         code = re.sub(r'\bfor_in\b', 'for _ in', code)
