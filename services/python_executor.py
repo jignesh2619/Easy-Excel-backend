@@ -69,6 +69,14 @@ class PythonExecutor:
             # Execute the cleaned code
             exec(code_to_execute, exec_globals)
             
+            # Debug: Log extracted names and contacts if they exist
+            if 'names' in exec_globals:
+                names_list = exec_globals.get('names', [])
+                logger.info(f"🔍 Extracted names count: {len(names_list)}, sample: {names_list[:5] if len(names_list) > 0 else '[]'}")
+            if 'contacts' in exec_globals:
+                contacts_list = exec_globals.get('contacts', [])
+                logger.info(f"🔍 Extracted contacts count: {len(contacts_list)}, sample: {contacts_list[:5] if len(contacts_list) > 0 else '[]'}")
+            
             # Step 4: Extract results
             result = self._extract_results(exec_globals, result_type)
             
@@ -78,6 +86,14 @@ class PythonExecutor:
                 # Ensure index is reset after operations
                 if not self.df.index.equals(pd.RangeIndex(len(self.df))):
                     self.df = self.df.reset_index(drop=True)
+                
+                # Debug: Log DataFrame state after execution
+                if 'Student Name' in self.df.columns:
+                    filled_student = self.df['Student Name'].notna().sum()
+                    logger.info(f"🔍 After execution - Student Name: {filled_student}/{len(self.df)} filled")
+                if 'Contact No.' in self.df.columns:
+                    filled_contact = self.df['Contact No.'].notna().sum()
+                    logger.info(f"🔍 After execution - Contact No.: {filled_contact}/{len(self.df)} filled")
             
             # Step 6: Store result
             if result is not None:
