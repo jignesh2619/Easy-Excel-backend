@@ -628,8 +628,8 @@ Generate the summary now:"""
                     },
                     {"role": "user", "content": prompt}
                 ],
-                # Note: GPT-5 models only support default temperature (1)
-                max_tokens=250
+                # Note: GPT-5 models only support default parameters
+                max_completion_tokens=250
             )
             
             summary = response.choices[0].message.content.strip()

@@ -277,8 +277,8 @@ Answer:"""
                     },
                     {"role": "user", "content": classification_prompt}
                 ],
-                # Note: GPT-5 models only support default temperature (1)
-                max_tokens=5  # Just "SIMPLE" or "COMPLEX"
+                # Note: GPT-5 models only support default parameters
+                max_completion_tokens=5  # Just "SIMPLE" or "COMPLEX"
             )
             
             result = response.choices[0].message.content.strip().upper()
