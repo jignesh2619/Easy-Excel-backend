@@ -272,35 +272,11 @@ class PythonExecutor:
         # This is safer and will catch all cases
         code = code.replace('df.loc[', 'df.iloc[')
         
-        # Fix: Convert semicolon-separated nested if statements to proper multi-line code
-        # The LLM often generates: "for i in range(...): if condition: if condition: statement; statement"
-        # This needs to be properly indented
-        # First, let's handle the case where we have nested ifs in a for loop on one line
-        if ';' in code and 'for ' in code and 'if ' in code:
-            # Try to convert semicolon-separated code with nested ifs to proper format
-            # Pattern: for i in range(...): if ...: if ...: statement; statement
-            pattern = r'(for\s+\w+\s+in\s+range\([^)]+\)):\s+(if\s+[^:]+):\s+(if\s+[^:]+):\s+([^;]+(?:;[^;]+)*)'
-            def fix_nested_ifs(match):
-                loop = match.group(1)
-                if1 = match.group(2)
-                if2 = match.group(3)
-                actions = match.group(4)
-                # Split actions by semicolon
-                action_list = [a.strip() for a in actions.split(';') if a.strip()]
-                action_str = '\n            '.join(action_list)
-                return f"{loop}:\n    {if1}:\n        {if2}:\n            {action_str}"
-            code = re.sub(pattern, fix_nested_ifs, code)
-            
-            # Also handle single if in for loop
-            pattern2 = r'(for\s+\w+\s+in\s+range\([^)]+\)):\s+(if\s+[^:]+):\s+([^;]+(?:;[^;]+)*)'
-            def fix_single_if(match):
-                loop = match.group(1)
-                if_stmt = match.group(2)
-                actions = match.group(3)
-                action_list = [a.strip() for a in actions.split(';') if a.strip()]
-                action_str = '\n        '.join(action_list)
-                return f"{loop}:\n    {if_stmt}:\n        {action_str}"
-            code = re.sub(pattern2, fix_single_if, code)
+        # IMPORTANT: Don't restructure semicolon-separated code if it's valid Python
+        # The code might be all on one line with semicolons, which is valid Python syntax
+        # Only restructure if it's actually malformed (e.g., "statement) for i in range(...)" at end)
+        # For now, we'll skip the automatic restructuring of semicolon-separated code
+        # and just ensure df.loc is replaced with df.iloc (already done above)
         
         # Fix common syntax errors
         # Fix: for_in -> for _ in (common LLM mistake)
@@ -337,7 +313,8 @@ df = pd.concat(new_rows, ignore_index=True)''',
         # Fix: Malformed generator/list comprehension at end of statement
         # Pattern: "statement) for i in range(...)" -> convert to proper loop
         # This fixes cases like: "df = pd.concat(...) for i in range(...)"
-        # Match assignment followed by for loop at end
+        # BUT: Only apply if the pattern is actually malformed (statement ends with ) and for comes after)
+        # Don't match if there are semicolons between - that's valid Python
         def fix_malformed_loop(match):
             statement = match.group(1).strip()
             var = match.group(2)
@@ -345,29 +322,32 @@ df = pd.concat(new_rows, ignore_index=True)''',
             # Convert to proper for loop with indentation
             return f'for {var} in {range_expr}:\n    {statement}'
         
-        # Pattern 1: Simple assignment with method call
-        # Matches: "df = pd.concat(...) for i in range(...)"
-        # IMPORTANT: Match complete range() call including all arguments like range(len(df), 0, -1)
+        # IMPORTANT: Only match patterns where "for" comes immediately after a closing paren
+        # This indicates a malformed pattern like "df = pd.concat(...) for i in range(...)"
+        # Don't match if there are semicolons or other code between - that's valid Python
+        
+        # Pattern 1: Simple assignment with method call - only if "for" comes right after )
+        # Matches: "df = pd.concat(...) for i in range(...)" (no semicolon between)
         pattern1 = r'(\w+\s*=\s*[^)]+\))\s+for\s+(\w+)\s+in\s+(range\([^)]+(?:,\s*[^)]+)*\))'
-        code = re.sub(pattern1, fix_malformed_loop, code)
+        # Only apply if there's no semicolon between the statement and "for"
+        if ';' not in code or not re.search(r'\)\s*;\s*for\s+', code):
+            code = re.sub(pattern1, fix_malformed_loop, code)
         
-        # Pattern 2: Assignment with method chain (e.g., .reset_index())
-        # Matches: "df = pd.concat(...).reset_index(...) for i in range(...)"
-        # IMPORTANT: Match complete range() call including all arguments
+        # Pattern 2: Assignment with method chain - only if "for" comes right after )
         pattern2 = r'(\w+\s*=\s*[^)]+\)(?:\.[^)]+\))+)\s+for\s+(\w+)\s+in\s+(range\([^)]+(?:,\s*[^)]+)*\))'
-        code = re.sub(pattern2, fix_malformed_loop, code)
+        if ';' not in code or not re.search(r'\)\s*;\s*for\s+', code):
+            code = re.sub(pattern2, fix_malformed_loop, code)
         
-        # Pattern 3: More complex - handles nested parentheses and method chains
-        # Matches: "df = pd.concat([...]).reset_index(...) for i in range(...)"
-        # This pattern handles the full line with nested brackets and method calls
-        # IMPORTANT: Match complete range() call including all arguments like range(len(df), 0, -1)
-        # Use a more robust pattern that handles nested parentheses in range()
+        # Pattern 3: More complex - only if "for" comes right after )
         pattern3 = r'^(\w+\s*=\s*.+\)(?:\.\w+\([^)]*\))*)\s+for\s+(\w+)\s+in\s+(range\([^)]+(?:,\s*[^)]+)*\))'
         def fix_complex_loop(match):
             statement = match.group(1).strip()
             var = match.group(2)
             range_expr = match.group(3)
             return f'for {var} in {range_expr}:\n    {statement}'
+        # Only apply if there's no semicolon between
+        if ';' not in code or not re.search(r'\)\s*;\s*for\s+', code):
+            code = re.sub(pattern3, fix_complex_loop, code)
         
         # Fix: for loop inside function call parentheses (multi-line issue)
         # Pattern: .method(for var in range(...): ...) or method(for var in range(...)
@@ -417,6 +397,14 @@ df = pd.concat(new_rows, ignore_index=True)''',
         fixed_lines = []
         for line in lines:
             line_stripped = line.strip()
+            
+            # IMPORTANT: If the line contains semicolons, it's likely valid Python code
+            # Don't try to restructure it - just leave it as-is after df.loc replacement
+            if ';' in line_stripped:
+                # This is semicolon-separated code - likely valid Python
+                # Just add it as-is (df.loc should already be replaced above)
+                fixed_lines.append(line)
+                continue
             
             # First check for pattern3 (for loop at end of statement)
             # Use a more robust approach: find the "for var in range" and extract everything
