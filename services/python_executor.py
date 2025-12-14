@@ -258,11 +258,19 @@ class PythonExecutor:
         # This is critical - loc uses the index label (which might not be 0,1,2,3...), 
         # while iloc uses position (which is always 0,1,2,3...)
         # Pattern: df.loc[i, 'Column'] or df.loc[i, "Column"] or df.loc[i, 'Column Name']
-        # Match: df.loc[variable, any_string_in_quotes]
+        # Match: df.loc[variable, any_string_in_quotes] - handle both single and double quotes
+        # Use a more robust pattern that handles any content between brackets
         code = re.sub(r'df\.loc\[(\w+),\s*([\'"])([^\'"]+)\2', r'df.iloc[\1, \2\3\2', code)
         
         # Also handle cases without quotes (shouldn't happen but just in case)
         code = re.sub(r'df\.loc\[(\w+),\s*(\w+)', r'df.iloc[\1, \2', code)
+        
+        # CRITICAL FIX: The code might be all on one line with semicolons
+        # We need to convert df.loc BEFORE we split by semicolons, otherwise the pattern won't match
+        # But actually, the regex should work on the whole string. Let me try a different approach:
+        # Replace ALL occurrences of df.loc[ with df.iloc[ regardless of what comes after
+        # This is safer and will catch all cases
+        code = code.replace('df.loc[', 'df.iloc[')
         
         # Fix: Convert semicolon-separated nested if statements to proper multi-line code
         # The LLM often generates: "for i in range(...): if condition: if condition: statement; statement"
