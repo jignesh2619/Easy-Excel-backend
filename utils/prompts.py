@@ -281,10 +281,31 @@ KNOWLEDGE BASE - TASK SELECTION GUIDE:
   * → CRITICAL: Use add_row JSON format for SINGLE row, NOT Python code to add rows
   * → Calculate values in operations, store in temp columns, reference in add_row.data
 
-- SPECIAL CASE - When user asks to add MULTIPLE rows with sequential data:
-  * User: "add numbers 1-50 in column B"
+- SPECIAL CASE - When user asks to FILL A COLUMN WITH SEQUENTIAL NUMBERS:
+  * User: "fill col A with 1-50 numbers"
+  * User: "fill column B with numbers 1 to 50"
+  * User: "fill column A with 1-50"
+  * → These mean: Fill the column with sequential numbers (1, 2, 3, ..., up to the requested number)
+  * → AUTOMATICALLY ADD ROWS if the DataFrame has fewer rows than needed
+  * → Extract the maximum number from the range (e.g., 50 from "1-50") - this is the target_count
+  * → Check if len(df) < target_count, and if so, add (target_count - len(df)) new empty rows first
+  * → Then fill the column with numbers from 1 to target_count
+  * → Use operations with Python code:
+  *   {
+  *     "task": "execute",
+  *     "operations": [{
+  *       "python_code": "target_count = 50\ncurrent_rows = len(df)\nif current_rows < target_count:\n    new_rows = [{} for _ in range(target_count - current_rows)]\n    df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)\ndf['A'] = list(range(1, target_count + 1))",
+  *       "description": "Fill column A with numbers 1 to 50, adding rows if needed",
+  *       "result_type": "dataframe"
+  *     }]
+  *   }
+  * → CRITICAL: Always check row count and auto-add rows if needed before filling
+  * → The target_count is the maximum number in the range (e.g., 50 from "1-50")
+
+- SPECIAL CASE - When user asks to ADD MULTIPLE NEW ROWS with sequential data:
+  * User: "add numbers 1-50 in column B" (when column is already full)
   * User: "add 50 rows with numbers 1-50"
-  * User: "fill column B with 1 to 50"
+  * User: "append 50 rows with numbers 1-50"
   * → These mean: Add 50 NEW ROWS to the DataFrame, each with a number in column B
   * → Use operations with Python code ONLY (do NOT use add_row JSON format):
   *   {

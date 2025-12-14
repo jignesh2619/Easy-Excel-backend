@@ -91,9 +91,9 @@ class XlsxWriter:
                     try:
                         if pd.isna(cell_value):
                             if cell_format:
-                                worksheet.write_blank(excel_row, col_idx, cell_format)
+                                worksheet.write_blank(excel_row, col_idx, "", cell_format)
                             else:
-                                worksheet.write_blank(excel_row, col_idx)
+                                worksheet.write_blank(excel_row, col_idx, "")
                         elif isinstance(cell_value, (int, float)):
                             if cell_format:
                                 worksheet.write_number(excel_row, col_idx, cell_value, cell_format)
@@ -249,7 +249,7 @@ class XlsxWriter:
                                 
                                 # Write with proper type handling - overwrites existing cell with format
                                 if pd.isna(cell_value):
-                                    worksheet.write_blank(excel_row, col_idx, cell_format)
+                                    worksheet.write_blank(excel_row, col_idx, "", cell_format)
                                 elif isinstance(cell_value, (int, float)):
                                     worksheet.write_number(excel_row, col_idx, cell_value, cell_format)
                                 elif isinstance(cell_value, bool):

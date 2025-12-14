@@ -352,15 +352,42 @@ Example - Adding total row for Jan column:
 → These mean: Add a total row at the BOTTOM of the column with the sum value
 → Use JSON format with "add_row" and calculate the sum in operations first
 
-**WHEN USER ASKS TO ADD MULTIPLE ROWS WITH SEQUENTIAL DATA:**
-- User: "add numbers 1-50 in column B"
+**WHEN USER ASKS TO FILL A COLUMN WITH SEQUENTIAL NUMBERS:**
+- User: "fill col A with 1-50 numbers"
+- User: "fill column B with numbers 1 to 50"
+- User: "fill empty cells in column A with 1-50"
+→ These mean: Fill the column with sequential numbers (1, 2, 3, ..., up to the requested number)
+→ If the DataFrame has fewer rows than needed, AUTOMATICALLY ADD ROWS first
+→ Then fill the column with sequential numbers starting from 1
+
+**CORRECT - Filling column with sequential numbers (e.g., fill column A with 1-50, auto-add rows if needed):**
+{
+  "operations": [{
+    "python_code": "target_count = 50\ncurrent_rows = len(df)\nif current_rows < target_count:\n    new_rows = [{} for _ in range(target_count - current_rows)]\n    df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)\ndf['A'] = list(range(1, target_count + 1))",
+    "description": "Fill column A with numbers 1 to 50, adding rows if needed",
+    "result_type": "dataframe"
+  }]
+}
+
+**IMPORTANT - When user specifies a range like "1-50":**
+- Extract the maximum number (50 in this case) - this is the target_count
+- Always check if current_rows < target_count
+- If yes, automatically add (target_count - current_rows) new empty rows
+- Then fill the column with numbers from 1 to target_count
+
+**ALTERNATIVE - If you want to fill only empty cells (when there are enough rows):**
+- Only use this approach if the user explicitly says "fill empty cells" AND there are already enough rows
+- Otherwise, use the approach above to auto-add rows
+
+**WHEN USER ASKS TO ADD MULTIPLE NEW ROWS WITH SEQUENTIAL DATA:**
+- User: "add numbers 1-50 in column B" (when column is already full)
 - User: "add 50 rows with numbers 1-50"
-- User: "fill column B with 1 to 50"
+- User: "append 50 rows with numbers 1-50"
 → These mean: Add 50 NEW ROWS to the DataFrame, each with a number in column B
 → Use operations with Python code to add multiple rows at once
 → DO NOT use add_row JSON format for multiple rows - use operations instead
 
-**CORRECT - Adding multiple rows with sequential data (e.g., numbers 1-50 in column B):**
+**CORRECT - Adding multiple rows with sequential data (e.g., add 50 new rows with numbers 1-50 in column B):**
 {
   "operations": [{
     "python_code": "new_rows = [{'B': i} for i in range(1, 51)]; df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)",
@@ -505,6 +532,38 @@ STEP 2: DETERMINE TARGET SEMANTICS (from column name)
 STEP 3: GENERATE EXTRACTION CODE (pattern-based)
 - For numeric extraction: Use str.extract() with regex pattern matching value position
 - Pattern template: df['Target'] = df['Source'].str.extract(r'PATTERN')[0].str.replace(',', '', regex=False).astype(float)
+
+**CRITICAL - EXTRACTING NAMES AND CONTACT NUMBERS FROM MIXED DATA:**
+- When user says "fill name in C and contact in D from column B" or similar:
+  - SMART FILLING: Detect where the last non-empty cell is in each target column, then fill empty cells sequentially
+  - Step 1: Extract names and contacts from source column (Data/B)
+  - Step 2: Find last non-empty index in each target column (Student Name, Contact No.)
+  - Step 3: Fill empty cells sequentially starting from the next position after last filled cell
+  - CORRECT approach for smart sequential filling (MUST USE THIS PATTERN):
+    * import pandas as pd
+    * # Extract names and contacts from source column
+    * names = df['Data'].where(df['Data'].str.contains(r'^[A-Za-z\s]+$', na=False)).dropna().tolist()
+    * contacts = df['Data'].where(df['Data'].str.match(r'^\d{8,10}$', na=False)).dropna().tolist()
+    * # Fill Student Name column - find last non-empty, then fill empty cells sequentially
+    * name_idx = 0
+    * for i in range(len(df)):
+    *     if pd.isna(df.loc[i, 'Student Name']) or df.loc[i, 'Student Name'] == '':
+    *         if name_idx < len(names):
+    *             df.loc[i, 'Student Name'] = names[name_idx]
+    *             name_idx += 1
+    * # Fill Contact No. column - find last non-empty, then fill empty cells sequentially
+    * contact_idx = 0
+    * for i in range(len(df)):
+    *     if pd.isna(df.loc[i, 'Contact No.']) or df.loc[i, 'Contact No.'] == '':
+    *         if contact_idx < len(contacts):
+    *             df.loc[i, 'Contact No.'] = contacts[contact_idx]
+    *             contact_idx += 1
+  - ALTERNATIVE simpler approach (if data is alternating):
+    * df['Student Name'] = df['Data'].where(df['Data'].str.contains(r'^[A-Za-z\s]+$', na=False))
+    * df['Contact No.'] = df['Data'].where(df['Data'].str.match(r'^\d{8,10}$', na=False)).shift(1)
+  - DO NOT use .str.isalpha() or .str.isnumeric() - these fail for strings with spaces or mixed content
+  - NEVER use .str.isalpha() for names (fails on strings with spaces like "am Sandier")
+  - NEVER use .str.isnumeric() for contact numbers in mixed data (use regex pattern matching instead)
 - Common regex patterns (apply to similar formats):
   * Currency after separator: r'\\$([\\d,]+(?:\\.\\d+)?)' → remove commas → float
   * Currency with decimals: r'\\$([\\d.]+)' → float

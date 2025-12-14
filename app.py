@@ -158,6 +158,7 @@ class ProcessDataRequest(BaseModel):
     data: List[Dict[str, Any]]  # JSON data (list of row objects)
     columns: List[str]  # Column names
     prompt: str  # User prompt for processing
+    row_count: Optional[int] = None  # Total number of rows (if data is a preview/sample)
 
 
 @app.get("/", response_model=HealthResponse)
@@ -589,6 +590,15 @@ async def process_data(
         
         df = pd.DataFrame(request.data)
         
+        # Check if frontend is sending limited data (preview only)
+        # If row_count is provided and larger than data length, log a warning
+        if hasattr(request, 'row_count') and request.row_count and request.row_count > len(df):
+            logger.warning(
+                f"⚠️ Frontend sent only {len(df)} rows but row_count={request.row_count}. "
+                f"Processing will only affect the {len(df)} rows sent. "
+                f"Frontend should send all {request.row_count} rows for full processing."
+            )
+        
         # Ensure columns match
         if set(df.columns) != set(request.columns):
             # Reorder columns to match request
@@ -748,6 +758,17 @@ async def process_data(
         columns = list(processed_df.columns)
         row_count = len(processed_df)
         
+        # Debug: Log sample data from processed_data
+        if processed_data and len(processed_data) > 0:
+            sample_row = processed_data[0]
+            logger.info(f"🔍 Sample row from processed_data: {sample_row}")
+            if 'Student Name' in columns:
+                student_names = [row.get('Student Name') for row in processed_data[:5]]
+                logger.info(f"🔍 First 5 Student Name values: {student_names}")
+            if 'Contact No.' in columns:
+                contacts = [row.get('Contact No.') for row in processed_data[:5]]
+                logger.info(f"🔍 First 5 Contact No. values: {contacts}")
+        
         # 13. Get formatting metadata
         formatting_metadata = processor.get_formatting_metadata(preview_df)
         logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
@@ -835,6 +856,10 @@ async def process_data(
                 )
             except Exception as e:
                 logger.warning(f"Failed to record feedback: {e}")
+        
+        # Log response details for debugging
+        logger.info(f"📤 Sending response: {len(processed_data)} rows, {len(columns)} columns, row_count={row_count}")
+        logger.info(f"📤 Response includes processed_data: {processed_data is not None}, length: {len(processed_data) if processed_data else 0}")
         
         return ProcessFileResponse(
             status="success",

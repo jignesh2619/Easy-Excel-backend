@@ -472,6 +472,16 @@ class ExcelProcessor:
                 # Log columns after operations for debugging
                 logger.info(f"🔍 Columns after operations: {list(self.df.columns)}")
                 
+                # Debug: Log sample data from Student Name and Contact No. columns
+                if 'Student Name' in self.df.columns:
+                    student_name_sample = self.df['Student Name'].head(10).tolist()
+                    non_empty_student = self.df['Student Name'].notna().sum()
+                    logger.info(f"🔍 Student Name column: {non_empty_student}/{len(self.df)} non-empty, sample: {student_name_sample}")
+                if 'Contact No.' in self.df.columns:
+                    contact_sample = self.df['Contact No.'].head(10).tolist()
+                    non_empty_contact = self.df['Contact No.'].notna().sum()
+                    logger.info(f"🔍 Contact No. column: {non_empty_contact}/{len(self.df)} non-empty, sample: {contact_sample}")
+                
                 # Track operations and columns used
                 for op in operations:
                     op_type = op.get("type", "unknown")
@@ -1196,7 +1206,7 @@ class ExcelProcessor:
                                 
                                 # Determine value type and write accordingly
                                 if pd.isna(cell_value):
-                                    worksheet.write_blank(excel_row, col_idx, cell_format)
+                                    worksheet.write_blank(excel_row, col_idx, "", cell_format)
                                 elif isinstance(cell_value, (int, float)):
                                     worksheet.write_number(excel_row, col_idx, cell_value, cell_format)
                                 elif isinstance(cell_value, bool):
@@ -1532,8 +1542,12 @@ class ExcelProcessor:
             self.summary.append("Delete column: No column name specified. Please specify column name or position (e.g., 'delete second column', 'delete column Name').")
             return
         
+        # Check if column was already deleted in operations (common when LLM generates both operation and delete_column)
         if column_name not in self.df.columns:
-            raise ValueError(f"Column '{column_name}' not found")
+            # Column might have been deleted in operations - check if it was recently deleted
+            logger.warning(f"⚠️ Column '{column_name}' not found - may have been deleted in operations already")
+            self.summary.append(f"Column '{column_name}' was already deleted (likely in previous operations)")
+            return  # Skip deletion since column is already gone
         
         self.df = self.df.drop(columns=[column_name])
         self.summary.append(f"Deleted column '{column_name}'")

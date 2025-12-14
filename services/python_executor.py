@@ -213,7 +213,7 @@ class PythonExecutor:
     
     def _clean_code(self, python_code: str) -> str:
         """
-        Clean code by removing markdown formatting and extra whitespace
+        Clean code by removing markdown formatting and fixing common syntax errors
         
         Args:
             python_code: Raw code string that might contain markdown
@@ -237,6 +237,289 @@ class PythonExecutor:
         
         # Remove any remaining ``` markers
         code = re.sub(r'```[a-z]*\n?', '', code)
+        
+        # Fix common syntax errors
+        # Fix: for_in -> for _ in (common LLM mistake)
+        code = re.sub(r'\bfor_in\b', 'for _ in', code)
+        # Fix: for _in -> for _ in (space before in but missing after _)
+        code = re.sub(r'\bfor\s+_in\b', 'for _ in', code)
+        # Fix: forin -> for _ in
+        code = re.sub(r'\bforin\b', 'for _ in', code)
+        # Fix: fori -> for i
+        code = re.sub(r'\bfori\b', 'for i', code)
+        # Fix: forj -> for j
+        code = re.sub(r'\bforj\b', 'for j', code)
+        # Fix: foridx -> for idx
+        code = re.sub(r'\bforidx\b', 'for idx', code)
+        
+        # Fix: Incorrect blank row insertion pattern
+        # Pattern: df = pd.concat([df, pd.DataFrame([{}] * len(df))], ignore_index=True)
+        # This appends blank rows at the end instead of inserting them between rows
+        # Replace with correct code that inserts blank rows between existing rows
+        incorrect_pattern = r'df\s*=\s*pd\.concat\(\s*\[\s*df\s*,\s*pd\.DataFrame\(\s*\[\s*\{\}\s*\]\s*\*\s*len\(df\)\s*\)\s*\]\s*,\s*ignore_index\s*=\s*True\s*\)'
+        if re.search(incorrect_pattern, code):
+            # Replace with correct implementation
+            code = re.sub(
+                incorrect_pattern,
+                '''new_rows = []
+for i in range(len(df)):
+    new_rows.append(df.iloc[i:i+1])
+    new_rows.append(pd.DataFrame([{}], columns=df.columns))
+df = pd.concat(new_rows, ignore_index=True)''',
+                code
+            )
+            logger.info("🔧 Fixed incorrect blank row insertion pattern - now inserting between rows instead of appending")
+        
+        # Fix: Malformed generator/list comprehension at end of statement
+        # Pattern: "statement) for i in range(...)" -> convert to proper loop
+        # This fixes cases like: "df = pd.concat(...) for i in range(...)"
+        # Match assignment followed by for loop at end
+        def fix_malformed_loop(match):
+            statement = match.group(1).strip()
+            var = match.group(2)
+            range_expr = match.group(3)
+            # Convert to proper for loop with indentation
+            return f'for {var} in {range_expr}:\n    {statement}'
+        
+        # Pattern 1: Simple assignment with method call
+        # Matches: "df = pd.concat(...) for i in range(...)"
+        # IMPORTANT: Match complete range() call including all arguments like range(len(df), 0, -1)
+        pattern1 = r'(\w+\s*=\s*[^)]+\))\s+for\s+(\w+)\s+in\s+(range\([^)]+(?:,\s*[^)]+)*\))'
+        code = re.sub(pattern1, fix_malformed_loop, code)
+        
+        # Pattern 2: Assignment with method chain (e.g., .reset_index())
+        # Matches: "df = pd.concat(...).reset_index(...) for i in range(...)"
+        # IMPORTANT: Match complete range() call including all arguments
+        pattern2 = r'(\w+\s*=\s*[^)]+\)(?:\.[^)]+\))+)\s+for\s+(\w+)\s+in\s+(range\([^)]+(?:,\s*[^)]+)*\))'
+        code = re.sub(pattern2, fix_malformed_loop, code)
+        
+        # Pattern 3: More complex - handles nested parentheses and method chains
+        # Matches: "df = pd.concat([...]).reset_index(...) for i in range(...)"
+        # This pattern handles the full line with nested brackets and method calls
+        # IMPORTANT: Match complete range() call including all arguments like range(len(df), 0, -1)
+        # Use a more robust pattern that handles nested parentheses in range()
+        pattern3 = r'^(\w+\s*=\s*.+\)(?:\.\w+\([^)]*\))*)\s+for\s+(\w+)\s+in\s+(range\([^)]+(?:,\s*[^)]+)*\))'
+        def fix_complex_loop(match):
+            statement = match.group(1).strip()
+            var = match.group(2)
+            range_expr = match.group(3)
+            return f'for {var} in {range_expr}:\n    {statement}'
+        
+        # Fix: for loop inside function call parentheses (multi-line issue)
+        # Pattern: .method(for var in range(...): ...) or method(for var in range(...)
+        # This fixes cases like: reset_index(for i in range(len(df): drop=True))
+        # We need to handle this across multiple lines
+        def fix_for_in_function_call_multiline(code_str):
+            # Join all lines to handle multi-line patterns
+            full_code = ' '.join(code_str.split('\n'))
+            
+            # Pattern: .method_name(for var in range(...): params)
+            # Or: method_name(for var in range(...): params)
+            pattern = r'(\.?\w+)\(for\s+(\w+)\s+in\s+(range\([^)]+\)):\s*([^)]+)\)'
+            
+            def extract_and_fix(match):
+                method_part = match.group(1)  # .reset_index or reset_index
+                var = match.group(2)  # i
+                range_expr = match.group(3)  # range(len(df)
+                params = match.group(4).strip()  # drop=True
+                
+                # Reconstruct: remove the for loop from inside, we'll add it outside
+                # Find the assignment statement before this method call
+                # For now, return a marker we can process later
+                return f"__FOR_LOOP_MARKER__{var}__{range_expr}__{method_part}({params})"
+            
+            # First pass: mark the problematic patterns
+            marked_code = re.sub(pattern, extract_and_fix, full_code)
+            
+            # If we found any markers, reconstruct the code
+            if '__FOR_LOOP_MARKER__' in marked_code:
+                # Find the assignment before the marker
+                # Pattern: df = pd.concat(...)__FOR_LOOP_MARKER__...
+                marker_pattern = r'(\w+\s*=\s*[^_]+)__FOR_LOOP_MARKER__(\w+)__([^_]+)__(.+)'
+                match = re.search(marker_pattern, marked_code)
+                if match:
+                    assignment = match.group(1).strip()
+                    var = match.group(2)
+                    range_expr = match.group(3)
+                    method_call = match.group(4)
+                    
+                    # Reconstruct as proper for loop
+                    return f'for {var} in {range_expr}:\n    {assignment}{method_call}'
+            
+            return code_str
+        
+        # Apply to each line separately to handle multi-line code
+        lines = code.split('\n')
+        fixed_lines = []
+        for line in lines:
+            line_stripped = line.strip()
+            
+            # First check for pattern3 (for loop at end of statement)
+            # Use a more robust approach: find the "for var in range" and extract everything
+            # This handles cases where range() has multiple arguments like range(len(df), 0, -1)
+            # IMPORTANT: Skip list comprehensions - they have the pattern [... for ... in ...]
+            # Check if this is a list comprehension by looking for opening bracket before "for"
+            for_match = re.search(r'for\s+(\w+)\s+in\s+range\s*\(', line_stripped)
+            is_list_comprehension = False
+            if for_match:
+                # Check if there's an opening bracket before "for" - this indicates a list comprehension
+                before_for = line_stripped[:for_match.start()]
+                # Count brackets to see if we're inside a list comprehension
+                bracket_count = before_for.count('[') - before_for.count(']')
+                if bracket_count > 0:
+                    # We're inside a list comprehension - don't convert it
+                    is_list_comprehension = True
+            
+            if for_match and not is_list_comprehension:
+                # Found a for loop - extract the full range expression by finding the matching closing paren
+                var = for_match.group(1)
+                # Find the position of the opening '(' of range(
+                range_open_paren_pos = for_match.end() - 1  # Position of '(' in "range("
+                
+                # Get the statement part (everything before "for")
+                statement_end = for_match.start()
+                statement = line_stripped[:statement_end].strip()
+                
+                # Find the complete range expression by counting parentheses
+                # Start from "range(" - we need to include "range" in the expression
+                range_start_pos = line_stripped.rfind('range', 0, range_open_paren_pos)
+                range_expr = line_stripped[range_start_pos:range_open_paren_pos + 1]  # "range("
+                paren_count = 1  # We already have the opening paren of range(
+                found_range = True
+                for i in range(range_open_paren_pos + 1, len(line_stripped)):  # Start after "range("
+                    char = line_stripped[i]
+                    range_expr += char
+                    if char == '(':
+                        paren_count += 1
+                    elif char == ')':
+                        paren_count -= 1
+                        if paren_count == 0:
+                            # Found the matching closing paren for range()
+                            break
+                
+                # If we found a complete range expression and a statement, fix it
+                if found_range and paren_count == 0 and statement:
+                    # Check if there's leftover text after range_expr that should be part of range
+                    range_expr_end_pos = range_start_pos + len(range_expr)
+                    remaining_after_range = line_stripped[range_expr_end_pos:].strip()
+                    
+                    # If remaining text looks like range arguments (e.g., ", 0, -1)"), append it to range_expr
+                    if remaining_after_range and re.match(r'^,\s*[^,)]+,\s*[^,)]+\)', remaining_after_range):
+                        # Extract the range arguments
+                        range_args_match = re.match(r'^,\s*([^,)]+),\s*([^,)]+)\)', remaining_after_range)
+                        if range_args_match:
+                            range_expr += remaining_after_range[:remaining_after_range.index(')') + 1]
+                            remaining_after_range = remaining_after_range[remaining_after_range.index(')') + 1:].strip()
+                    
+                    # Clean up the statement - remove any trailing range arguments that got mixed in
+                    statement_cleaned = statement
+                    # Check if statement ends with something like ", 0, -1)" which suggests leftover range args
+                    if re.search(r',\s*\d+,\s*-?\d+\)\s*$', statement_cleaned):
+                        # Remove the trailing range arguments that got mixed into the statement
+                        statement_cleaned = re.sub(r',\s*\d+,\s*-?\d+\)\s*$', '', statement_cleaned)
+                    
+                    fixed_lines.append(f'for {var} in {range_expr}:')
+                    fixed_lines.append(f'    {statement_cleaned}')
+                else:
+                    # Try pattern3 as fallback
+                    match_obj = re.match(pattern3, line_stripped)
+                    if match_obj:
+                        statement = match_obj.group(1).strip()
+                        var = match_obj.group(2)
+                        range_expr = match_obj.group(3)
+                        fixed_lines.append(f'for {var} in {range_expr}:')
+                        fixed_lines.append(f'    {statement}')
+                    else:
+                        fixed_lines.append(line)
+            elif is_list_comprehension:
+                # This is a list comprehension - leave it as-is (it's valid Python)
+                fixed_lines.append(line)
+            else:
+                # Try pattern3 as fallback
+                match_obj = re.match(pattern3, line_stripped)
+                if match_obj:
+                    statement = match_obj.group(1).strip()
+                    var = match_obj.group(2)
+                    range_expr = match_obj.group(3)
+                    fixed_lines.append(f'for {var} in {range_expr}:')
+                    fixed_lines.append(f'    {statement}')
+                else:
+                    # Check for for loop inside function call (handle multi-line)
+                    # Join current line with previous lines to check for multi-line patterns
+                    context_lines = fixed_lines[-3:] + [line] if len(fixed_lines) >= 3 else fixed_lines + [line]
+                    context = '\n'.join(context_lines)
+                    fixed_context = fix_for_in_function_call_multiline(context)
+                    
+                    if fixed_context != context:
+                        # Pattern was fixed - replace the last few lines with the fixed version
+                        # Remove the last few lines we checked
+                        fixed_lines = fixed_lines[:-len(context_lines) + 1] if len(fixed_lines) >= len(context_lines) - 1 else []
+                        # Add the fixed version (split back into lines)
+                        fixed_lines.extend(fixed_context.split('\n'))
+                    else:
+                        fixed_lines.append(line)
+        code = '\n'.join(fixed_lines)
+        
+        # Additional fix: Detect and fix "for" keyword appearing inside function call parentheses
+        # This handles cases like: .reset_index(for i in range(...): ...)
+        # We'll search for this pattern and restructure it
+        def fix_for_inside_parentheses(code_str):
+            # Pattern: find "for var in range" that appears after an opening parenthesis
+            # This is a sign of malformed code
+            lines = code_str.split('\n')
+            result = []
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                # Check if this line or next lines contain "for" after an opening paren
+                # Look ahead a few lines to catch multi-line issues
+                lookahead = ' '.join(lines[i:min(i+5, len(lines))])
+                
+                # Pattern: .method(for var in range or method(for var in range
+                if re.search(r'\(for\s+\w+\s+in\s+range', lookahead):
+                    # Found malformed pattern - try to extract and fix
+                    # Find the assignment statement before this
+                    if i > 0:
+                        # Look for assignment in previous lines
+                        assignment_line = ''
+                        for j in range(max(0, i-3), i):
+                            if '=' in lines[j] and not lines[j].strip().startswith('#'):
+                                assignment_line = lines[j]
+                                break
+                        
+                        # Extract for loop details - match full range() call including all arguments
+                        for_match = re.search(r'for\s+(\w+)\s+in\s+(range\([^)]+(?:,\s*[^)]+)*\))', lookahead)
+                        if for_match and assignment_line:
+                            var = for_match.group(1)
+                            range_expr = for_match.group(2)  # Already complete with all arguments
+                            
+                            # Remove the malformed for loop from the code
+                            # Find where it starts and ends
+                            cleaned_lines = []
+                            skip_until_paren = False
+                            for k in range(i, min(i+10, len(lines))):
+                                if k < len(lines):
+                                    cleaned = re.sub(r'\(for\s+\w+\s+in\s+range[^)]*\):\s*', '(', lines[k])
+                                    cleaned = re.sub(r'for\s+\w+\s+in\s+range[^)]*\):\s*', '', cleaned)
+                                    if cleaned.strip() and not cleaned.strip().startswith('for'):
+                                        cleaned_lines.append(cleaned)
+                            
+                            # Reconstruct as proper for loop
+                            if cleaned_lines:
+                                result.append(f'for {var} in {range_expr}:')
+                                result.append(f'    {assignment_line}')
+                                for cl in cleaned_lines:
+                                    result.append(f'    {cl}')
+                                i += len(cleaned_lines)
+                                continue
+                
+                result.append(line)
+                i += 1
+            
+            return '\n'.join(result)
+        
+        # Apply the fix
+        code = fix_for_inside_parentheses(code)
         
         # Clean up whitespace
         code = code.strip()
