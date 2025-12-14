@@ -358,8 +358,11 @@ class PythonExecutor:
                 lines.append(current_line.strip())
             
             # Now convert lines with nested if statements to properly indented code
+            # Also handle increments that are on the next line after semicolon split
             fixed_lines = []
-            for line in lines:
+            i = 0
+            while i < len(lines):
+                line = lines[i]
                 # Check if this line has nested if statements
                 if re.search(r'for\s+\w+\s+in\s+range[^:]+:\s*if\s+.*:\s*if\s+', line):
                     # Convert to multi-line with proper indentation
@@ -378,6 +381,7 @@ class PythonExecutor:
                         fixed_lines.append(f'            {statement}')
                         if increment:
                             fixed_lines.append(f'            {increment}')
+                        i += 1
                     else:
                         # Try simpler pattern: "for i in range(...): if condition: statement; increment"
                         match = re.match(r'(for\s+\w+\s+in\s+range[^:]+):\s*(if\s+[^:]+):\s*(.+?)(?:;\s*(\w+\s*[+\-*/]=\s*[^;]+))?$', line)
@@ -391,10 +395,44 @@ class PythonExecutor:
                             fixed_lines.append(f'        {statement}')
                             if increment:
                                 fixed_lines.append(f'        {increment}')
+                            i += 1
                         else:
+                            # Check if next line is an increment (e.g., "name_idx += 1" or "contact_idx += 1")
+                            # This handles the case where semicolon split separated the increment
+                            if i + 1 < len(lines) and re.match(r'^\s*(\w+_idx\s*[+\-*/]=\s*[^;]+)$', lines[i + 1].strip()):
+                                increment_line = lines[i + 1].strip()
+                                # Try to extract the if statement pattern
+                                match2 = re.match(r'(for\s+\w+\s+in\s+range[^:]+):\s*(if\s+[^:]+):\s*(if\s+[^:]+):\s*(.+)', line)
+                                if match2:
+                                    for_loop = match2.group(1)
+                                    if1 = match2.group(2)
+                                    if2 = match2.group(3)
+                                    statement = match2.group(4).strip()
+                                    fixed_lines.append(f'{for_loop}:')
+                                    fixed_lines.append(f'    {if1}:')
+                                    fixed_lines.append(f'        {if2}:')
+                                    fixed_lines.append(f'            {statement}')
+                                    fixed_lines.append(f'            {increment_line}')
+                                    i += 2  # Skip both lines
+                                    continue
+                                else:
+                                    # Try simpler pattern
+                                    match3 = re.match(r'(for\s+\w+\s+in\s+range[^:]+):\s*(if\s+[^:]+):\s*(.+)', line)
+                                    if match3:
+                                        for_loop = match3.group(1)
+                                        if1 = match3.group(2)
+                                        statement = match3.group(3).strip()
+                                        fixed_lines.append(f'{for_loop}:')
+                                        fixed_lines.append(f'    {if1}:')
+                                        fixed_lines.append(f'        {statement}')
+                                        fixed_lines.append(f'        {increment_line}')
+                                        i += 2  # Skip both lines
+                                        continue
                             fixed_lines.append(line)
+                            i += 1
                 else:
                     fixed_lines.append(line)
+                    i += 1
             
             code = '\n'.join(fixed_lines)
         
