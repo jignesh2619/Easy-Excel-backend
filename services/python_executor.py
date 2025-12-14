@@ -570,8 +570,11 @@ df = pd.concat(new_rows, ignore_index=True)''',
             
             return '\n'.join(result)
         
-        # Apply the fix
-        code = fix_for_inside_parentheses(code)
+        # Apply the fix - but skip if code is semicolon-separated (valid Python)
+        # Only apply fix_for_inside_parentheses if code doesn't have semicolons
+        # or if it's clearly malformed (for loop inside parentheses)
+        if ';' not in code or not re.search(r'\(for\s+\w+\s+in\s+range', code):
+            code = fix_for_inside_parentheses(code)
         
         # Clean up whitespace
         code = code.strip()
