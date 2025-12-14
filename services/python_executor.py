@@ -257,8 +257,12 @@ class PythonExecutor:
         # Fix: Replace df.loc[i, ...] with df.iloc[i, ...] to avoid index issues
         # This is critical - loc uses the index label (which might not be 0,1,2,3...), 
         # while iloc uses position (which is always 0,1,2,3...)
-        # Pattern: df.loc[i, 'Column'] or df.loc[i, "Column"]
-        code = re.sub(r'df\.loc\[(\w+),\s*', r'df.iloc[\1, ', code)
+        # Pattern: df.loc[i, 'Column'] or df.loc[i, "Column"] or df.loc[i, 'Column Name']
+        # Match: df.loc[variable, any_string_in_quotes]
+        code = re.sub(r'df\.loc\[(\w+),\s*([\'"])([^\'"]+)\2', r'df.iloc[\1, \2\3\2', code)
+        
+        # Also handle cases without quotes (shouldn't happen but just in case)
+        code = re.sub(r'df\.loc\[(\w+),\s*(\w+)', r'df.iloc[\1, \2', code)
         
         # Fix: Convert semicolon-separated nested if statements to proper multi-line code
         # The LLM often generates: "for i in range(...): if condition: if condition: statement; statement"
@@ -621,6 +625,14 @@ df = pd.concat(new_rows, ignore_index=True)''',
                 "valid": False, 
                 "error": f"Syntax error at line {error_line}: {str(e)}\nCode preview:\n{code_preview}"
             }
+        
+        # Debug: Log if df.loc was replaced with df.iloc
+        if 'df.loc[' in python_code and 'df.iloc[' in cleaned_code:
+            logger.info(f"🔧 Converted df.loc to df.iloc in code cleaning")
+        elif 'df.loc[' in python_code:
+            logger.warning(f"⚠️ df.loc found in code but not converted to df.iloc - pattern might not match")
+            logger.warning(f"⚠️ Original code snippet: {python_code[:200]}")
+            logger.warning(f"⚠️ Cleaned code snippet: {cleaned_code[:200]}")
         
         return {"valid": True, "error": None, "cleaned_code": cleaned_code}
     
