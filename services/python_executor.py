@@ -254,23 +254,39 @@ class PythonExecutor:
         # Remove any remaining ``` markers
         code = re.sub(r'```[a-z]*\n?', '', code)
         
-        # Fix: Replace df.loc[i, ...] with df.iloc[i, ...] to avoid index issues
+        # Fix: Replace df.loc[i, 'Column Name'] with df.iloc[i, df.columns.get_loc('Column Name')]
         # This is critical - loc uses the index label (which might not be 0,1,2,3...), 
         # while iloc uses position (which is always 0,1,2,3...)
-        # Pattern: df.loc[i, 'Column'] or df.loc[i, "Column"] or df.loc[i, 'Column Name']
+        # BUT: iloc doesn't accept column names, only integer positions!
+        # So we need to convert df.loc[i, 'Column Name'] to df.iloc[i, df.columns.get_loc('Column Name')]
+        
+        # Pattern 1: df.loc[i, 'Column Name'] or df.loc[i, "Column Name"]
         # Match: df.loc[variable, any_string_in_quotes] - handle both single and double quotes
-        # Use a more robust pattern that handles any content between brackets
-        code = re.sub(r'df\.loc\[(\w+),\s*([\'"])([^\'"]+)\2', r'df.iloc[\1, \2\3\2', code)
+        def replace_loc_with_iloc(match):
+            row_var = match.group(1)  # e.g., "i"
+            quote_char = match.group(2)  # ' or "
+            col_name = match.group(3)  # e.g., "Student Name"
+            return f'df.iloc[{row_var}, df.columns.get_loc({quote_char}{col_name}{quote_char})]'
         
-        # Also handle cases without quotes (shouldn't happen but just in case)
-        code = re.sub(r'df\.loc\[(\w+),\s*(\w+)', r'df.iloc[\1, \2', code)
+        code = re.sub(r'df\.loc\[(\w+),\s*([\'"])([^\'"]+)\2\]', replace_loc_with_iloc, code)
         
-        # CRITICAL FIX: The code might be all on one line with semicolons
-        # We need to convert df.loc BEFORE we split by semicolons, otherwise the pattern won't match
-        # But actually, the regex should work on the whole string. Let me try a different approach:
-        # Replace ALL occurrences of df.loc[ with df.iloc[ regardless of what comes after
-        # This is safer and will catch all cases
-        code = code.replace('df.loc[', 'df.iloc[')
+        # Pattern 2: Also fix df.iloc[i, 'Column Name'] that was incorrectly converted earlier
+        # This handles cases where df.loc was already converted to df.iloc but with column names
+        def replace_iloc_with_get_loc(match):
+            row_var = match.group(1)  # e.g., "i"
+            quote_char = match.group(2)  # ' or "
+            col_name = match.group(3)  # e.g., "Student Name"
+            return f'df.iloc[{row_var}, df.columns.get_loc({quote_char}{col_name}{quote_char})]'
+        
+        code = re.sub(r'df\.iloc\[(\w+),\s*([\'"])([^\'"]+)\2\]', replace_iloc_with_get_loc, code)
+        
+        # Pattern 3: df.loc[i, ColumnName] (without quotes - shouldn't happen but handle it)
+        # For this case, we'll just keep it as df.loc since we can't determine the column name
+        # Actually, let's skip this pattern since column names should always be in quotes
+        
+        # Pattern 4: df.loc[i, ...] where the second argument is not a string (e.g., integer)
+        # In this case, we can safely convert to df.iloc[i, ...]
+        # But this is rare - usually column names are used
         
         # IMPORTANT: Don't restructure semicolon-separated code if it's valid Python
         # The code might be all on one line with semicolons, which is valid Python syntax
