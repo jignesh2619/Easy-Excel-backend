@@ -620,7 +620,7 @@ Generate the summary now:"""
             
             # Call LLM
             response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-5-nano",
                 messages=[
                     {
                         "role": "system",

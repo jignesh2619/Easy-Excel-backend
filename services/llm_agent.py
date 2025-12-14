@@ -89,21 +89,21 @@ SYSTEM_MESSAGE = (
 class LLMAgent:
     """Handles LLM interpretation of user prompts using OpenAI with hybrid model routing"""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-5-nano"):
         """
-        Initialize LLM Agent with hybrid model support (gpt-4o-mini default, gpt-4o for complex)
+        Initialize LLM Agent with hybrid model support (gpt-5-nano default, gpt-5-mini for complex)
         
         Args:
             api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
-            model: Default model to use (default: gpt-4o-mini for cost savings)
+            model: Default model to use (default: gpt-5-nano for cost savings)
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY environment variable.")
         
-        # Get model from env var, default to gpt-4o-mini for cost savings
-        self.default_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-        self.complex_model = "gpt-4o"  # Use for complex operations
+        # Get model from env var, default to gpt-5-nano for cost savings
+        self.default_model = os.getenv("OPENAI_MODEL", "gpt-5-nano")
+        self.complex_model = "gpt-5-mini"  # Use for complex operations
         
         try:
             self.client = OpenAI(api_key=self.api_key)
@@ -194,7 +194,7 @@ class LLMAgent:
             sample_data: Sample data (optional, for future use)
             
         Returns:
-            True if complex operation (use gpt-4o), False if simple (use gpt-4o-mini)
+            True if complex operation (use gpt-5-mini), False if simple (use gpt-5-nano)
         """
         if not user_prompt:
             return False
@@ -269,7 +269,7 @@ Request: "{user_prompt}"
 Answer:"""
 
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",  # Use cheapest model for classification
+                model="gpt-5-nano",  # Use cheapest model for classification
                 messages=[
                     {
                         "role": "system", 
@@ -311,8 +311,8 @@ Answer:"""
         - ActionPlanBot: For all data operations
         
         Uses hybrid model routing:
-        - gpt-4o-mini: For simple operations (default, cost-effective)
-        - gpt-4o: For complex operations (better accuracy)
+        - gpt-5-nano: For simple operations (default, cost-effective, optimized for structured outputs)
+        - gpt-5-mini: For complex operations (better accuracy, optimized for JSON/schema outputs)
         """
         # Check if chart request
         is_chart = self._is_chart_request(user_prompt)

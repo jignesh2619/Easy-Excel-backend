@@ -609,13 +609,13 @@ PATTERN RECOGNITION PRINCIPLES:
 class ActionPlanBot:
     """Bot for generating data operation action plans"""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-5-nano"):
         """
         Initialize Action Plan Bot
         
         Args:
             api_key: OpenAI API key
-            model: Model to use (default: gpt-4o-mini for cost savings)
+            model: Model to use (default: gpt-5-nano for cost savings, optimized for JSON outputs)
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
