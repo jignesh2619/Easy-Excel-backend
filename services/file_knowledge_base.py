@@ -628,7 +628,7 @@ Generate the summary now:"""
                     },
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3,
+                # Note: GPT-5 models only support default temperature (1)
                 max_tokens=250
             )
             

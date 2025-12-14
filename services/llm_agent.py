@@ -277,7 +277,7 @@ Answer:"""
                     },
                     {"role": "user", "content": classification_prompt}
                 ],
-                temperature=0.1,  # Low temperature for consistent classification
+                # Note: GPT-5 models only support default temperature (1)
                 max_tokens=5  # Just "SIMPLE" or "COMPLEX"
             )
             
@@ -453,7 +453,7 @@ Include "operations" array with "execution_instructions" for each operation."""
                     {"role": "system", "content": SYSTEM_MESSAGE},
                     {"role": "user", "content": full_prompt},
                 ],
-                temperature=0.1,
+                # Note: GPT-5 models only support default temperature (1)
                 top_p=0.95,
             )
             

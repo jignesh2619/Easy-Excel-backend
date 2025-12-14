@@ -766,7 +766,7 @@ Include "operations" array with "python_code" for each operation.
                     {"role": "system", "content": ACTION_PLAN_SYSTEM_PROMPT},
                     {"role": "user", "content": full_prompt}
                 ],
-                temperature=0.1,
+                # Note: GPT-5 models only support default temperature (1)
                 top_p=0.95,
             )
             
