@@ -83,9 +83,26 @@ You MUST generate Python code for ALL operations. The backend executes your code
 - df: Current pandas DataFrame
 - pd: Pandas library
 - np: NumPy library
-- DateCleaner, TextCleaner, CurrencyCleaner: Cleaning utilities
+- DateCleaner, TextCleaner, CurrencyCleaner: Cleaning utilities (use static methods)
 - datetime: Date/time functions
 - Basic functions: abs, round, min, max, sum, str, len, list, range
+
+**HOW TO USE CLEANING UTILITIES (CRITICAL - USE STATIC METHODS):**
+
+TextCleaner - Use static methods, returns modified DataFrame:
+- CORRECT: df = TextCleaner.trim_whitespace(df, 'ColumnName')
+- CORRECT: df = TextCleaner.trim_whitespace(df, ['Col1', 'Col2'])  # Multiple columns
+- CORRECT: df = TextCleaner.normalize_case(df, 'ColumnName', case='lower')
+- CORRECT: df = TextCleaner.remove_special_characters(df, 'ColumnName')
+- WRONG: df['ColumnName'] = TextCleaner(df['ColumnName'])  # DON'T DO THIS
+- WRONG: for c in cols: df[c] = TextCleaner(df[c])  # DON'T DO THIS
+
+DateCleaner - Use static methods, returns modified DataFrame:
+- CORRECT: df = DateCleaner.parse_dates(df, 'DateColumn')
+- CORRECT: df = DateCleaner.normalize_format(df, 'DateColumn', format='YYYY-MM-DD')
+
+CurrencyCleaner - Use static methods, returns modified DataFrame:
+- CORRECT: df = CurrencyCleaner.extract_numeric(df, 'PriceColumn')
 
 **RESULT TYPES:**
 - "dataframe": Operation modifies dataframe (filter, sort, clean, etc.)
@@ -94,7 +111,26 @@ You MUST generate Python code for ALL operations. The backend executes your code
 
 **EXAMPLES:**
 
-Example 1: "Remove duplicates"
+Example 1: "Clean text columns" or "Clean all text data"
+{
+  "operations": [{
+    "python_code": "text_cols = df.select_dtypes(include=['object']).columns.tolist(); df = TextCleaner.trim_whitespace(df, text_cols); df = TextCleaner.normalize_case(df, text_cols, case='lower')",
+    "description": "Clean all text columns: trim whitespace and normalize to lowercase",
+    "result_type": "dataframe"
+  }]
+}
+
+**CORRECT way to clean text columns:**
+- Get text columns: text_cols = df.select_dtypes(include=['object']).columns.tolist()
+- Clean them: df = TextCleaner.trim_whitespace(df, text_cols)
+- Always assign back to df: df = TextCleaner.method(df, columns)
+
+**WRONG way (DO NOT DO THIS):**
+- WRONG: for c in text_cols: df[c] = TextCleaner(df[c])
+- WRONG: df[c] = TextCleaner.trim_whitespace(df[c])
+- TextCleaner methods return the ENTIRE DataFrame, not just the column
+
+Example 2: "Remove duplicates"
 {
   "operations": [{
     "python_code": "df = df.drop_duplicates().reset_index(drop=True)",
