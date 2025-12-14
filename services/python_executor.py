@@ -363,7 +363,59 @@ class PythonExecutor:
             i = 0
             while i < len(lines):
                 line = lines[i]
-                # Check if this line has nested if statements
+                # Check if this line is a for loop
+                if re.match(r'^\s*for\s+\w+\s+in\s+range', line):
+                    # This is a for loop - check if next lines have nested if statements
+                    # Pattern: for loop, then if, then nested if, then assignment, then increment
+                    if i + 1 < len(lines) and re.match(r'^\s*if\s+', lines[i + 1]):
+                        # We have a for loop followed by an if - check for nested structure
+                        # Look ahead to find the pattern: for -> if -> if -> assignment -> increment
+                        if i + 2 < len(lines) and re.match(r'^\s*if\s+', lines[i + 2]):
+                            # We have nested ifs: for -> if -> if
+                            # Check if next line is assignment and then increment
+                            if i + 3 < len(lines):
+                                assignment_line = lines[i + 3]
+                                # Check if next line after assignment is an increment
+                                if i + 4 < len(lines) and re.match(r'^\s*(\w+_idx\s*[+\-*/]=\s*[^;]+)$', lines[i + 4].strip()):
+                                    # We have: for -> if -> if -> assignment -> increment
+                                    increment_line = lines[i + 4].strip()
+                                    # Extract the for loop
+                                    for_match = re.match(r'^\s*(for\s+\w+\s+in\s+range[^:]+):', line)
+                                    if for_match:
+                                        for_loop = for_match.group(1)
+                                        if1_line = lines[i + 1].strip()
+                                        if2_line = lines[i + 2].strip()
+                                        fixed_lines.append(f'{for_loop}:')
+                                        fixed_lines.append(f'    {if1_line}')
+                                        fixed_lines.append(f'        {if2_line}')
+                                        fixed_lines.append(f'            {assignment_line.strip()}')
+                                        fixed_lines.append(f'            {increment_line}')
+                                        i += 5  # Skip all 5 lines
+                                        continue
+                                elif re.match(r'^\s*(\w+_idx\s*[+\-*/]=\s*[^;]+)$', assignment_line.strip()):
+                                    # The assignment line is actually the increment (wrong structure, but handle it)
+                                    increment_line = assignment_line.strip()
+                                    # We need to find the actual assignment - it might be in the if2 line
+                                    if2_line = lines[i + 2].strip()
+                                    # Check if if2 contains the assignment
+                                    if '=' in if2_line and 'df.iloc' in if2_line:
+                                        # Split if2 into condition and assignment
+                                        if2_parts = if2_line.split(':', 1)
+                                        if len(if2_parts) == 2:
+                                            if2_condition = if2_parts[0].strip()
+                                            assignment = if2_parts[1].strip()
+                                            for_match = re.match(r'^\s*(for\s+\w+\s+in\s+range[^:]+):', line)
+                                            if for_match:
+                                                for_loop = for_match.group(1)
+                                                if1_line = lines[i + 1].strip()
+                                                fixed_lines.append(f'{for_loop}:')
+                                                fixed_lines.append(f'    {if1_line}')
+                                                fixed_lines.append(f'        {if2_condition}:')
+                                                fixed_lines.append(f'            {assignment}')
+                                                fixed_lines.append(f'            {increment_line}')
+                                                i += 5
+                                                continue
+                # Check if this line has nested if statements on the same line
                 if re.search(r'for\s+\w+\s+in\s+range[^:]+:\s*if\s+.*:\s*if\s+', line):
                     # Convert to multi-line with proper indentation
                     # Pattern: "for i in range(...): if condition: if condition2: statement; increment"
