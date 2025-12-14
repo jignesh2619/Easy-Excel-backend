@@ -363,27 +363,34 @@ class PythonExecutor:
                 # Check if this line has nested if statements
                 if re.search(r'for\s+\w+\s+in\s+range[^:]+:\s*if\s+.*:\s*if\s+', line):
                     # Convert to multi-line with proper indentation
-                    # Pattern: "for i in range(...): if condition: if condition2: statement"
-                    match = re.match(r'(for\s+\w+\s+in\s+range[^:]+):\s*(if\s+[^:]+):\s*(if\s+[^:]+):\s*(.+)', line)
+                    # Pattern: "for i in range(...): if condition: if condition2: statement; increment"
+                    # Need to handle the case where there's a semicolon-separated increment after the statement
+                    match = re.match(r'(for\s+\w+\s+in\s+range[^:]+):\s*(if\s+[^:]+):\s*(if\s+[^:]+):\s*(.+?)(?:;\s*(\w+\s*[+\-*/]=\s*[^;]+))?$', line)
                     if match:
                         for_loop = match.group(1)
                         if1 = match.group(2)
                         if2 = match.group(3)
-                        statement = match.group(4)
+                        statement = match.group(4).strip()
+                        increment = match.group(5)  # e.g., "name_idx += 1"
                         fixed_lines.append(f'{for_loop}:')
                         fixed_lines.append(f'    {if1}:')
                         fixed_lines.append(f'        {if2}:')
                         fixed_lines.append(f'            {statement}')
+                        if increment:
+                            fixed_lines.append(f'            {increment}')
                     else:
-                        # Try simpler pattern: "for i in range(...): if condition: statement"
-                        match = re.match(r'(for\s+\w+\s+in\s+range[^:]+):\s*(if\s+[^:]+):\s*(.+)', line)
+                        # Try simpler pattern: "for i in range(...): if condition: statement; increment"
+                        match = re.match(r'(for\s+\w+\s+in\s+range[^:]+):\s*(if\s+[^:]+):\s*(.+?)(?:;\s*(\w+\s*[+\-*/]=\s*[^;]+))?$', line)
                         if match:
                             for_loop = match.group(1)
                             if1 = match.group(2)
-                            statement = match.group(3)
+                            statement = match.group(3).strip()
+                            increment = match.group(4)  # e.g., "name_idx += 1"
                             fixed_lines.append(f'{for_loop}:')
                             fixed_lines.append(f'    {if1}:')
                             fixed_lines.append(f'        {statement}')
+                            if increment:
+                                fixed_lines.append(f'        {increment}')
                         else:
                             fixed_lines.append(line)
                 else:
