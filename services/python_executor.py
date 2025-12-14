@@ -638,9 +638,13 @@ df = pd.concat(new_rows, ignore_index=True)''',
         if 'df.loc[' in python_code and 'df.iloc[' in cleaned_code:
             logger.info(f"🔧 Converted df.loc to df.iloc in code cleaning")
         elif 'df.loc[' in python_code:
-            logger.warning(f"⚠️ df.loc found in code but not converted to df.iloc - pattern might not match")
-            logger.warning(f"⚠️ Original code snippet: {python_code[:200]}")
-            logger.warning(f"⚠️ Cleaned code snippet: {cleaned_code[:200]}")
+            logger.warning(f"⚠️ df.loc found in code but not converted to df.iloc")
+            logger.warning(f"⚠️ Original code snippet: {python_code[:300]}")
+            logger.warning(f"⚠️ Cleaned code snippet: {cleaned_code[:300]}")
+            # Force replacement if it wasn't done
+            if 'df.loc[' in cleaned_code:
+                cleaned_code = cleaned_code.replace('df.loc[', 'df.iloc[')
+                logger.info(f"🔧 Force-converted remaining df.loc to df.iloc")
         
         return {"valid": True, "error": None, "cleaned_code": cleaned_code}
     
