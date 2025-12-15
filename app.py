@@ -163,7 +163,7 @@ async def health():
 @app.post("/process-file", response_model=ProcessFileResponse)
 async def process_file(
     file: UploadFile = File(...),
-    prompt: str = Form(...),
+    prompt: str = Form(default=""),
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ):
     """
@@ -171,7 +171,7 @@ async def process_file(
     
     Args:
         file: Uploaded file (Excel or CSV)
-        prompt: Natural language prompt describing desired operations
+        prompt: Natural language prompt describing desired operations (optional - if empty, just load file)
         
     Returns:
         Processed file URL, chart URL (if generated), and summary
@@ -272,7 +272,34 @@ async def process_file(
                     detail=token_check.get("error", "Insufficient tokens. Please upgrade your plan.")
                 )
         
-        # 8. Interpret prompt with LLM
+        # 8. Interpret prompt with LLM (only if prompt is provided)
+        # If prompt is empty or just whitespace, skip processing and return file as-is
+        prompt = prompt.strip() if prompt else ""
+        
+        if not prompt:
+            # No prompt provided - just load and return file without any processing
+            logger.info("No prompt provided - returning file as-is without processing")
+            processor = ExcelProcessor(temp_file_path)
+            processor.load_data()
+            
+            # Save unprocessed file
+            output_filename = f"processed_{Path(file.filename).stem}.xlsx"
+            processed_file_path = file_manager.save_processed_file(
+                processor.df,
+                output_filename,
+                formatting_rules=[],
+                conditional_formatting_rules=[]
+            )
+            
+            return ProcessFileResponse(
+                file_url=f"/download/{Path(processed_file_path).name}",
+                chart_url=None,
+                summary=["File loaded successfully. No processing performed."],
+                rows=len(processor.df),
+                columns=len(processor.df.columns),
+                formatting_metadata={}
+            )
+        
         if llm_agent is None:
             raise HTTPException(
                 status_code=500, 
