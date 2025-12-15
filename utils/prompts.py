@@ -1186,7 +1186,7 @@ Example 5: "remove the initial dot from phone numbers column"
 }
 """
 
-def get_prompt_with_context(user_prompt: str, available_columns: list, sample_data: Optional[list] = None) -> str:
+def get_prompt_with_context(user_prompt: str, available_columns: list, sample_data: Optional[list] = None, total_rows: Optional[int] = None) -> str:
     """
     Generate prompt with context about available columns and sample data
     
@@ -1220,25 +1220,39 @@ def get_prompt_with_context(user_prompt: str, available_columns: list, sample_da
     # Add full Excel data if provided - MAKE IT VERY PROMINENT
     sample_data_text = ""
     if sample_data:
-        total_rows = len(sample_data)
+        sample_row_count = len(sample_data)
+        actual_total_rows = total_rows if total_rows is not None else sample_row_count
         sample_data_text = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║         📊 REPRESENTATIVE SAMPLE OF THE UPLOADED DATASET PROVIDED 📊          ║
 ║                                                                                ║
-║  You are receiving a curated sample of {total_rows} rows. ALL columns appear.  ║
+║  ⚠️ CRITICAL: This is a SAMPLE of {sample_row_count} rows from a TOTAL of {actual_total_rows} rows ⚠️  ║
+║                                                                                ║
+║  You are seeing ONLY {sample_row_count} representative rows below. The FULL dataset    ║
+║  contains {actual_total_rows} total rows. Your code MUST work on ALL {actual_total_rows} rows, not just  ║
+║  the {sample_row_count} sample rows shown here.                                    ║
+║                                                                                ║
 ║  Rows were selected to capture numeric extremes, category coverage, dates,     ║
 ║  missing-value edge cases, and overall diversity of the dataset.               ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-REPRESENTATIVE SAMPLE ({total_rows} rows shown, {len(available_columns)} columns):
+REPRESENTATIVE SAMPLE ({sample_row_count} rows shown out of {actual_total_rows} total, {len(available_columns)} columns):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-IMPORTANT: Below is a representative subset. Every column is preserved exactly.
+⚠️ CRITICAL REMINDER: This is a SAMPLE. The actual dataset has {actual_total_rows} rows.
+Your Python code will execute on the FULL dataset ({actual_total_rows} rows), NOT just these {sample_row_count} sample rows.
+
 Use this sample to:
 ✓ Identify which column is "first", "second", "third", etc. (for positional references)
 ✓ Understand data types, formats, outliers, and rare cases
 ✓ Make accurate decisions based on actual values, not assumptions
 ✓ See how all column names appear with real data
+
+⚠️ WHEN GENERATING CODE:
+- Your code will run on ALL {actual_total_rows} rows, not just the {sample_row_count} shown
+- If grouping by a category (e.g., "Month"), there may be MORE rows with that category in the full dataset
+- Always use operations that work on the entire DataFrame (df.groupby, df.filter, etc.)
+- DO NOT assume the sample shows all unique values - there may be more in the full dataset
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

@@ -85,6 +85,13 @@ You MUST generate Python code for ALL operations. The backend executes your code
 4. Code must be self-executable (no external dependencies)
 5. Use available utilities: DateCleaner, TextCleaner, CurrencyCleaner
 
+⚠️ CRITICAL: SAMPLE vs FULL DATASET ⚠️
+- You receive a SAMPLE of rows (e.g., 10 rows) but the code executes on the FULL dataset (e.g., 23 rows)
+- When grouping by categories (Month, Item, etc.), there may be MORE rows with that category in the full dataset
+- Your code MUST work on ALL rows, not just the sample shown
+- Always use DataFrame operations (df.groupby, df.filter, etc.) that process the entire dataset
+- DO NOT assume the sample shows all unique values - check the prompt for total row count
+
 **CRITICAL - CODE FORMATTING RULES (MUST FOLLOW):**
 6. KEEP METHOD CHAINS ON SINGLE LINE - Never split method calls across lines
    - WRONG: "df.groupby(['A'])\n['B'].sum()" (invalid - method chain split)
@@ -777,8 +784,17 @@ class ActionPlanBot:
             Action plan dict with operations
         """
         try:
-            # Build prompt
-            prompt = get_prompt_with_context(user_prompt, available_columns, sample_data)
+            # Extract total rows from sample_explanation if available
+            total_rows = None
+            if sample_explanation:
+                import re
+                # Extract "X rows selected from Y total" pattern
+                match = re.search(r'(\d+)\s+rows?\s+selected\s+from\s+(\d+)\s+total', sample_explanation, re.IGNORECASE)
+                if match:
+                    total_rows = int(match.group(2))
+            
+            # Build prompt with total row count
+            prompt = get_prompt_with_context(user_prompt, available_columns, sample_data, total_rows=total_rows)
             
             # Get knowledge base summary
             kb_summary = get_knowledge_base_summary()
