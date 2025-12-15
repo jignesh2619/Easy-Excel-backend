@@ -80,43 +80,10 @@ class PythonExecutor:
             # Step 4: Extract results
             result = self._extract_results(exec_globals, result_type)
             
-            # Step 5: Update dataframe
+            # Step 5: Update dataframe and normalize structure
             if 'df' in exec_globals:
-                self.df = exec_globals['df']
-                
-                # CRITICAL: Validate DataFrame structure after operations
-                # Ensure all cell values are scalars (not arrays, DataFrames, or Series)
-                import numpy as np
-                for col in self.df.columns:
-                    for idx in self.df.index:
-                        value = self.df.at[idx, col]
-                        if isinstance(value, (pd.DataFrame, pd.Series, np.ndarray)):
-                            logger.warning(f"Found non-scalar value in cell ({idx}, {col}): {type(value).__name__}, converting...")
-                            if isinstance(value, pd.Series):
-                                # Take first value from Series
-                                if len(value) > 0:
-                                    self.df.at[idx, col] = value.iloc[0] if not pd.isna(value.iloc[0]) else None
-                                else:
-                                    self.df.at[idx, col] = None
-                            elif isinstance(value, pd.DataFrame):
-                                # Convert DataFrame to string
-                                self.df.at[idx, col] = str(value)
-                            elif isinstance(value, np.ndarray):
-                                # Flatten 1D arrays, convert multi-dimensional to string
-                                if value.ndim == 1 and len(value) > 0:
-                                    self.df.at[idx, col] = value[0]
-                                else:
-                                    self.df.at[idx, col] = str(value)
-                
-                # Ensure index is reset after operations
-                if not self.df.index.equals(pd.RangeIndex(len(self.df))):
-                    self.df = self.df.reset_index(drop=True)
-                
-                # Ensure all columns are proper Series
-                for col in self.df.columns:
-                    if not isinstance(self.df[col], pd.Series):
-                        logger.warning(f"Column '{col}' is not a Series after operation, fixing...")
-                        self.df[col] = pd.Series(self.df[col], index=self.df.index, dtype=object)
+                from services.dataframe_normalizer import normalize_dataframe
+                self.df = normalize_dataframe(exec_globals['df'])
                 
                 # Debug: Log DataFrame state after execution
                 if 'Student Name' in self.df.columns:
@@ -263,7 +230,7 @@ class PythonExecutor:
     
     def _clean_code(self, python_code: str) -> str:
         """
-        Clean code by removing markdown formatting and fixing common syntax errors
+        Clean code - simplified to only essential fixes
         
         Args:
             python_code: Raw code string that might contain markdown
@@ -273,18 +240,14 @@ class PythonExecutor:
         """
         code = python_code.strip()
         
-        # CRITICAL: Replace literal \n escape sequences with actual newlines
-        # This handles cases where LLM generates code with literal \n instead of actual newlines
+        # 1. Replace literal \n escape sequences with actual newlines
         code = code.replace('\\n', '\n')
         
-        # Remove markdown code blocks (```python ... ```)
+        # 2. Remove markdown code blocks
         if code.startswith('```'):
-            # Find the closing ```
             lines = code.split('\n')
-            # Remove first line if it's ```python or ```
             if lines[0].startswith('```'):
                 lines = lines[1:]
-            # Remove last line if it's ```
             if lines and lines[-1].strip() == '```':
                 lines = lines[:-1]
             code = '\n'.join(lines)
@@ -292,662 +255,55 @@ class PythonExecutor:
         # Remove any remaining ``` markers
         code = re.sub(r'```[a-z]*\n?', '', code)
         
-        # Fix: Replace df.loc[i, 'Column Name'] with df.iloc[i, df.columns.get_loc('Column Name')]
-        # This is critical - loc uses the index label (which might not be 0,1,2,3...), 
-        # while iloc uses position (which is always 0,1,2,3...)
-        # BUT: iloc doesn't accept column names, only integer positions!
-        # So we need to convert df.loc[i, 'Column Name'] to df.iloc[i, df.columns.get_loc('Column Name')]
-        
-        # Pattern 1: df.loc[i, 'Column Name'] or df.loc[i, "Column Name"]
-        # Match: df.loc[variable, any_string_in_quotes] - handle both single and double quotes
-        def replace_loc_with_iloc(match):
-            row_var = match.group(1)  # e.g., "i"
-            quote_char = match.group(2)  # ' or "
-            col_name = match.group(3)  # e.g., "Student Name"
-            return f'df.iloc[{row_var}, df.columns.get_loc({quote_char}{col_name}{quote_char})]'
-        
-        code = re.sub(r'df\.loc\[(\w+),\s*([\'"])([^\'"]+)\2\]', replace_loc_with_iloc, code)
-        
-        # Pattern 2: Also fix df.iloc[i, 'Column Name'] that was incorrectly converted earlier
-        # This handles cases where df.loc was already converted to df.iloc but with column names
-        def replace_iloc_with_get_loc(match):
-            row_var = match.group(1)  # e.g., "i"
-            quote_char = match.group(2)  # ' or "
-            col_name = match.group(3)  # e.g., "Student Name"
-            return f'df.iloc[{row_var}, df.columns.get_loc({quote_char}{col_name}{quote_char})]'
-        
-        code = re.sub(r'df\.iloc\[(\w+),\s*([\'"])([^\'"]+)\2\]', replace_iloc_with_get_loc, code)
-        
-        # Pattern 3: df.loc[i, ColumnName] (without quotes - shouldn't happen but handle it)
-        # For this case, we'll just keep it as df.loc since we can't determine the column name
-        # Actually, let's skip this pattern since column names should always be in quotes
-        
-        # Pattern 4: df.loc[i, ...] where the second argument is not a string (e.g., integer)
-        # In this case, we can safely convert to df.iloc[i, ...]
-        # But this is rare - usually column names are used
-        
-        # IMPORTANT: Fix semicolon-separated code that contains for loops or if statements
-        # For loops and if statements cannot be on the same line with semicolons - they need to be on separate lines
-        # Pattern: "statement1; statement2; for col in ...: statement3"
-        # Pattern: "statement1; if condition: statement2"
-        # This needs to be split into multiple lines with proper indentation
+        # 3. Fix for/if statements on same line with semicolons (CRITICAL - Python syntax requirement)
         if ';' in code and (re.search(r';\s*for\s+\w+\s+in\s+', code) or re.search(r';\s*if\s+', code) or re.search(r';\s*elif\s+', code) or re.search(r';\s*else\s*:', code)):
-            # Split by semicolons, but preserve for loops and if statements with proper indentation
             parts = []
             current_part = ''
             in_block = False
-            block_type = None  # 'for', 'if', 'elif', 'else'
-            indent_level = 0
             
-            # Split by semicolons, but be careful with for loops and if statements
             for segment in code.split(';'):
                 segment = segment.strip()
                 if not segment:
                     continue
                 
-                # Check if this segment starts a for loop
-                if re.match(r'for\s+\w+\s+in\s+', segment):
-                    # If we have accumulated code, add it first
+                # Check for control flow statements
+                if re.match(r'(for|if|elif|else)\s+', segment) or re.match(r'else\s*:', segment):
                     if current_part:
                         parts.append(current_part)
                         current_part = ''
-                    # Start the for loop
                     in_block = True
-                    block_type = 'for'
-                    indent_level = 0
-                    parts.append(segment)
-                # Check if this segment starts an if statement
-                elif re.match(r'if\s+', segment):
-                    # If we have accumulated code, add it first
-                    if current_part:
-                        parts.append(current_part)
-                        current_part = ''
-                    # Start the if block
-                    in_block = True
-                    block_type = 'if'
-                    indent_level = 0
-                    parts.append(segment)
-                # Check if this segment starts an elif statement
-                elif re.match(r'elif\s+', segment):
-                    # If we have accumulated code, add it first
-                    if current_part:
-                        parts.append(current_part)
-                        current_part = ''
-                    # Start the elif block (same indent as if)
-                    in_block = True
-                    block_type = 'elif'
-                    indent_level = 0
-                    parts.append(segment)
-                # Check if this segment starts an else statement
-                elif re.match(r'else\s*:', segment):
-                    # If we have accumulated code, add it first
-                    if current_part:
-                        parts.append(current_part)
-                        current_part = ''
-                    # Start the else block (same indent as if)
-                    in_block = True
-                    block_type = 'else'
-                    indent_level = 0
                     parts.append(segment)
                 elif in_block:
-                    # This is part of the block body - add with indentation
-                    parts.append('    ' + segment)
+                    parts.append('    ' + segment)  # Indent block body
                 else:
-                    # Regular statement - accumulate or add
-                    if current_part:
-                        current_part += '; ' + segment
-                    else:
-                        current_part = segment
+                    current_part = current_part + '; ' + segment if current_part else segment
             
-            # Add any remaining accumulated code
             if current_part:
                 parts.append(current_part)
-            
-            # Join with newlines
             code = '\n'.join(parts)
         
-        # Fix common syntax errors
-        # Fix: [None)*( -> [None] * ( (common LLM mistake with list multiplication)
-        code = re.sub(r'\[None\)\*\(', '[None] * (', code)
-        # Fix: grouped.co -> grouped.columns (truncated column reference)
-        code = re.sub(r'\bgrouped\.co\b', 'grouped.columns', code)
-        # Fix: for_in -> for _ in (common LLM mistake)
-        code = re.sub(r'\bfor_in\b', 'for _ in', code)
-        # Fix: for _in -> for _ in (space before in but missing after _)
-        code = re.sub(r'\bfor\s+_in\b', 'for _ in', code)
-        # Fix: forin -> for _ in
-        code = re.sub(r'\bforin\b', 'for _ in', code)
-        # Fix: fori -> for i
-        code = re.sub(r'\bfori\b', 'for i', code)
-        # Fix: forj -> for j
-        code = re.sub(r'\bforj\b', 'for j', code)
-        # Fix: foridx -> for idx
-        code = re.sub(r'\bforidx\b', 'for idx', code)
+        # 4. Fix common syntax errors
+        code = re.sub(r'\[None\)\*\(', '[None] * (', code)  # [None)*( -> [None] * (
+        code = re.sub(r'\bgrouped\.co\b', 'grouped.columns', code)  # grouped.co -> grouped.columns
+        code = re.sub(r'\bfor_in\b', 'for _ in', code)  # for_in -> for _ in
+        code = re.sub(r'\bfor\s+_in\b', 'for _ in', code)  # for _in -> for _ in
         
-        # Fix: Convert semicolon-separated nested if statements to properly indented code
-        # Pattern: "for i in range(...): if condition: if condition2: statement"
-        # This is invalid Python - nested if statements need proper indentation
-        # We'll convert it to multi-line code with proper indentation
-        if ';' in code and re.search(r'for\s+\w+\s+in\s+range[^:]+:\s*if\s+.*:\s*if\s+', code):
-            # Split by semicolons but preserve structure
-            lines = []
-            current_line = ''
-            paren_count = 0
-            bracket_count = 0
-            in_string = False
-            string_char = None
-            
-            i = 0
-            while i < len(code):
-                char = code[i]
-                
-                # Track string boundaries
-                if char in ('"', "'") and (i == 0 or code[i-1] != '\\'):
-                    if not in_string:
-                        in_string = True
-                        string_char = char
-                    elif char == string_char:
-                        in_string = False
-                        string_char = None
-                
-                if not in_string:
-                    if char == '(':
-                        paren_count += 1
-                    elif char == ')':
-                        paren_count -= 1
-                    elif char == '[':
-                        bracket_count += 1
-                    elif char == ']':
-                        bracket_count -= 1
-                    elif char == ';' and paren_count == 0 and bracket_count == 0:
-                        # Safe to split here
-                        if current_line.strip():
-                            lines.append(current_line.strip())
-                        current_line = ''
-                        i += 1
-                        continue
-                
-                current_line += char
-                i += 1
-            
-            if current_line.strip():
-                lines.append(current_line.strip())
-            
-            # Now convert lines with nested if statements to properly indented code
-            # Also handle increments that are on the next line after semicolon split
-            fixed_lines = []
-            i = 0
-            while i < len(lines):
-                line = lines[i]
-                # Check if this line is a for loop
-                if re.match(r'^\s*for\s+\w+\s+in\s+range', line):
-                    # This is a for loop - check if next lines have nested if statements
-                    # Pattern: for loop, then if, then nested if, then assignment, then increment
-                    if i + 1 < len(lines) and re.match(r'^\s*if\s+', lines[i + 1]):
-                        # We have a for loop followed by an if - check for nested structure
-                        # Look ahead to find the pattern: for -> if -> if -> assignment -> increment
-                        if i + 2 < len(lines) and re.match(r'^\s*if\s+', lines[i + 2]):
-                            # We have nested ifs: for -> if -> if
-                            # Check if next line is assignment and then increment
-                            if i + 3 < len(lines):
-                                assignment_line = lines[i + 3]
-                                # Check if next line after assignment is an increment
-                                if i + 4 < len(lines) and re.match(r'^\s*(\w+_idx\s*[+\-*/]=\s*[^;]+)$', lines[i + 4].strip()):
-                                    # We have: for -> if -> if -> assignment -> increment
-                                    increment_line = lines[i + 4].strip()
-                                    # Extract the for loop
-                                    for_match = re.match(r'^\s*(for\s+\w+\s+in\s+range[^:]+):', line)
-                                    if for_match:
-                                        for_loop = for_match.group(1)
-                                        if1_line = lines[i + 1].strip()
-                                        if2_line = lines[i + 2].strip()
-                                        fixed_lines.append(f'{for_loop}:')
-                                        fixed_lines.append(f'    {if1_line}')
-                                        fixed_lines.append(f'        {if2_line}')
-                                        fixed_lines.append(f'            {assignment_line.strip()}')
-                                        fixed_lines.append(f'            {increment_line}')
-                                        i += 5  # Skip all 5 lines
-                                        continue
-                                elif re.match(r'^\s*(\w+_idx\s*[+\-*/]=\s*[^;]+)$', assignment_line.strip()):
-                                    # The assignment line is actually the increment (wrong structure, but handle it)
-                                    increment_line = assignment_line.strip()
-                                    # We need to find the actual assignment - it might be in the if2 line
-                                    if2_line = lines[i + 2].strip()
-                                    # Check if if2 contains the assignment
-                                    if '=' in if2_line and 'df.iloc' in if2_line:
-                                        # Split if2 into condition and assignment
-                                        if2_parts = if2_line.split(':', 1)
-                                        if len(if2_parts) == 2:
-                                            if2_condition = if2_parts[0].strip()
-                                            assignment = if2_parts[1].strip()
-                                            for_match = re.match(r'^\s*(for\s+\w+\s+in\s+range[^:]+):', line)
-                                            if for_match:
-                                                for_loop = for_match.group(1)
-                                                if1_line = lines[i + 1].strip()
-                                                fixed_lines.append(f'{for_loop}:')
-                                                fixed_lines.append(f'    {if1_line}')
-                                                fixed_lines.append(f'        {if2_condition}:')
-                                                fixed_lines.append(f'            {assignment}')
-                                                fixed_lines.append(f'            {increment_line}')
-                                                i += 5
-                                                continue
-                # Check if this line has nested if statements on the same line
-                if re.search(r'for\s+\w+\s+in\s+range[^:]+:\s*if\s+.*:\s*if\s+', line):
-                    # Convert to multi-line with proper indentation
-                    # Pattern: "for i in range(...): if condition: if condition2: statement; increment"
-                    # Need to handle the case where there's a semicolon-separated increment after the statement
-                    match = re.match(r'(for\s+\w+\s+in\s+range[^:]+):\s*(if\s+[^:]+):\s*(if\s+[^:]+):\s*(.+?)(?:;\s*(\w+\s*[+\-*/]=\s*[^;]+))?$', line)
-                    if match:
-                        for_loop = match.group(1)
-                        if1 = match.group(2)
-                        if2 = match.group(3)
-                        statement = match.group(4).strip()
-                        increment = match.group(5)  # e.g., "name_idx += 1"
-                        fixed_lines.append(f'{for_loop}:')
-                        fixed_lines.append(f'    {if1}:')
-                        fixed_lines.append(f'        {if2}:')
-                        fixed_lines.append(f'            {statement}')
-                        if increment:
-                            fixed_lines.append(f'            {increment}')
-                        i += 1
-                    else:
-                        # Try simpler pattern: "for i in range(...): if condition: statement; increment"
-                        match = re.match(r'(for\s+\w+\s+in\s+range[^:]+):\s*(if\s+[^:]+):\s*(.+?)(?:;\s*(\w+\s*[+\-*/]=\s*[^;]+))?$', line)
-                        if match:
-                            for_loop = match.group(1)
-                            if1 = match.group(2)
-                            statement = match.group(3).strip()
-                            increment = match.group(4)  # e.g., "name_idx += 1"
-                            fixed_lines.append(f'{for_loop}:')
-                            fixed_lines.append(f'    {if1}:')
-                            fixed_lines.append(f'        {statement}')
-                            if increment:
-                                fixed_lines.append(f'        {increment}')
-                            i += 1
-                        else:
-                            # Check if next line is an increment (e.g., "name_idx += 1" or "contact_idx += 1")
-                            # This handles the case where semicolon split separated the increment
-                            if i + 1 < len(lines) and re.match(r'^\s*(\w+_idx\s*[+\-*/]=\s*[^;]+)$', lines[i + 1].strip()):
-                                increment_line = lines[i + 1].strip()
-                                # Try to extract the if statement pattern
-                                match2 = re.match(r'(for\s+\w+\s+in\s+range[^:]+):\s*(if\s+[^:]+):\s*(if\s+[^:]+):\s*(.+)', line)
-                                if match2:
-                                    for_loop = match2.group(1)
-                                    if1 = match2.group(2)
-                                    if2 = match2.group(3)
-                                    statement = match2.group(4).strip()
-                                    fixed_lines.append(f'{for_loop}:')
-                                    fixed_lines.append(f'    {if1}:')
-                                    fixed_lines.append(f'        {if2}:')
-                                    fixed_lines.append(f'            {statement}')
-                                    fixed_lines.append(f'            {increment_line}')
-                                    i += 2  # Skip both lines
-                                    continue
-                                else:
-                                    # Try simpler pattern
-                                    match3 = re.match(r'(for\s+\w+\s+in\s+range[^:]+):\s*(if\s+[^:]+):\s*(.+)', line)
-                                    if match3:
-                                        for_loop = match3.group(1)
-                                        if1 = match3.group(2)
-                                        statement = match3.group(3).strip()
-                                        fixed_lines.append(f'{for_loop}:')
-                                        fixed_lines.append(f'    {if1}:')
-                                        fixed_lines.append(f'        {statement}')
-                                        fixed_lines.append(f'        {increment_line}')
-                                        i += 2  # Skip both lines
-                                        continue
-                            fixed_lines.append(line)
-                            i += 1
-                else:
-                    fixed_lines.append(line)
-                    i += 1
-            
-            code = '\n'.join(fixed_lines)
-        
-        # Post-processing: Fix incorrectly indented increment statements
-        # Pattern: increment statement (name_idx += 1, contact_idx += 1) that's at wrong indentation
-        # It should be inside the inner if block, not at the same level as the outer if
-        lines = code.split('\n')
-        fixed_code_lines = []
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            # Check if this is an increment statement at the wrong indentation level
-            # It should be inside an if block, not at the same level as the if
-            if re.match(r'^\s*(\w+_idx\s*[+\-*/]=\s*[^;]+)$', line.strip()):
-                # This is an increment statement
-                # Check if previous lines form a nested if structure
-                # Look back to see if we have: assignment -> inner if -> outer if -> for loop
-                if (i >= 3 and 
-                    'df.iloc' in lines[i - 1] and
-                    re.match(r'^\s*if\s+', lines[i - 2]) and
-                    re.match(r'^\s*if\s+', lines[i - 3])):
-                    # We have: for -> if -> if -> assignment -> increment
-                    # The increment should be indented to match the assignment (inside inner if)
-                    assignment_indent = len(lines[i - 1]) - len(lines[i - 1].lstrip())
-                    increment_content = line.strip()
-                    fixed_code_lines.append(' ' * assignment_indent + increment_content)
-                    i += 1
-                    continue
-                elif (i >= 2 and
-                      'df.iloc' in lines[i - 1] and
-                      re.match(r'^\s*if\s+', lines[i - 2])):
-                    # We have: for -> if -> assignment -> increment
-                    # The increment should be indented to match the assignment (inside if)
-                    assignment_indent = len(lines[i - 1]) - len(lines[i - 1].lstrip())
-                    increment_content = line.strip()
-                    fixed_code_lines.append(' ' * assignment_indent + increment_content)
-                    i += 1
-                    continue
-            fixed_code_lines.append(line)
-            i += 1
-        
-        code = '\n'.join(fixed_code_lines)
-        
-        # Fix: Incorrect blank row insertion pattern
-        # Pattern: df = pd.concat([df, pd.DataFrame([{}] * len(df))], ignore_index=True)
-        # This appends blank rows at the end instead of inserting them between rows
-        # Replace with correct code that inserts blank rows between existing rows
-        incorrect_pattern = r'df\s*=\s*pd\.concat\(\s*\[\s*df\s*,\s*pd\.DataFrame\(\s*\[\s*\{\}\s*\]\s*\*\s*len\(df\)\s*\)\s*\]\s*,\s*ignore_index\s*=\s*True\s*\)'
-        if re.search(incorrect_pattern, code):
-            # Replace with correct implementation
-            code = re.sub(
-                incorrect_pattern,
-                '''new_rows = []
-for i in range(len(df)):
-    new_rows.append(df.iloc[i:i+1])
-    new_rows.append(pd.DataFrame([{}], columns=df.columns))
-df = pd.concat(new_rows, ignore_index=True)''',
-                code
-            )
-            logger.info("🔧 Fixed incorrect blank row insertion pattern - now inserting between rows instead of appending")
-        
-        # Fix: Malformed generator/list comprehension at end of statement
-        # Pattern: "statement) for i in range(...)" -> convert to proper loop
-        # This fixes cases like: "df = pd.concat(...) for i in range(...)"
-        # BUT: Only apply if the pattern is actually malformed (statement ends with ) and for comes after)
-        # Don't match if there are semicolons between - that's valid Python
-        def fix_malformed_loop(match):
-            statement = match.group(1).strip()
-            var = match.group(2)
-            range_expr = match.group(3)
-            # Convert to proper for loop with indentation
-            return f'for {var} in {range_expr}:\n    {statement}'
-        
-        # IMPORTANT: Only match patterns where "for" comes immediately after a closing paren
-        # This indicates a malformed pattern like "df = pd.concat(...) for i in range(...)"
-        # Don't match if there are semicolons or other code between - that's valid Python
-        
-        # Pattern 1: Simple assignment with method call - only if "for" comes right after )
-        # Matches: "df = pd.concat(...) for i in range(...)" (no semicolon between)
-        pattern1 = r'(\w+\s*=\s*[^)]+\))\s+for\s+(\w+)\s+in\s+(range\([^)]+(?:,\s*[^)]+)*\))'
-        # Only apply if there's no semicolon between the statement and "for"
-        if ';' not in code or not re.search(r'\)\s*;\s*for\s+', code):
-            code = re.sub(pattern1, fix_malformed_loop, code)
-        
-        # Pattern 2: Assignment with method chain - only if "for" comes right after )
-        pattern2 = r'(\w+\s*=\s*[^)]+\)(?:\.[^)]+\))+)\s+for\s+(\w+)\s+in\s+(range\([^)]+(?:,\s*[^)]+)*\))'
-        if ';' not in code or not re.search(r'\)\s*;\s*for\s+', code):
-            code = re.sub(pattern2, fix_malformed_loop, code)
-        
-        # Pattern 3: More complex - only if "for" comes right after )
-        pattern3 = r'^(\w+\s*=\s*.+\)(?:\.\w+\([^)]*\))*)\s+for\s+(\w+)\s+in\s+(range\([^)]+(?:,\s*[^)]+)*\))'
-        def fix_complex_loop(match):
-            statement = match.group(1).strip()
-            var = match.group(2)
-            range_expr = match.group(3)
-            return f'for {var} in {range_expr}:\n    {statement}'
-        # Only apply if there's no semicolon between
-        if ';' not in code or not re.search(r'\)\s*;\s*for\s+', code):
-            code = re.sub(pattern3, fix_complex_loop, code)
-        
-        # Fix: for loop inside function call parentheses (multi-line issue)
-        # Pattern: .method(for var in range(...): ...) or method(for var in range(...)
-        # This fixes cases like: reset_index(for i in range(len(df): drop=True))
-        # We need to handle this across multiple lines
-        def fix_for_in_function_call_multiline(code_str):
-            # Join all lines to handle multi-line patterns
-            full_code = ' '.join(code_str.split('\n'))
-            
-            # Pattern: .method_name(for var in range(...): params)
-            # Or: method_name(for var in range(...): params)
-            pattern = r'(\.?\w+)\(for\s+(\w+)\s+in\s+(range\([^)]+\)):\s*([^)]+)\)'
-            
-            def extract_and_fix(match):
-                method_part = match.group(1)  # .reset_index or reset_index
-                var = match.group(2)  # i
-                range_expr = match.group(3)  # range(len(df)
-                params = match.group(4).strip()  # drop=True
-                
-                # Reconstruct: remove the for loop from inside, we'll add it outside
-                # Find the assignment statement before this method call
-                # For now, return a marker we can process later
-                return f"__FOR_LOOP_MARKER__{var}__{range_expr}__{method_part}({params})"
-            
-            # First pass: mark the problematic patterns
-            marked_code = re.sub(pattern, extract_and_fix, full_code)
-            
-            # If we found any markers, reconstruct the code
-            if '__FOR_LOOP_MARKER__' in marked_code:
-                # Find the assignment before the marker
-                # Pattern: df = pd.concat(...)__FOR_LOOP_MARKER__...
-                marker_pattern = r'(\w+\s*=\s*[^_]+)__FOR_LOOP_MARKER__(\w+)__([^_]+)__(.+)'
-                match = re.search(marker_pattern, marked_code)
-                if match:
-                    assignment = match.group(1).strip()
-                    var = match.group(2)
-                    range_expr = match.group(3)
-                    method_call = match.group(4)
-                    
-                    # Reconstruct as proper for loop
-                    return f'for {var} in {range_expr}:\n    {assignment}{method_call}'
-            
-            return code_str
-        
-        # Apply to each line separately to handle multi-line code
-        lines = code.split('\n')
-        fixed_lines = []
-        for line in lines:
-            line_stripped = line.strip()
-            
-            # IMPORTANT: If the line contains semicolons, it's likely valid Python code
-            # Don't try to restructure it - just leave it as-is after df.loc replacement
-            if ';' in line_stripped:
-                # This is semicolon-separated code - likely valid Python
-                # Just add it as-is (df.loc should already be replaced above)
-                fixed_lines.append(line)
-                continue
-            
-            # First check for pattern3 (for loop at end of statement)
-            # Use a more robust approach: find the "for var in range" and extract everything
-            # This handles cases where range() has multiple arguments like range(len(df), 0, -1)
-            # IMPORTANT: Skip list comprehensions - they have the pattern [... for ... in ...]
-            # Check if this is a list comprehension by looking for opening bracket before "for"
-            for_match = re.search(r'for\s+(\w+)\s+in\s+range\s*\(', line_stripped)
-            is_list_comprehension = False
-            if for_match:
-                # Check if there's an opening bracket before "for" - this indicates a list comprehension
-                before_for = line_stripped[:for_match.start()]
-                # Count brackets to see if we're inside a list comprehension
-                bracket_count = before_for.count('[') - before_for.count(']')
-                if bracket_count > 0:
-                    # We're inside a list comprehension - don't convert it
-                    is_list_comprehension = True
-            
-            if for_match and not is_list_comprehension:
-                # Found a for loop - extract the full range expression by finding the matching closing paren
-                var = for_match.group(1)
-                # Find the position of the opening '(' of range(
-                range_open_paren_pos = for_match.end() - 1  # Position of '(' in "range("
-                
-                # Get the statement part (everything before "for")
-                statement_end = for_match.start()
-                statement = line_stripped[:statement_end].strip()
-                
-                # Find the complete range expression by counting parentheses
-                # Start from "range(" - we need to include "range" in the expression
-                range_start_pos = line_stripped.rfind('range', 0, range_open_paren_pos)
-                range_expr = line_stripped[range_start_pos:range_open_paren_pos + 1]  # "range("
-                paren_count = 1  # We already have the opening paren of range(
-                found_range = True
-                for i in range(range_open_paren_pos + 1, len(line_stripped)):  # Start after "range("
-                    char = line_stripped[i]
-                    range_expr += char
-                    if char == '(':
-                        paren_count += 1
-                    elif char == ')':
-                        paren_count -= 1
-                        if paren_count == 0:
-                            # Found the matching closing paren for range()
-                            break
-                
-                # If we found a complete range expression and a statement, fix it
-                if found_range and paren_count == 0 and statement:
-                    # Check if there's leftover text after range_expr that should be part of range
-                    range_expr_end_pos = range_start_pos + len(range_expr)
-                    remaining_after_range = line_stripped[range_expr_end_pos:].strip()
-                    
-                    # If remaining text looks like range arguments (e.g., ", 0, -1)"), append it to range_expr
-                    if remaining_after_range and re.match(r'^,\s*[^,)]+,\s*[^,)]+\)', remaining_after_range):
-                        # Extract the range arguments
-                        range_args_match = re.match(r'^,\s*([^,)]+),\s*([^,)]+)\)', remaining_after_range)
-                        if range_args_match:
-                            range_expr += remaining_after_range[:remaining_after_range.index(')') + 1]
-                            remaining_after_range = remaining_after_range[remaining_after_range.index(')') + 1:].strip()
-                    
-                    # Clean up the statement - remove any trailing range arguments that got mixed in
-                    statement_cleaned = statement
-                    # Check if statement ends with something like ", 0, -1)" which suggests leftover range args
-                    if re.search(r',\s*\d+,\s*-?\d+\)\s*$', statement_cleaned):
-                        # Remove the trailing range arguments that got mixed into the statement
-                        statement_cleaned = re.sub(r',\s*\d+,\s*-?\d+\)\s*$', '', statement_cleaned)
-                    
-                    fixed_lines.append(f'for {var} in {range_expr}:')
-                    fixed_lines.append(f'    {statement_cleaned}')
-                else:
-                    # Try pattern3 as fallback
-                    match_obj = re.match(pattern3, line_stripped)
-                    if match_obj:
-                        statement = match_obj.group(1).strip()
-                        var = match_obj.group(2)
-                        range_expr = match_obj.group(3)
-                        fixed_lines.append(f'for {var} in {range_expr}:')
-                        fixed_lines.append(f'    {statement}')
-                    else:
-                        fixed_lines.append(line)
-            elif is_list_comprehension:
-                # This is a list comprehension - leave it as-is (it's valid Python)
-                fixed_lines.append(line)
-            else:
-                # Try pattern3 as fallback
-                match_obj = re.match(pattern3, line_stripped)
-                if match_obj:
-                    statement = match_obj.group(1).strip()
-                    var = match_obj.group(2)
-                    range_expr = match_obj.group(3)
-                    fixed_lines.append(f'for {var} in {range_expr}:')
-                    fixed_lines.append(f'    {statement}')
-                else:
-                    # Check for for loop inside function call (handle multi-line)
-                    # Join current line with previous lines to check for multi-line patterns
-                    context_lines = fixed_lines[-3:] + [line] if len(fixed_lines) >= 3 else fixed_lines + [line]
-                    context = '\n'.join(context_lines)
-                    fixed_context = fix_for_in_function_call_multiline(context)
-                    
-                    if fixed_context != context:
-                        # Pattern was fixed - replace the last few lines with the fixed version
-                        # Remove the last few lines we checked
-                        fixed_lines = fixed_lines[:-len(context_lines) + 1] if len(fixed_lines) >= len(context_lines) - 1 else []
-                        # Add the fixed version (split back into lines)
-                        fixed_lines.extend(fixed_context.split('\n'))
-                    else:
-                        fixed_lines.append(line)
-        code = '\n'.join(fixed_lines)
-        
-        # Additional fix: Detect and fix "for" keyword appearing inside function call parentheses
-        # This handles cases like: .reset_index(for i in range(...): ...)
-        # We'll search for this pattern and restructure it
-        def fix_for_inside_parentheses(code_str):
-            # Pattern: find "for var in range" that appears after an opening parenthesis
-            # This is a sign of malformed code
-            lines = code_str.split('\n')
-            result = []
-            i = 0
-            while i < len(lines):
-                line = lines[i]
-                # Check if this line or next lines contain "for" after an opening paren
-                # Look ahead a few lines to catch multi-line issues
-                lookahead = ' '.join(lines[i:min(i+5, len(lines))])
-                
-                # Pattern: .method(for var in range or method(for var in range
-                if re.search(r'\(for\s+\w+\s+in\s+range', lookahead):
-                    # Found malformed pattern - try to extract and fix
-                    # Find the assignment statement before this
-                    if i > 0:
-                        # Look for assignment in previous lines
-                        assignment_line = ''
-                        for j in range(max(0, i-3), i):
-                            if '=' in lines[j] and not lines[j].strip().startswith('#'):
-                                assignment_line = lines[j]
-                                break
-                        
-                        # Extract for loop details - match full range() call including all arguments
-                        for_match = re.search(r'for\s+(\w+)\s+in\s+(range\([^)]+(?:,\s*[^)]+)*\))', lookahead)
-                        if for_match and assignment_line:
-                            var = for_match.group(1)
-                            range_expr = for_match.group(2)  # Already complete with all arguments
-                            
-                            # Remove the malformed for loop from the code
-                            # Find where it starts and ends
-                            cleaned_lines = []
-                            skip_until_paren = False
-                            for k in range(i, min(i+10, len(lines))):
-                                if k < len(lines):
-                                    cleaned = re.sub(r'\(for\s+\w+\s+in\s+range[^)]*\):\s*', '(', lines[k])
-                                    cleaned = re.sub(r'for\s+\w+\s+in\s+range[^)]*\):\s*', '', cleaned)
-                                    if cleaned.strip() and not cleaned.strip().startswith('for'):
-                                        cleaned_lines.append(cleaned)
-                            
-                            # Reconstruct as proper for loop
-                            if cleaned_lines:
-                                result.append(f'for {var} in {range_expr}:')
-                                result.append(f'    {assignment_line}')
-                                for cl in cleaned_lines:
-                                    result.append(f'    {cl}')
-                                i += len(cleaned_lines)
-                                continue
-                
-                result.append(line)
-                i += 1
-            
-            return '\n'.join(result)
-        
-        # Apply the fix - but skip if code is semicolon-separated (valid Python)
-        # Only apply fix_for_inside_parentheses if code doesn't have semicolons
-        # or if it's clearly malformed (for loop inside parentheses)
-        if ';' not in code or not re.search(r'\(for\s+\w+\s+in\s+range', code):
-            code = fix_for_inside_parentheses(code)
-        
-        # Clean up whitespace
-        code = code.strip()
-        
-        return code
+        return code.strip()
     
     def _validate_code(self, python_code: str) -> Dict[str, Any]:
         """
-        Validate code before execution
+        Validate code before execution - simplified
         
         Returns:
-            {"valid": bool, "error": str}
+            {"valid": bool, "error": str, "cleaned_code": str}
         """
-        # Clean the code first (remove markdown, etc.)
+        # Clean the code first
         cleaned_code = self._clean_code(python_code)
         
-        # Log the full cleaned code for debugging (first 1000 chars)
-        logger.info(f"🔍 Full cleaned code (first 1000 chars): {cleaned_code[:1000]}")
-        logger.info(f"🔍 Full cleaned code length: {len(cleaned_code)}")
+        # Log the cleaned code for debugging
+        logger.info(f"🔍 Cleaned code (first 500 chars): {cleaned_code[:500]}")
         
-        # Check if code is empty after cleaning
+        # Check if code is empty
         if not cleaned_code or not cleaned_code.strip():
             return {"valid": False, "error": "Code is empty after cleaning"}
         
@@ -955,45 +311,27 @@ df = pd.concat(new_rows, ignore_index=True)''',
         if re.search(r'\bimport\s+\w+|from\s+\w+\s+import', cleaned_code):
             return {"valid": False, "error": "Import statements are not allowed"}
         
-        # Check 2: No file operations
+        # Check 2: No dangerous operations
         dangerous_patterns = [
             r'\bopen\s*\(', r'\bread\s*\(', r'\bwrite\s*\(',
             r'__file__', r'__import__', r'eval\s*\(', r'exec\s*\(',
+            r'\bos\.|sys\.|subprocess\.|shutil\.',
         ]
         for pattern in dangerous_patterns:
             if re.search(pattern, cleaned_code):
                 return {"valid": False, "error": f"Dangerous operation detected: {pattern}"}
         
-        # Check 3: No system operations
-        if re.search(r'\bos\.|sys\.|subprocess\.|shutil\.', cleaned_code):
-            return {"valid": False, "error": "System operations are not allowed"}
-        
-        # Check 4: Basic syntax validation
+        # Check 3: Basic syntax validation
         try:
             compile(cleaned_code, '<string>', 'exec')
         except SyntaxError as e:
-            # Include the problematic code in error message
             error_line = getattr(e, 'lineno', 'unknown')
-            error_text = getattr(e, 'text', '')
             code_preview = cleaned_code[:300] if len(cleaned_code) > 300 else cleaned_code
             return {
                 "valid": False, 
-                "error": f"Syntax error at line {error_line}: {str(e)}\nCode preview:\n{code_preview}"
+                "error": f"Syntax error at line {error_line}: {str(e)}\nCode preview:\n{code_preview}",
+                "cleaned_code": cleaned_code
             }
-        
-        # Debug: Log if df.loc was replaced with df.iloc
-        if 'df.loc[' in python_code and 'df.iloc[' in cleaned_code:
-            logger.info(f"🔧 Converted df.loc to df.iloc in code cleaning")
-        elif 'df.loc[' in python_code:
-            logger.warning(f"⚠️ df.loc found in code but not converted to df.iloc")
-            logger.warning(f"⚠️ Original code snippet: {python_code[:500]}")
-            logger.warning(f"⚠️ Cleaned code snippet (first 500 chars): {cleaned_code[:500]}")
-            logger.warning(f"⚠️ Cleaned code snippet (full length: {len(cleaned_code)}): {cleaned_code}")
-            # Force replacement if it wasn't done
-            if 'df.loc[' in cleaned_code:
-                cleaned_code = cleaned_code.replace('df.loc[', 'df.iloc[')
-                logger.info(f"🔧 Force-converted remaining df.loc to df.iloc")
-                logger.info(f"🔧 After force conversion (first 500 chars): {cleaned_code[:500]}")
         
         return {"valid": True, "error": None, "cleaned_code": cleaned_code}
     
@@ -1043,15 +381,7 @@ df = pd.concat(new_rows, ignore_index=True)''',
         return str(error)
     
     def execute_multiple(self, operations: List[Dict]) -> Dict[str, Any]:
-        """
-        Execute multiple operations in sequence
-        
-        Args:
-            operations: List of operation dicts with 'python_code' and 'description'
-        
-        Returns:
-            Dict with execution summary
-        """
+        """Execute multiple operations in sequence"""
         logger.info(f"🔍 execute_multiple called with {len(operations)} operations")
         results = []
         successful = 0
@@ -1072,7 +402,6 @@ df = pd.concat(new_rows, ignore_index=True)''',
             except Exception as e:
                 failed += 1
                 logger.error(f"Operation failed: {operation.get('description', 'Unknown')} - {str(e)}")
-                # Raise to stop execution on first error
                 raise
         
         return {

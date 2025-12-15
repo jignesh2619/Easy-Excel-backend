@@ -620,7 +620,7 @@ Generate the summary now:"""
             
             # Call LLM
             response = self.openai_client.chat.completions.create(
-                model="gpt-5-nano",
+                model="gpt-4o-mini",
                 messages=[
                     {
                         "role": "system",
@@ -628,7 +628,6 @@ Generate the summary now:"""
                     },
                     {"role": "user", "content": prompt}
                 ],
-                # Note: GPT-5 models only support default parameters
                 max_completion_tokens=250
             )
             

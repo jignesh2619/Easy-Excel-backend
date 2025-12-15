@@ -61,13 +61,13 @@ Return ONLY valid JSON, no markdown or explanations.
 class ChartBot:
     """Bot for generating chart configurations"""
     
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-5-nano"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
         """
         Initialize Chart Bot
         
         Args:
             api_key: OpenAI API key
-            model: Model to use (default: gpt-5-nano for cost savings, optimized for JSON outputs)
+            model: Model to use (default: gpt-4o-mini for cost savings, optimized for JSON outputs)
         """
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
@@ -183,7 +183,6 @@ class ChartBot:
                     {"role": "system", "content": CHART_BOT_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt}
                 ],
-                # Note: GPT-5 models only support default parameters (no temperature, top_p, etc.)
             )
             
             content = response.choices[0].message.content.strip()

@@ -27,6 +27,7 @@ from services.python_executor import PythonExecutor
 from services.chart_executor import ChartExecutor
 from services.data_tracer import DataTracer
 from services.excel_preprocessor import ExcelPreprocessor
+from services.dataframe_normalizer import normalize_dataframe
 
 
 class ExcelProcessor:
@@ -1006,38 +1007,8 @@ class ExcelProcessor:
             
             logger.info(f"💾 Static formatting rules: {len(formatting_rules)}, Conditional rules: {len(conditional_rules)}")
             
-            # Validate DataFrame structure before writing
-            # Ensure all columns are proper Series (not nested structures)
-            import pandas as pd
-            import numpy as np
-            for col in self.df.columns:
-                if not isinstance(self.df[col], pd.Series):
-                    logger.warning(f"Column '{col}' is not a Series, converting...")
-                    self.df[col] = pd.Series(self.df[col], dtype=object)
-            
-            # Ensure DataFrame is clean (no nested DataFrames/Series/arrays as values)
-            # Convert any non-scalar values to scalars or strings
-            for col in self.df.columns:
-                for idx in self.df.index:
-                    value = self.df.at[idx, col]
-                    if isinstance(value, pd.DataFrame):
-                        # DataFrame in cell - convert to string
-                        logger.warning(f"Cell ({idx}, {col}) contains DataFrame, converting to string")
-                        self.df.at[idx, col] = str(value)
-                    elif isinstance(value, pd.Series):
-                        # Series in cell - take first value or None
-                        logger.warning(f"Cell ({idx}, {col}) contains Series, extracting first value")
-                        if len(value) > 0:
-                            self.df.at[idx, col] = value.iloc[0] if not pd.isna(value.iloc[0]) else None
-                        else:
-                            self.df.at[idx, col] = None
-                    elif isinstance(value, np.ndarray):
-                        # Numpy array in cell - flatten if 1D, convert to string if multi-dimensional
-                        logger.warning(f"Cell ({idx}, {col}) contains ndarray of shape {value.shape}, converting")
-                        if value.ndim == 1 and len(value) > 0:
-                            self.df.at[idx, col] = value[0]
-                        else:
-                            self.df.at[idx, col] = str(value)
+            # Normalize DataFrame structure using unified function
+            self.df = normalize_dataframe(self.df)
             
             # Write with formatting
             writer.write(
