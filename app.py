@@ -156,8 +156,7 @@ async def health():
     return HealthResponse(status="OK", message="Service is healthy")
 
 
-@app.options("/{full_path:path}")
-# OPTIONS requests are handled by nginx - no need for manual handler
+# OPTIONS requests are handled by nginx - no need for FastAPI handler
 # This prevents duplicate CORS headers
 
 
