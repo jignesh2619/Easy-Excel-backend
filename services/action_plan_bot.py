@@ -182,6 +182,24 @@ Example 5: "Sum revenue for India in January"
   }]
 }
 
+Example 6: "Group similar items" or "Group data by item and size"
+{
+  "operations": [{
+    "python_code": "df = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index()",
+    "description": "Group by Item and Size, sum quantities for each group",
+    "result_type": "dataframe"
+  }]
+}
+
+Example 7: "Group by item and sum quantities" (group by single column)
+{
+  "operations": [{
+    "python_code": "df = df.groupby('Item')['Quantity'].sum().reset_index()",
+    "description": "Group by Item and sum quantities",
+    "result_type": "dataframe"
+  }]
+}
+
 Example 6: "Give me sum of column Jan" (user wants total row added)
 {
   "operations": [{
