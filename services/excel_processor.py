@@ -470,6 +470,9 @@ class ExcelProcessor:
                 self.df = python_executor.get_dataframe()
                 self.summary.extend(python_executor.get_execution_log())
                 
+                # CRITICAL: Normalize DataFrame immediately after operations to prevent ndarray errors
+                self.df = normalize_dataframe(self.df)
+                
                 # Log columns after operations for debugging
                 logger.info(f"🔍 Columns after operations: {list(self.df.columns)}")
                 

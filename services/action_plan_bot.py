@@ -212,7 +212,7 @@ Example 5: "Sum revenue for India in January"
 Example 6: "Group similar items in columns E, F, G" (preserve original data, add grouped results to new columns)
 {
   "operations": [{
-    "python_code": "grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index(); grouped.columns = ['Item.1', 'Size.1', 'Quantity.1']; original_len = len(df); grouped_len = len(grouped); empty_rows = pd.DataFrame({col: [None] * (original_len - grouped_len) for col in grouped.columns}) if grouped_len < original_len else pd.DataFrame(); grouped = pd.concat([grouped, empty_rows], ignore_index=True) if len(empty_rows) > 0 else grouped; df = pd.concat([df, grouped], axis=1)",
+    "python_code": "grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index(); grouped.columns = ['Item.1', 'Size.1', 'Quantity.1']; original_len = len(df); grouped_len = len(grouped); if grouped_len < original_len: empty_data = {col: [None] * (original_len - grouped_len) for col in grouped.columns}; empty_df = pd.DataFrame(empty_data); grouped = pd.concat([grouped, empty_df], ignore_index=True); df = pd.concat([df, grouped], axis=1)",
     "description": "Group by Item and Size, sum quantities, add results to new columns preserving original rows",
     "result_type": "dataframe"
   }]
@@ -221,7 +221,7 @@ Example 6: "Group similar items in columns E, F, G" (preserve original data, add
 Example 6b: "Group similar items in columns E, F, G" (alternative: add grouped results as new rows at bottom)
 {
   "operations": [{
-    "python_code": "grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index(); grouped.columns = ['Item.1', 'Size.1', 'Quantity.1']; original_cols = df.columns.tolist(); missing_cols = [col for col in original_cols if col not in grouped.columns]; for col in missing_cols: grouped[col] = None; df = pd.concat([df, grouped], ignore_index=True)",
+    "python_code": "grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index(); grouped.columns = ['Item.1', 'Size.1', 'Quantity.1']; original_cols = df.columns.tolist(); missing_cols = [col for col in original_cols if col not in grouped.columns]; for col in missing_cols: grouped[col] = None; grouped = grouped.reindex(columns=original_cols + ['Item.1', 'Size.1', 'Quantity.1']); df = pd.concat([df, grouped], ignore_index=True)",
     "description": "Group by Item and Size, add grouped results as new rows at bottom with original columns",
     "result_type": "dataframe"
   }]
