@@ -182,7 +182,7 @@ Example 5: "Sum revenue for India in January"
   }]
 }
 
-Example 6: "Group similar items" or "Group data by item and size"
+Example 6: "Group similar items" or "Group data by item and size" or "Total quantity of each product and size"
 {
   "operations": [{
     "python_code": "df = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index()",
@@ -199,6 +199,14 @@ Example 7: "Group by item and sum quantities" (group by single column)
     "result_type": "dataframe"
   }]
 }
+
+**IMPORTANT - GROUPING SIMILAR ROWS:**
+When user says "group similar items", "total quantity of each product", "combine duplicate rows", etc.:
+- User wants to GROUP BY the identifying columns (Item, Size, etc.) and SUM the quantity
+- This creates a new dataframe with unique combinations and aggregated values
+- Example: Multiple rows with "t-shirt" size "m" quantities 2, 1, 3 → One row "t-shirt" "m" quantity 6
+- Use: df = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index()
+- This is a DATA OPERATION, NOT a chart - return result_type: "dataframe"
 
 Example 6: "Give me sum of column Jan" (user wants total row added)
 {
