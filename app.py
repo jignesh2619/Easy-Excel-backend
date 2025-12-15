@@ -6,7 +6,7 @@ FastAPI server for processing Excel/CSV files with AI-powered prompts.
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Request, Header, Depends
 from fastapi.responses import JSONResponse, FileResponse
-from fastapi.middleware.cors import CORSMiddleware
+# CORS is handled by nginx - no FastAPI CORS middleware needed
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -48,25 +48,8 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware - Configure to allow frontend domain
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://www.easyexcel.in",
-        "https://easyexcel.in",
-        "https://www.lazyexcel.pro",
-        "https://lazyexcel.pro",
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=3600,
-)
+# CORS is handled by nginx - no need for FastAPI CORS middleware
+# This prevents duplicate CORS headers which browsers reject
 
 # Initialize services
 file_manager = FileManager()
@@ -174,18 +157,8 @@ async def health():
 
 
 @app.options("/{full_path:path}")
-async def options_handler(full_path: str):
-    """Handle OPTIONS requests for CORS preflight"""
-    return JSONResponse(
-        content={},
-        headers={
-            "Access-Control-Allow-Origin": "https://www.easyexcel.in",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-            "Access-Control-Allow-Headers": "*",
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Max-Age": "3600",
-        }
-    )
+# OPTIONS requests are handled by nginx - no need for manual handler
+# This prevents duplicate CORS headers
 
 
 @app.post("/process-file", response_model=ProcessFileResponse)
