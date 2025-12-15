@@ -422,24 +422,18 @@ def get_knowledge_base_summary() -> str:
     Returns:
         Formatted string with key knowledge base information
     """
-    summary = []
-    
-    # Task definitions - only most common ones
-    summary.append("TASK DEFINITIONS:")
+    # Ultra-concise summary - only critical task mappings
+    # Format: "task: keywords" (one line per task)
+    tasks = []
     common_tasks = ["clean", "filter", "group_by", "formula"]
     for task in common_tasks:
         if task in KNOWLEDGE_BASE["task_definitions"]:
             info = KNOWLEDGE_BASE["task_definitions"][task]
-            summary.append(f"\n**{task.upper()}**: {info['description']}")
-            summary.append(f"  Keywords: {', '.join(info['keywords'][:3])}")
+            keywords = ', '.join(info['keywords'][:2])  # Only top 2 keywords
+            tasks.append(f"{task}: {keywords}")
     
-    # Common patterns - only top 2
-    summary.append("\n\nCOMMON PATTERNS:")
-    patterns = list(KNOWLEDGE_BASE["common_patterns"].items())[:2]
-    for pattern_name, pattern_info in patterns:
-        summary.append(f"  '{pattern_info['pattern']}' → task='{pattern_info['correct_task']}'")
-    
-    return "\n".join(summary)
+    # Single line format for maximum efficiency
+    return "Tasks: " + " | ".join(tasks) if tasks else ""
 
 
 def export_knowledge_base_to_json(file_path: str = "knowledge_base.json"):
@@ -477,62 +471,38 @@ def add_example_to_knowledge_base(example_type: str, example: dict):
 def get_task_decision_guide(user_prompt: str) -> dict:
     """
     Analyze user prompt and suggest task based on knowledge base
+    Optimized for token efficiency - minimal output
     
     Args:
         user_prompt: User's natural language request
         
     Returns:
-        Dictionary with suggested task and reasoning
+        Dictionary with suggested task (simplified)
     """
     prompt_lower = user_prompt.lower()
-    suggestions = {
-        "suggested_task": None,
-        "suggested_chart_type": "none",
-        "confidence": 0,
-        "reasoning": [],
-        "matched_patterns": []
-    }
     
+    # Quick keyword checks (most common patterns first)
     # Check for cleaning keywords
-    cleaning_keywords = KNOWLEDGE_BASE["task_definitions"]["clean"]["keywords"]
+    cleaning_keywords = ["clean", "remove duplicates", "fix formatting", "duplicate", "remove empty"]
     has_cleaning = any(keyword in prompt_lower for keyword in cleaning_keywords)
     
-    # Check for visualization keywords
-    viz_keywords = ["visualize", "dashboard", "chart", "graph", "plot", "show me"]
-    has_viz = any(keyword in prompt_lower for keyword in viz_keywords)
-    
     # Check for statistics keywords
-    stats_keywords = KNOWLEDGE_BASE["task_definitions"]["summarize"]["keywords"]
+    stats_keywords = ["summary", "statistics", "describe", "statistical"]
     has_stats = any(keyword in prompt_lower for keyword in stats_keywords)
     
-    # Decision logic
+    # Check for grouping keywords
+    group_keywords = ["group", "group by", "sum by", "count by"]
+    has_group = any(keyword in prompt_lower for keyword in group_keywords)
+    
+    # Decision logic (simplified - only return task, no verbose reasoning)
     if has_cleaning:
-        suggestions["suggested_task"] = "clean"
-        suggestions["confidence"] = 0.9
-        suggestions["reasoning"].append("Detected cleaning keywords")
-        if has_viz:
-            suggestions["suggested_chart_type"] = "bar"
-            suggestions["reasoning"].append("Also detected visualization request")
+        return {"suggested_task": "clean"}
     elif has_stats:
-        suggestions["suggested_task"] = "summarize"
-        suggestions["confidence"] = 0.9
-        suggestions["reasoning"].append("Detected statistics keywords")
-    elif has_viz:
-        suggestions["suggested_task"] = "group_by"  # Default for visualization
-        suggestions["suggested_chart_type"] = "bar"
-        suggestions["confidence"] = 0.7
-        suggestions["reasoning"].append("Detected visualization request")
-    
-    # Check common patterns
-    for pattern_name, pattern_info in KNOWLEDGE_BASE["common_patterns"].items():
-        if pattern_info["pattern"].lower() in prompt_lower:
-            suggestions["matched_patterns"].append(pattern_name)
-            suggestions["suggested_task"] = pattern_info["correct_task"]
-            suggestions["suggested_chart_type"] = pattern_info["correct_chart_type"]
-            suggestions["confidence"] = 0.95
-            suggestions["reasoning"].append(f"Matched pattern: {pattern_name}")
-    
-    return suggestions
+        return {"suggested_task": "summarize"}
+    elif has_group:
+        return {"suggested_task": "group_by"}
+    else:
+        return {"suggested_task": "auto-detect"}
 
 
 def get_chart_knowledge_base_summary() -> str:

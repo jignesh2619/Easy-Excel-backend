@@ -1579,6 +1579,7 @@ def get_column_mapping_info(available_columns: List[str]) -> str:
     """
     Generate column mapping information for LLM prompts.
     Shows Excel column letters mapped to actual column names.
+    Optimized for token efficiency.
     
     Args:
         available_columns: List of actual column names
@@ -1589,28 +1590,18 @@ def get_column_mapping_info(available_columns: List[str]) -> str:
     if not available_columns:
         return ""
     
-    mapping_lines = []
-    mapping_lines.append("\n📋 COLUMN MAPPING (Excel Letters → Actual Column Names):")
-    
+    # Ultra-concise format: "A=Col1, B=Col2, C=Col3"
+    mapping_parts = []
     for idx, col_name in enumerate(available_columns):
-        # Convert index to Excel column letter (A=0, B=1, ..., Z=25, AA=26, AB=27, etc.)
+        # Convert index to Excel column letter (A=0, B=1, ..., Z=25, AA=26, etc.)
         excel_letter = ""
-        temp_idx = idx + 1  # Convert to 1-indexed for calculation
+        temp_idx = idx + 1
         while temp_idx > 0:
-            temp_idx -= 1  # Adjust for 0-based alphabet
+            temp_idx -= 1
             excel_letter = chr(ord('A') + (temp_idx % 26)) + excel_letter
             temp_idx = temp_idx // 26
-        
-        mapping_lines.append(f"  Column {excel_letter} (index {idx}): '{col_name}'")
+        mapping_parts.append(f"{excel_letter}={col_name}")
     
-    mapping_lines.append("\n⚠️ IMPORTANT: When user says 'column C' or 'column A':")
-    mapping_lines.append("  1. FIRST check if there's a column named 'C' or 'A'")
-    mapping_lines.append("  2. If NO column with that name exists, interpret as Excel column letter")
-    mapping_lines.append("  3. Use the ACTUAL column name from the mapping above in your Python code")
-    mapping_lines.append("  4. Example: If user says 'column C' and no column named 'C' exists:")
-    mapping_lines.append("     → Use column at index 2 (C = 3rd column)")
-    mapping_lines.append("     → Get actual name: available_columns[2]")
-    mapping_lines.append("     → Generate code: df['ActualColumnName'] (not df['C'])")
-    
-    return "\n".join(mapping_lines)
+    # Single line format
+    return f"Columns: {', '.join(mapping_parts[:10])}" + ("..." if len(mapping_parts) > 10 else "")
 

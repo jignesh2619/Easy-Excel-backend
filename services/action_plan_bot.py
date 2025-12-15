@@ -766,108 +766,34 @@ class ActionPlanBot:
             # Get knowledge base summary
             kb_summary = get_knowledge_base_summary()
             
-            # Get task suggestions
+            # Get task suggestions (simplified output)
             task_suggestions = get_task_decision_guide(user_prompt)
+            task_hint = task_suggestions.get('suggested_task', 'auto-detect')
             
-            # Get similar examples
-            similar_examples_text = ""
-            all_examples = []
-            
-            if self.training_data_loader:
-                try:
-                    training_examples = self.training_data_loader.get_examples_for_prompt(user_prompt, limit=1)
-                    all_examples.extend(training_examples)
-                except Exception:
-                    pass
-            
-            if self.feedback_learner:
-                try:
-                    feedback_examples = self.feedback_learner.get_similar_successful_examples(user_prompt, limit=1)
-                    for ex in feedback_examples:
-                        all_examples.append({
-                            "prompt": ex["prompt"],
-                            "action_plan": ex["action_plan"]
-                        })
-                except Exception:
-                    pass
-            
-            if all_examples:
-                # Limit to 2 examples max to reduce prompt size
-                similar_examples_text = "\n\nFEW-SHOT LEARNING EXAMPLES:\n"
-                for i, ex in enumerate(all_examples[:2], 1):
-                    # Truncate action plan to essential parts only
-                    action_plan_summary = {
-                        "operations": ex['action_plan'].get('operations', [])[:2],  # Only first 2 operations
-                        "task": ex['action_plan'].get('task', 'execute')
-                    }
-                    similar_examples_text += f"\nExample {i}:\n"
-                    similar_examples_text += f"User: {ex['prompt'][:100]}\n"  # Truncate prompt to 100 chars
-                    similar_examples_text += f"Response: {json.dumps(action_plan_summary, indent=2)}\n"
-            
-            sample_explanation_text = ""
-            if sample_explanation:
-                sample_explanation_text = f"\n\nDATA SAMPLE SUMMARY:\n{sample_explanation}\n"
-            
-            # Get column mapping info (Excel letters → actual column names)
+            # Get column mapping info (Excel letters → actual column names) - simplified
             column_mapping = get_column_mapping_info(available_columns)
             
-            # Detect extraction operations and generate pattern hints (token-efficient)
-            extraction_hint = ""
-            is_extraction_operation = any(keyword in user_prompt.lower() for keyword in 
-                                        ["fill", "extract", "copy from", "get from", "ref", "reference", "with ref"])
+            # Build concise prompt - remove verbose sections
+            # Only include essential context
+            prompt_parts = []
             
-            if is_extraction_operation and sample_data and available_columns:
-                try:
-                    # Lightweight pattern analysis: analyze first 2 columns as potential source/target
-                    # This is a heuristic - the LLM will use sample data to make final decision
-                    if len(available_columns) >= 2:
-                        potential_source = available_columns[0]  # First column often source
-                        potential_target = available_columns[1]  # Second column often target
-                        
-                        hint = ExtractionPatternAnalyzer.get_pattern_hint(
-                            potential_source, 
-                            potential_target,
-                            sample_data,
-                            available_columns
-                        )
-                        if hint:
-                            extraction_hint = hint
-                    elif len(available_columns) == 1:
-                        # Single column - might be extracting from it
-                        hint = ExtractionPatternAnalyzer.get_pattern_hint(
-                            available_columns[0],
-                            "Target",
-                            sample_data,
-                            available_columns
-                        )
-                        if hint:
-                            extraction_hint = hint
-                except Exception as e:
-                    logger.debug(f"Could not generate extraction hint: {e}")
-                    # Continue without hint - not critical, LLM will still analyze sample data
+            # Knowledge base (ultra-concise)
+            if kb_summary:
+                prompt_parts.append(f"Tasks: {kb_summary}")
             
-            full_prompt = f"""You are a data operations assistant. Return ONLY valid JSON.
-
-CRITICAL: Generate Python code for ALL operations. The backend will execute your code directly.
-
-KNOWLEDGE BASE CONTEXT:
-{kb_summary}
-
-TASK DECISION HINT:
-Suggested task: {task_suggestions.get('suggested_task', 'auto-detect')}
-Reasoning: {', '.join(task_suggestions.get('reasoning', []))}
-{column_mapping}
-{similar_examples_text}
-{sample_explanation_text}
-{extraction_hint}
-**IMPORTANT - PATTERN RECOGNITION FOR EXTRACTION:**
-When extracting values: 1) Analyze source format from sample data (separators, value position, type), 2) Determine target type from column name semantics, 3) Generate str.extract() regex matching the pattern, 4) Handle commas/currency, 5) Convert to appropriate type. NEVER copy formatted strings when target suggests extracted type.
-
-{prompt}
-
-Return your response as a valid JSON object with NO markdown, NO code blocks, NO explanations.
-Include "operations" array with "python_code" for each operation.
-"""
+            # Task hint (one line)
+            if task_hint != 'auto-detect':
+                prompt_parts.append(f"Task hint: {task_hint}")
+            
+            # Column mapping (essential for Excel letter references)
+            if column_mapping:
+                prompt_parts.append(column_mapping)
+            
+            # Main prompt with sample data
+            prompt_parts.append(prompt)
+            
+            # Build final prompt
+            full_prompt = "\n\n".join(prompt_parts) + "\n\nReturn ONLY valid JSON with operations array containing python_code for each operation."
 
             response = self.client.chat.completions.create(
                 model=self.model,
