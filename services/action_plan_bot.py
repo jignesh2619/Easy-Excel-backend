@@ -78,6 +78,10 @@ You MUST generate Python code for ALL operations. The backend executes your code
 3. Use .reset_index(drop=True) after operations that change rows
 4. Code must be self-executable (no external dependencies)
 5. Use available utilities: DateCleaner, TextCleaner, CurrencyCleaner
+6. CRITICAL: For loops MUST be on separate lines - NEVER put for loops on the same line with semicolons
+   - WRONG: "statement1; for col in cols: statement2" (invalid syntax)
+   - CORRECT: Use newlines: "statement1\nfor col in cols:\n    statement2"
+   - If you need multiple statements, use semicolons for simple statements, but for loops need separate lines
 
 **CRITICAL - PRESERVE ALL COLUMNS:**
 ⚠️ DO NOT drop or remove columns unless the user EXPLICITLY asks to remove them.
