@@ -282,7 +282,26 @@ class PythonExecutor:
                 parts.append(current_part)
             code = '\n'.join(parts)
         
-        # 4. Fix common syntax errors
+        # 4. Fix method chains split across lines (common LLM error)
+        # Pattern: method()\n['key'] or method()\n.method2()
+        # Join them back to single line
+        lines = code.split('\n')
+        fixed_lines = []
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            # Check if next line starts with [ or . (method chain continuation)
+            if i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                if next_line.startswith('[') or next_line.startswith('.'):
+                    # Join them together
+                    line = line + next_line
+                    i += 1  # Skip next line since we merged it
+            fixed_lines.append(line)
+            i += 1
+        code = '\n'.join(fixed_lines)
+        
+        # 5. Fix common syntax errors
         code = re.sub(r'\[None\)\*\(', '[None] * (', code)  # [None)*( -> [None] * (
         code = re.sub(r'\bgrouped\.co\b', 'grouped.columns', code)  # grouped.co -> grouped.columns
         code = re.sub(r'\bfor_in\b', 'for _ in', code)  # for_in -> for _ in
