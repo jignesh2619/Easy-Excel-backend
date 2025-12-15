@@ -288,11 +288,48 @@ class PythonExecutor:
         # In this case, we can safely convert to df.iloc[i, ...]
         # But this is rare - usually column names are used
         
-        # IMPORTANT: Don't restructure semicolon-separated code if it's valid Python
-        # The code might be all on one line with semicolons, which is valid Python syntax
-        # Only restructure if it's actually malformed (e.g., "statement) for i in range(...)" at end)
-        # For now, we'll skip the automatic restructuring of semicolon-separated code
-        # and just ensure df.loc is replaced with df.iloc (already done above)
+        # IMPORTANT: Fix semicolon-separated code that contains for loops
+        # For loops cannot be on the same line with semicolons - they need to be on separate lines
+        # Pattern: "statement1; statement2; for col in ...: statement3"
+        # This needs to be split into multiple lines with proper indentation
+        if ';' in code and re.search(r';\s*for\s+\w+\s+in\s+', code):
+            # Split by semicolons, but preserve for loops with proper indentation
+            parts = []
+            current_part = ''
+            in_for_loop = False
+            indent_level = 0
+            
+            # Split by semicolons, but be careful with for loops
+            for segment in code.split(';'):
+                segment = segment.strip()
+                if not segment:
+                    continue
+                
+                # Check if this segment starts a for loop
+                if re.match(r'for\s+\w+\s+in\s+', segment):
+                    # If we have accumulated code, add it first
+                    if current_part:
+                        parts.append(current_part)
+                        current_part = ''
+                    # Start the for loop
+                    in_for_loop = True
+                    parts.append(segment)
+                elif in_for_loop:
+                    # This is part of the for loop body - add with indentation
+                    parts.append('    ' + segment)
+                else:
+                    # Regular statement - accumulate or add
+                    if current_part:
+                        current_part += '; ' + segment
+                    else:
+                        current_part = segment
+            
+            # Add any remaining accumulated code
+            if current_part:
+                parts.append(current_part)
+            
+            # Join with newlines
+            code = '\n'.join(parts)
         
         # Fix common syntax errors
         # Fix: for_in -> for _ in (common LLM mistake)
