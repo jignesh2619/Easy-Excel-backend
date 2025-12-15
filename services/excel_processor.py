@@ -778,9 +778,9 @@ class ExcelProcessor:
                             operation_executed = True
         
         # Only run default cleaning steps if:
-        # 1. User explicitly requested general cleaning, OR
-        # 2. No specific operations were executed
-        if user_requested_general_cleaning or (not operation_executed and len(operations) == 0):
+        # 1. User explicitly requested general cleaning
+        # DO NOT run default cleaning if operations array is empty - user may not want any cleaning
+        if user_requested_general_cleaning:
             # Remove duplicates
             rows_before_dup = len(self.df)
             self.df = self.df.drop_duplicates()
