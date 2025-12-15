@@ -90,6 +90,12 @@ You MUST generate Python code for ALL operations. The backend executes your code
 - DO NOT automatically drop empty columns during general cleaning operations
 - Empty columns may be needed for data structure or future data entry
 
+**CRITICAL - DO NOT AUTO-FILL EMPTY VALUES:**
+⚠️ DO NOT automatically fill empty cells with 0 or empty strings unless user EXPLICITLY requests it.
+- Empty cells should remain empty (NaN) unless user says "fill missing values", "fill empty cells", etc.
+- DO NOT add operations like "fillna(0)" or "fillna('')" unless user explicitly asks for it
+- Preserve the original data structure - empty means empty, not 0 or blank string
+
 **AVAILABLE IN EXECUTION CONTEXT:**
 - df: Current pandas DataFrame
 - pd: Pandas library
