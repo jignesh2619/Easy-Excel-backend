@@ -189,8 +189,17 @@ Example 5: "Sum revenue for India in January"
 Example 6: "Group similar items in columns E, F, G" (preserve original data, add grouped results to new columns)
 {
   "operations": [{
-    "python_code": "grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index(); grouped.columns = ['Item.1', 'Size.1', 'Quantity.1']; df = pd.concat([df, grouped], axis=1)",
-    "description": "Group by Item and Size, sum quantities, add results to new columns",
+    "python_code": "grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index(); grouped.columns = ['Item.1', 'Size.1', 'Quantity.1']; original_len = len(df); grouped_len = len(grouped); if grouped_len < original_len: empty_rows = pd.DataFrame({col: [None] * (original_len - grouped_len) for col in grouped.columns}); grouped = pd.concat([grouped, empty_rows], ignore_index=True); df = pd.concat([df, grouped], axis=1)",
+    "description": "Group by Item and Size, sum quantities, add results to new columns preserving original rows",
+    "result_type": "dataframe"
+  }]
+}
+
+Example 6b: "Group similar items in columns E, F, G" (alternative: add grouped results as new rows at bottom)
+{
+  "operations": [{
+    "python_code": "grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index(); grouped.columns = ['Item.1', 'Size.1', 'Quantity.1']; original_cols = df.columns.tolist(); for col in original_cols: if col not in grouped.columns: grouped[col] = None; grouped = grouped[original_cols + ['Item.1', 'Size.1', 'Quantity.1']]; df = pd.concat([df, grouped], ignore_index=True)",
+    "description": "Group by Item and Size, add grouped results as new rows at bottom with original columns",
     "result_type": "dataframe"
   }]
 }
@@ -208,16 +217,24 @@ Example 7: "Group similar items" (if user wants to replace data with grouped res
 When user says "group similar items", "total quantity of each product", "combine duplicate rows", "group data of similar ones", etc.:
 
 CRITICAL: Check if user specifies target columns (e.g., "in E, F, G", "in columns E F G"):
-- If YES: PRESERVE original data and ADD grouped results to specified columns
-  - Example: "group similar items in E, F, G" → Keep all original columns, add grouped results to columns E, F, G
-  - Use: grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index(); grouped.columns = ['ColumnE', 'ColumnF', 'ColumnG']; df = pd.concat([df, grouped], axis=1)
-  - This preserves ALL original rows and columns, adds grouped summary to new columns
+- If YES: PRESERVE original data and ADD grouped results
+  - Option 1: Add as new columns (pad with None to match row count)
+    - grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index()
+    - grouped.columns = ['Item.1', 'Size.1', 'Quantity.1']
+    - Pad grouped to match original row count, then: df = pd.concat([df, grouped], axis=1)
+  
+  - Option 2: Add as new rows at bottom (preserve all original rows, append grouped summary)
+    - grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index()
+    - grouped.columns = ['Item.1', 'Size.1', 'Quantity.1']
+    - Fill missing original columns in grouped with None, then: df = pd.concat([df, grouped], ignore_index=True)
+  
+  - DEFAULT: Use Option 2 (add as new rows) to preserve all original data clearly
 
-- If NO target columns specified: User might want to REPLACE data with grouped results
+- If NO target columns specified: User wants to REPLACE data with grouped results only
   - Use: df = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index()
   - This creates a new dataframe with only grouped results
 
-DEFAULT BEHAVIOR: If user says "group in column X, Y, Z" or mentions specific columns, ALWAYS preserve original data and add to those columns.
+KEY RULE: When user says "group in column X, Y, Z", ALWAYS preserve ALL original rows and columns, then add grouped results.
 
 Example 6: "Give me sum of column Jan" (user wants total row added)
 {
