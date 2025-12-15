@@ -373,6 +373,10 @@ class PythonExecutor:
             code = '\n'.join(parts)
         
         # Fix common syntax errors
+        # Fix: [None)*( -> [None] * ( (common LLM mistake with list multiplication)
+        code = re.sub(r'\[None\)\*\(', '[None] * (', code)
+        # Fix: grouped.co -> grouped.columns (truncated column reference)
+        code = re.sub(r'\bgrouped\.co\b', 'grouped.columns', code)
         # Fix: for_in -> for _ in (common LLM mistake)
         code = re.sub(r'\bfor_in\b', 'for _ in', code)
         # Fix: for _in -> for _ in (space before in but missing after _)
