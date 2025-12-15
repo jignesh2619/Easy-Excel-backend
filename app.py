@@ -287,6 +287,11 @@ async def process_file(
             output_path = file_manager.output_dir / output_filename
             processed_file_path = processor.save_processed_file(str(output_path))
             
+            # Convert dataframe to JSON format for preview (same as normal processing)
+            import pandas as pd
+            import numpy as np
+            processed_data = processor.df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
+            
             return ProcessFileResponse(
                 status="success",
                 processed_file_url=f"/download/{Path(processed_file_path).name}",
@@ -294,6 +299,7 @@ async def process_file(
                 summary=["File loaded successfully. No processing performed."],
                 row_count=len(processor.df),
                 columns=processor.df.columns.tolist(),
+                processed_data=processed_data,
                 formatting_metadata={}
             )
         
