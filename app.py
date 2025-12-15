@@ -288,11 +288,12 @@ async def process_file(
             processed_file_path = processor.save_processed_file(str(output_path))
             
             return ProcessFileResponse(
-                file_url=f"/download/{Path(processed_file_path).name}",
+                status="success",
+                processed_file_url=f"/download/{Path(processed_file_path).name}",
                 chart_url=None,
                 summary=["File loaded successfully. No processing performed."],
-                rows=len(processor.df),
-                columns=len(processor.df.columns),
+                row_count=len(processor.df),
+                columns=processor.df.columns.tolist(),
                 formatting_metadata={}
             )
         
