@@ -239,6 +239,10 @@ class PythonExecutor:
         """
         code = python_code.strip()
         
+        # CRITICAL: Replace literal \n escape sequences with actual newlines
+        # This handles cases where LLM generates code with literal \n instead of actual newlines
+        code = code.replace('\\n', '\n')
+        
         # Remove markdown code blocks (```python ... ```)
         if code.startswith('```'):
             # Find the closing ```
