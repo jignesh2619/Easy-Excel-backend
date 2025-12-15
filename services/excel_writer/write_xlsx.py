@@ -76,6 +76,26 @@ class XlsxWriter:
                 for col_idx, col_name in enumerate(df.columns):
                     cell_value = df.iloc[row_idx, col_idx]
                     
+                    # CRITICAL: Ensure cell_value is a scalar, not an array or DataFrame
+                    # Convert arrays/DataFrames to string representation
+                    if isinstance(cell_value, (pd.DataFrame, pd.Series, np.ndarray)):
+                        logger.warning(f"Cell ({row_idx}, {col_name}) contains {type(cell_value).__name__}, converting to string")
+                        if isinstance(cell_value, pd.Series):
+                            # For Series, take first value or convert to string
+                            if len(cell_value) > 0:
+                                cell_value = cell_value.iloc[0] if not pd.isna(cell_value.iloc[0]) else None
+                            else:
+                                cell_value = None
+                        elif isinstance(cell_value, pd.DataFrame):
+                            # For DataFrame, convert to string representation
+                            cell_value = str(cell_value)
+                        elif isinstance(cell_value, np.ndarray):
+                            # For numpy array, flatten if 1D, convert to string if multi-dimensional
+                            if cell_value.ndim == 1 and len(cell_value) > 0:
+                                cell_value = cell_value[0]
+                            else:
+                                cell_value = str(cell_value)
+                    
                     # Check if this cell should have conditional formatting
                     cell_format = None
                     lookup_key = (row_idx, col_name)
@@ -110,7 +130,7 @@ class XlsxWriter:
                             else:
                                 worksheet.write_string(excel_row, col_idx, str(cell_value))
                     except Exception as e:
-                        logger.error(f"Error writing cell ({excel_row}, {col_idx}): {e}")
+                        logger.error(f"Error writing cell ({excel_row}, {col_idx}): {e}, value type: {type(cell_value)}, value: {cell_value}")
                         # Fallback: write without format
                         worksheet.write_string(excel_row, col_idx, str(cell_value) if not pd.isna(cell_value) else "")
             
