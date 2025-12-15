@@ -76,8 +76,8 @@ class FileManager:
         
         # Stream file directly to disk without loading into memory
         with open(file_path, "wb") as f:
-            # Reset file pointer in case it was already read
-            await file.seek(0)
+            # Reset file pointer in case it was already read (seek is synchronous)
+            file.file.seek(0)
             # Stream chunks of 64KB for efficient memory usage
             while True:
                 chunk = await file.read(65536)  # 64KB chunks
@@ -86,7 +86,7 @@ class FileManager:
                 f.write(chunk)
         
         # Reset file pointer for potential reuse
-        await file.seek(0)
+        file.file.seek(0)
         
         # Check if file is empty
         if file_path.stat().st_size == 0:
