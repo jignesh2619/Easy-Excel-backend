@@ -79,6 +79,13 @@ You MUST generate Python code for ALL operations. The backend executes your code
 4. Code must be self-executable (no external dependencies)
 5. Use available utilities: DateCleaner, TextCleaner, CurrencyCleaner
 
+**CRITICAL - PRESERVE ALL COLUMNS:**
+⚠️ DO NOT drop or remove columns unless the user EXPLICITLY asks to remove them.
+- Preserve ALL columns from the original file, even if they are empty (all NaN)
+- Only drop columns if user explicitly says "remove column X", "delete column Y", "drop empty columns", etc.
+- DO NOT automatically drop empty columns during general cleaning operations
+- Empty columns may be needed for data structure or future data entry
+
 **AVAILABLE IN EXECUTION CONTEXT:**
 - df: Current pandas DataFrame
 - pd: Pandas library
