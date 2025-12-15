@@ -180,6 +180,9 @@ class PythonExecutor:
             'np': np,
             'result': None,
             
+            # Standard library modules
+            're': re,
+            
             # Date/Time
             'datetime': datetime,
             'date': date,
