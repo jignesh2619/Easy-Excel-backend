@@ -5,6 +5,7 @@ Uses xlsxwriter for writing Excel files with formatting support.
 """
 
 import pandas as pd
+import numpy as np
 import xlsxwriter
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
@@ -76,25 +77,17 @@ class XlsxWriter:
                 for col_idx, col_name in enumerate(df.columns):
                     cell_value = df.iloc[row_idx, col_idx]
                     
-                    # CRITICAL: Ensure cell_value is a scalar, not an array or DataFrame
-                    # Convert arrays/DataFrames to string representation
+                    # Note: DataFrame should already be normalized before reaching here
+                    # But add safety check for any edge cases
                     if isinstance(cell_value, (pd.DataFrame, pd.Series, np.ndarray)):
-                        logger.warning(f"Cell ({row_idx}, {col_name}) contains {type(cell_value).__name__}, converting to string")
-                        if isinstance(cell_value, pd.Series):
-                            # For Series, take first value or convert to string
-                            if len(cell_value) > 0:
-                                cell_value = cell_value.iloc[0] if not pd.isna(cell_value.iloc[0]) else None
-                            else:
-                                cell_value = None
-                        elif isinstance(cell_value, pd.DataFrame):
-                            # For DataFrame, convert to string representation
+                        logger.warning(f"Cell ({row_idx}, {col_name}) contains {type(cell_value).__name__} - DataFrame should be normalized before writing")
+                        # Quick fix: convert to string
+                        if isinstance(cell_value, pd.Series) and len(cell_value) > 0:
+                            cell_value = cell_value.iloc[0] if not pd.isna(cell_value.iloc[0]) else None
+                        elif isinstance(cell_value, np.ndarray) and cell_value.ndim == 1 and len(cell_value) > 0:
+                            cell_value = cell_value[0]
+                        else:
                             cell_value = str(cell_value)
-                        elif isinstance(cell_value, np.ndarray):
-                            # For numpy array, flatten if 1D, convert to string if multi-dimensional
-                            if cell_value.ndim == 1 and len(cell_value) > 0:
-                                cell_value = cell_value[0]
-                            else:
-                                cell_value = str(cell_value)
                     
                     # Check if this cell should have conditional formatting
                     cell_format = None
