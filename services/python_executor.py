@@ -288,18 +288,20 @@ class PythonExecutor:
         # In this case, we can safely convert to df.iloc[i, ...]
         # But this is rare - usually column names are used
         
-        # IMPORTANT: Fix semicolon-separated code that contains for loops
-        # For loops cannot be on the same line with semicolons - they need to be on separate lines
+        # IMPORTANT: Fix semicolon-separated code that contains for loops or if statements
+        # For loops and if statements cannot be on the same line with semicolons - they need to be on separate lines
         # Pattern: "statement1; statement2; for col in ...: statement3"
+        # Pattern: "statement1; if condition: statement2"
         # This needs to be split into multiple lines with proper indentation
-        if ';' in code and re.search(r';\s*for\s+\w+\s+in\s+', code):
-            # Split by semicolons, but preserve for loops with proper indentation
+        if ';' in code and (re.search(r';\s*for\s+\w+\s+in\s+', code) or re.search(r';\s*if\s+', code) or re.search(r';\s*elif\s+', code) or re.search(r';\s*else\s*:', code)):
+            # Split by semicolons, but preserve for loops and if statements with proper indentation
             parts = []
             current_part = ''
-            in_for_loop = False
+            in_block = False
+            block_type = None  # 'for', 'if', 'elif', 'else'
             indent_level = 0
             
-            # Split by semicolons, but be careful with for loops
+            # Split by semicolons, but be careful with for loops and if statements
             for segment in code.split(';'):
                 segment = segment.strip()
                 if not segment:
@@ -312,10 +314,45 @@ class PythonExecutor:
                         parts.append(current_part)
                         current_part = ''
                     # Start the for loop
-                    in_for_loop = True
+                    in_block = True
+                    block_type = 'for'
+                    indent_level = 0
                     parts.append(segment)
-                elif in_for_loop:
-                    # This is part of the for loop body - add with indentation
+                # Check if this segment starts an if statement
+                elif re.match(r'if\s+', segment):
+                    # If we have accumulated code, add it first
+                    if current_part:
+                        parts.append(current_part)
+                        current_part = ''
+                    # Start the if block
+                    in_block = True
+                    block_type = 'if'
+                    indent_level = 0
+                    parts.append(segment)
+                # Check if this segment starts an elif statement
+                elif re.match(r'elif\s+', segment):
+                    # If we have accumulated code, add it first
+                    if current_part:
+                        parts.append(current_part)
+                        current_part = ''
+                    # Start the elif block (same indent as if)
+                    in_block = True
+                    block_type = 'elif'
+                    indent_level = 0
+                    parts.append(segment)
+                # Check if this segment starts an else statement
+                elif re.match(r'else\s*:', segment):
+                    # If we have accumulated code, add it first
+                    if current_part:
+                        parts.append(current_part)
+                        current_part = ''
+                    # Start the else block (same indent as if)
+                    in_block = True
+                    block_type = 'else'
+                    indent_level = 0
+                    parts.append(segment)
+                elif in_block:
+                    # This is part of the block body - add with indentation
                     parts.append('    ' + segment)
                 else:
                     # Regular statement - accumulate or add
