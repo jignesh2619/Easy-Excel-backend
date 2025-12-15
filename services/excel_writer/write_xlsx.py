@@ -119,11 +119,21 @@ class XlsxWriter:
             
             # Auto-adjust column widths (do this BEFORE applying static formatting to avoid conflicts)
             for i, col in enumerate(df.columns):
-                max_length = max(
-                    df[col].astype(str).map(len).max(),
-                    len(str(col))
-                )
-                worksheet.set_column(i, i, min(max_length + 2, 50))
+                try:
+                    # Ensure we're working with a Series, not a nested structure
+                    col_data = df[col]
+                    if isinstance(col_data, pd.Series):
+                        max_length = max(
+                            col_data.astype(str).map(len).max() if len(col_data) > 0 else 0,
+                            len(str(col))
+                        )
+                    else:
+                        # Fallback if column is not a Series
+                        max_length = len(str(col)) + 2
+                    worksheet.set_column(i, i, min(max_length + 2, 50))
+                except Exception as e:
+                    logger.warning(f"Error setting column width for column '{col}': {e}")
+                    worksheet.set_column(i, i, 15)  # Default width
             
             # Apply static formatting rules (non-conditional) - do this last
             if formatting_rules:

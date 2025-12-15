@@ -1006,6 +1006,22 @@ class ExcelProcessor:
             
             logger.info(f"💾 Static formatting rules: {len(formatting_rules)}, Conditional rules: {len(conditional_rules)}")
             
+            # Validate DataFrame structure before writing
+            # Ensure all columns are proper Series (not nested structures)
+            import pandas as pd
+            for col in self.df.columns:
+                if not isinstance(self.df[col], pd.Series):
+                    logger.warning(f"Column '{col}' is not a Series, converting...")
+                    self.df[col] = pd.Series(self.df[col], dtype=object)
+            
+            # Ensure DataFrame is clean (no nested DataFrames as values)
+            # Convert any non-scalar values to strings
+            for col in self.df.columns:
+                for idx in self.df.index:
+                    value = self.df.at[idx, col]
+                    if isinstance(value, (pd.DataFrame, pd.Series)):
+                        self.df.at[idx, col] = str(value)
+            
             # Write with formatting
             writer.write(
                 df=self.df,
