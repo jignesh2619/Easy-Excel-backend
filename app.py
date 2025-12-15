@@ -276,9 +276,7 @@ async def process_file(
         # If prompt is empty or just whitespace, skip processing and return file as-is
         prompt = prompt.strip() if prompt else ""
         
-        # Also skip if prompt is a default/automatic prompt from frontend
-        default_prompts = ["clean this data", "clean this data...", "clean", "clean data"]
-        if not prompt or prompt.lower() in default_prompts:
+        if not prompt:
             # No prompt provided - just load and return file without any processing
             logger.info("No prompt provided - returning file as-is without processing")
             processor = ExcelProcessor(temp_file_path)
