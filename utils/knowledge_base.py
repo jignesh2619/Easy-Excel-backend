@@ -417,34 +417,27 @@ KNOWLEDGE_BASE = {
 def get_knowledge_base_summary() -> str:
     """
     Get a formatted summary of the knowledge base for inclusion in prompts
+    Optimized for token efficiency - only essential information
     
     Returns:
         Formatted string with key knowledge base information
     """
     summary = []
     
-    # Task definitions
+    # Task definitions - only most common ones
     summary.append("TASK DEFINITIONS:")
-    for task, info in KNOWLEDGE_BASE["task_definitions"].items():
-        summary.append(f"\n**{task.upper()}**:")
-        summary.append(f"  Description: {info['description']}")
-        summary.append(f"  Output: {info['output']}")
-        summary.append(f"  Use when: {', '.join(info['use_when'][:3])}")
-        summary.append(f"  Keywords: {', '.join(info['keywords'][:5])}")
+    common_tasks = ["clean", "filter", "group_by", "formula"]
+    for task in common_tasks:
+        if task in KNOWLEDGE_BASE["task_definitions"]:
+            info = KNOWLEDGE_BASE["task_definitions"][task]
+            summary.append(f"\n**{task.upper()}**: {info['description']}")
+            summary.append(f"  Keywords: {', '.join(info['keywords'][:3])}")
     
-    # Common patterns
+    # Common patterns - only top 2
     summary.append("\n\nCOMMON PATTERNS:")
-    for pattern_name, pattern_info in KNOWLEDGE_BASE["common_patterns"].items():
-        summary.append(f"\nPattern: '{pattern_info['pattern']}'")
-        summary.append(f"  ✓ CORRECT: task='{pattern_info['correct_task']}', chart_type='{pattern_info['correct_chart_type']}'")
-        summary.append(f"  ✗ INCORRECT: task='{pattern_info['incorrect_task']}'")
-        summary.append(f"  Reason: {pattern_info['reason']}")
-    
-    # Validation rules
-    summary.append("\n\nVALIDATION RULES:")
-    for rule in KNOWLEDGE_BASE["validation_rules"][:3]:  # Top 3 most important
-        if "rule" in rule:
-            summary.append(f"  - {rule['rule']}")
+    patterns = list(KNOWLEDGE_BASE["common_patterns"].items())[:2]
+    for pattern_name, pattern_info in patterns:
+        summary.append(f"  '{pattern_info['pattern']}' → task='{pattern_info['correct_task']}'")
     
     return "\n".join(summary)
 

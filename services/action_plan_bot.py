@@ -748,14 +748,14 @@ class ActionPlanBot:
             
             if self.training_data_loader:
                 try:
-                    training_examples = self.training_data_loader.get_examples_for_prompt(user_prompt, limit=3)
+                    training_examples = self.training_data_loader.get_examples_for_prompt(user_prompt, limit=1)
                     all_examples.extend(training_examples)
                 except Exception:
                     pass
             
             if self.feedback_learner:
                 try:
-                    feedback_examples = self.feedback_learner.get_similar_successful_examples(user_prompt, limit=2)
+                    feedback_examples = self.feedback_learner.get_similar_successful_examples(user_prompt, limit=1)
                     for ex in feedback_examples:
                         all_examples.append({
                             "prompt": ex["prompt"],
@@ -765,11 +765,17 @@ class ActionPlanBot:
                     pass
             
             if all_examples:
+                # Limit to 2 examples max to reduce prompt size
                 similar_examples_text = "\n\nFEW-SHOT LEARNING EXAMPLES:\n"
-                for i, ex in enumerate(all_examples[:5], 1):
+                for i, ex in enumerate(all_examples[:2], 1):
+                    # Truncate action plan to essential parts only
+                    action_plan_summary = {
+                        "operations": ex['action_plan'].get('operations', [])[:2],  # Only first 2 operations
+                        "task": ex['action_plan'].get('task', 'execute')
+                    }
                     similar_examples_text += f"\nExample {i}:\n"
-                    similar_examples_text += f"User: {ex['prompt']}\n"
-                    similar_examples_text += f"Response: {json.dumps(ex['action_plan'], indent=2)}\n"
+                    similar_examples_text += f"User: {ex['prompt'][:100]}\n"  # Truncate prompt to 100 chars
+                    similar_examples_text += f"Response: {json.dumps(action_plan_summary, indent=2)}\n"
             
             sample_explanation_text = ""
             if sample_explanation:

@@ -32,7 +32,7 @@ class SampleSelector:
         - Captures edge cases and outliers
     """
 
-    def __init__(self, max_rows: int = 20, min_rows: int = 10):
+    def __init__(self, max_rows: int = 10, min_rows: int = 5):
         self.max_rows = max_rows
         self.min_rows = min_rows
 
