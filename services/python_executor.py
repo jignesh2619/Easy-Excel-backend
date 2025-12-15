@@ -83,9 +83,40 @@ class PythonExecutor:
             # Step 5: Update dataframe
             if 'df' in exec_globals:
                 self.df = exec_globals['df']
+                
+                # CRITICAL: Validate DataFrame structure after operations
+                # Ensure all cell values are scalars (not arrays, DataFrames, or Series)
+                import numpy as np
+                for col in self.df.columns:
+                    for idx in self.df.index:
+                        value = self.df.at[idx, col]
+                        if isinstance(value, (pd.DataFrame, pd.Series, np.ndarray)):
+                            logger.warning(f"Found non-scalar value in cell ({idx}, {col}): {type(value).__name__}, converting...")
+                            if isinstance(value, pd.Series):
+                                # Take first value from Series
+                                if len(value) > 0:
+                                    self.df.at[idx, col] = value.iloc[0] if not pd.isna(value.iloc[0]) else None
+                                else:
+                                    self.df.at[idx, col] = None
+                            elif isinstance(value, pd.DataFrame):
+                                # Convert DataFrame to string
+                                self.df.at[idx, col] = str(value)
+                            elif isinstance(value, np.ndarray):
+                                # Flatten 1D arrays, convert multi-dimensional to string
+                                if value.ndim == 1 and len(value) > 0:
+                                    self.df.at[idx, col] = value[0]
+                                else:
+                                    self.df.at[idx, col] = str(value)
+                
                 # Ensure index is reset after operations
                 if not self.df.index.equals(pd.RangeIndex(len(self.df))):
                     self.df = self.df.reset_index(drop=True)
+                
+                # Ensure all columns are proper Series
+                for col in self.df.columns:
+                    if not isinstance(self.df[col], pd.Series):
+                        logger.warning(f"Column '{col}' is not a Series after operation, fixing...")
+                        self.df[col] = pd.Series(self.df[col], index=self.df.index, dtype=object)
                 
                 # Debug: Log DataFrame state after execution
                 if 'Student Name' in self.df.columns:
