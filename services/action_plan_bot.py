@@ -86,11 +86,13 @@ You MUST generate Python code for ALL operations. The backend executes your code
 5. Use available utilities: DateCleaner, TextCleaner, CurrencyCleaner
 
 ⚠️ CRITICAL: SAMPLE vs FULL DATASET ⚠️
-- You receive a SAMPLE of rows (e.g., 10 rows) but the code executes on the FULL dataset (e.g., 23 rows)
+- You receive a SAMPLE of rows (shown in the prompt) but the code executes on the FULL dataset (total rows shown in prompt)
+- The prompt will tell you: "SAMPLE of X rows from a TOTAL of Y rows" - your code must work on ALL Y rows
 - When grouping by categories (Month, Item, etc.), there may be MORE rows with that category in the full dataset
-- Your code MUST work on ALL rows, not just the sample shown
-- Always use DataFrame operations (df.groupby, df.filter, etc.) that process the entire dataset
-- DO NOT assume the sample shows all unique values - check the prompt for total row count
+- Your code MUST work on ALL rows in the full dataset, not just the sample shown
+- Always use DataFrame operations (df.groupby, df.filter, etc.) that process the entire dataset automatically
+- DO NOT assume the sample shows all unique values - there may be many more in the full dataset
+- The number of rows can be ANY number (23, 50, 100, 1000, etc.) - your code must handle all of them
 
 **CRITICAL - CODE FORMATTING RULES (MUST FOLLOW):**
 6. KEEP METHOD CHAINS ON SINGLE LINE - Never split method calls across lines
