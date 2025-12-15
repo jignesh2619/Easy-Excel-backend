@@ -57,6 +57,44 @@ class FileManager:
         
         return str(file_path)
     
+    async def save_uploaded_file_streaming(self, file, filename: str) -> str:
+        """
+        Save uploaded file using streaming (more efficient for large files)
+        
+        Args:
+            file: FastAPI UploadFile object
+            filename: Original filename
+            
+        Returns:
+            Full path to saved file
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Preserve original extension
+        file_ext = Path(filename).suffix
+        safe_filename = f"{timestamp}_{Path(filename).stem}{file_ext}"
+        file_path = self.temp_dir / safe_filename
+        
+        # Stream file directly to disk without loading into memory
+        with open(file_path, "wb") as f:
+            # Reset file pointer in case it was already read
+            await file.seek(0)
+            # Stream chunks of 64KB for efficient memory usage
+            while True:
+                chunk = await file.read(65536)  # 64KB chunks
+                if not chunk:
+                    break
+                f.write(chunk)
+        
+        # Reset file pointer for potential reuse
+        await file.seek(0)
+        
+        # Check if file is empty
+        if file_path.stat().st_size == 0:
+            file_path.unlink()
+            raise ValueError("Uploaded file is empty")
+        
+        return str(file_path)
+    
     def save_processed_file(self, file_content: bytes, original_filename: str) -> str:
         """
         Save processed file to output directory

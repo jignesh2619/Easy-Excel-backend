@@ -213,12 +213,10 @@ async def process_file(
         if not is_valid:
             raise HTTPException(status_code=400, detail=error)
         
-        # 2. Save uploaded file
+        # 2. Save uploaded file (streaming for better performance)
         try:
-            file_content = await file.read()
-            if not file_content or len(file_content) == 0:
-                raise HTTPException(status_code=400, detail="Uploaded file is empty")
-            temp_file_path = file_manager.save_uploaded_file(file_content, file.filename)
+            # Use streaming to avoid loading entire file into memory
+            temp_file_path = await file_manager.save_uploaded_file_streaming(file, file.filename)
         except Exception as e:
             logger.error(f"Error saving uploaded file: {str(e)}")
             raise HTTPException(status_code=400, detail=f"Failed to save uploaded file: {str(e)}")
