@@ -1248,11 +1248,14 @@ Use this sample to:
 ✓ Make accurate decisions based on actual values, not assumptions
 ✓ See how all column names appear with real data
 
-⚠️ WHEN GENERATING CODE:
+⚠️ WHEN GENERATING CODE (APPLIES TO ALL OPERATIONS):
 - Your code will run on ALL {actual_total_rows} rows, not just the {sample_row_count} shown
+- This applies to ALL operations: grouping, filtering, sorting, cleaning, formulas, calculations, etc.
 - If grouping by a category (e.g., "Month"), there may be MORE rows with that category in the full dataset
-- Always use operations that work on the entire DataFrame (df.groupby, df.filter, etc.)
-- DO NOT assume the sample shows all unique values - there may be more in the full dataset
+- If filtering by a condition, the full dataset may have MORE matching rows than shown in the sample
+- If calculating totals/sums/averages, they must include ALL {actual_total_rows} rows, not just the sample
+- Always use DataFrame operations that work on the entire dataset automatically (df.groupby, df.filter, df.sort_values, df.apply, etc.)
+- DO NOT assume the sample shows all unique values, all matching rows, or all data - there may be many more in the full dataset
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

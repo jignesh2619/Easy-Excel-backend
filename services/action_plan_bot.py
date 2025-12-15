@@ -85,13 +85,16 @@ You MUST generate Python code for ALL operations. The backend executes your code
 4. Code must be self-executable (no external dependencies)
 5. Use available utilities: DateCleaner, TextCleaner, CurrencyCleaner
 
-⚠️ CRITICAL: SAMPLE vs FULL DATASET ⚠️
+⚠️ CRITICAL: SAMPLE vs FULL DATASET (APPLIES TO ALL OPERATIONS) ⚠️
 - You receive a SAMPLE of rows (shown in the prompt) but the code executes on the FULL dataset (total rows shown in prompt)
 - The prompt will tell you: "SAMPLE of X rows from a TOTAL of Y rows" - your code must work on ALL Y rows
+- This applies to ALL operations: grouping, filtering, sorting, cleaning, formulas, calculations, aggregations, etc.
 - When grouping by categories (Month, Item, etc.), there may be MORE rows with that category in the full dataset
+- When filtering by conditions, there may be MORE matching rows in the full dataset than shown in the sample
+- When calculating totals/sums/averages, they must include ALL rows in the full dataset, not just the sample
 - Your code MUST work on ALL rows in the full dataset, not just the sample shown
-- Always use DataFrame operations (df.groupby, df.filter, etc.) that process the entire dataset automatically
-- DO NOT assume the sample shows all unique values - there may be many more in the full dataset
+- Always use DataFrame operations (df.groupby, df.filter, df.sort_values, df.apply, df.sum, df.mean, etc.) that process the entire dataset automatically
+- DO NOT assume the sample shows all unique values, all matching rows, or complete data - there may be many more in the full dataset
 - The number of rows can be ANY number (23, 50, 100, 1000, etc.) - your code must handle all of them
 
 **CRITICAL - CODE FORMATTING RULES (MUST FOLLOW):**
