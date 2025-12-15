@@ -981,10 +981,17 @@ Include "operations" array with "python_code" for each operation.
         if not isinstance(normalized["operations"], list):
             normalized["operations"] = []
         
-        # Validate each operation has python_code
+        # Validate and extract python_code for each operation
         for op in normalized["operations"]:
-            if "python_code" not in op:
-                logger.warning(f"Operation missing python_code: {op}")
+            # If python_code is missing or empty, try to extract from execution_instructions
+            if "python_code" not in op or not op.get("python_code", "").strip():
+                # Check if execution_instructions has code
+                exec_instructions = op.get("execution_instructions", {})
+                if isinstance(exec_instructions, dict) and "code" in exec_instructions:
+                    op["python_code"] = exec_instructions["code"]
+                    logger.info(f"✅ Extracted python_code from execution_instructions.code")
+                elif "python_code" not in op:
+                    logger.warning(f"Operation missing python_code: {op}")
         
         return normalized
 
