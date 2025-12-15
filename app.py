@@ -282,14 +282,10 @@ async def process_file(
             processor = ExcelProcessor(temp_file_path)
             processor.load_data()
             
-            # Save unprocessed file
+            # Save unprocessed file using processor's save method
             output_filename = f"processed_{Path(file.filename).stem}.xlsx"
-            processed_file_path = file_manager.save_processed_file(
-                processor.df,
-                output_filename,
-                formatting_rules=[],
-                conditional_formatting_rules=[]
-            )
+            output_path = file_manager.output_dir / output_filename
+            processed_file_path = processor.save_processed_file(str(output_path))
             
             return ProcessFileResponse(
                 file_url=f"/download/{Path(processed_file_path).name}",
