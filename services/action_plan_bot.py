@@ -64,14 +64,24 @@ You MUST generate Python code for ALL operations. The backend executes your code
       "result_type": "dataframe"
     }
   ],
-  "conditional_format": {
-    "format_type": "contains_text",
-    "config": {
-      "column": "ColumnName",
-      "text": "search text",
-      "bg_color": "#FFFF00"
+  "conditional_format": [
+    {
+      "format_type": "text_equals",
+      "config": {
+        "column": "ColumnName",
+        "text": "HR",
+        "bg_color": "#FF0000"
+      }
+    },
+    {
+      "format_type": "text_equals",
+      "config": {
+        "column": "ColumnName",
+        "text": "IT",
+        "bg_color": "#FFFF00"
+      }
     }
-  },
+  ],
   "format": {
     "range": {"column": "ColumnName"},
     "bold": true
@@ -125,6 +135,13 @@ You MUST generate Python code for ALL operations. The backend executes your code
 - DO NOT add operations like "fillna(0)" or "fillna('')" unless user explicitly asks for it
 - Preserve the original data structure - empty means empty, not 0 or blank string
 
+**CRITICAL - CONDITIONAL FORMATTING (HIGHLIGHT CELLS):**
+⚠️ DO NOT create temporary columns for conditional formatting - conditional formatting ONLY applies visual formatting, it does NOT modify data.
+- Conditional formatting does NOT require Python operations - ONLY return conditional_format JSON
+- For multiple formats (e.g., "highlight HR red and IT yellow"), use conditional_format as an ARRAY with multiple entries
+- DO NOT add columns like "_hr_contains_hr_" or any temporary flag columns for conditional formatting
+- Example: "Highlight cells HR with Red and IT with yellow" → Return conditional_format array with two entries (HR=red, IT=yellow), NO operations
+
 **AVAILABLE IN EXECUTION CONTEXT:**
 - df: Current pandas DataFrame
 - pd: Pandas library
@@ -133,6 +150,18 @@ You MUST generate Python code for ALL operations. The backend executes your code
 - datetime: Date/time functions
 - Basic functions: abs, round, min, max, sum, str, len, list, range
 
+**PHONE NUMBER FORMATTING (CRITICAL - MUST USE TextCleaner.format_phone_numbers):**
+When user requests phone number formatting (e.g., "format phone numbers to (XXX) XXX-XXXX", "standardize phone numbers", "format phone numbers"):
+- ALWAYS use TextCleaner.format_phone_numbers() method - This is the ONLY correct way
+- CORRECT: df = TextCleaner.format_phone_numbers(df, 'Phone Number')
+- CORRECT: df = TextCleaner.format_phone_numbers(df, ['Phone', 'Mobile', 'Phone Number'])
+- CORRECT: df = TextCleaner.format_phone_numbers(df, 'Phone')  # Use actual column name from dataset
+- This method automatically handles ALL formats: 555-123-4567, 555.123.4567, (555) 123-4567, +1-555-123-4567, +15554445566, 5551234567, 555 123 4567, etc.
+- DO NOT write custom code with str.replace() or regex for phone formatting
+- DO NOT use apply() with lambda for phone formatting
+- DO NOT assign to 're' variable (causes scoping errors)
+- The method extracts digits and formats to (XXX) XXX-XXXX automatically
+
 **HOW TO USE CLEANING UTILITIES (CRITICAL - USE STATIC METHODS):**
 
 TextCleaner - Use static methods, returns modified DataFrame:
@@ -140,6 +169,19 @@ TextCleaner - Use static methods, returns modified DataFrame:
 - CORRECT: df = TextCleaner.trim_whitespace(df, ['Col1', 'Col2'])  # Multiple columns
 - CORRECT: df = TextCleaner.normalize_case(df, 'ColumnName', case='lower')
 - CORRECT: df = TextCleaner.remove_special_characters(df, 'ColumnName')
+- CORRECT: df = TextCleaner.format_phone_numbers(df, 'Phone Number')  # Format to (XXX) XXX-XXXX
+- CORRECT: df = TextCleaner.format_phone_numbers(df, ['Phone', 'Mobile'])  # Multiple columns
+
+**TEXT SPLITTING (CRITICAL - USE TextCleaner.split_column OR pandas str.split):**
+When user requests to split text from one column into multiple columns (e.g., "split column A into D and E", "split text of col a and fill in D and e"):
+- ALWAYS use TextCleaner.split_column() method OR pandas str.split() - DO NOT use re module
+- CORRECT: df = TextCleaner.split_column(df, 'ColumnA', ' ', ['ColumnD', 'ColumnE'])
+- CORRECT: df[['D', 'E']] = df['A'].astype(str).str.split(' ', n=1, expand=True)  # Split on space into 2 columns
+- CORRECT: split_cols = df['A'].astype(str).str.split(' ', expand=True); df['D'] = split_cols[0]; df['E'] = split_cols[1]
+- DO NOT use re.split() or re module for text splitting - use str.split() instead
+- DO NOT assign to 're' variable anywhere in the code
+- If separator is not specified, assume space ' ' as default separator
+
 - WRONG: df['ColumnName'] = TextCleaner(df['ColumnName'])  # DON'T DO THIS
 - WRONG: for c in cols: df[c] = TextCleaner(df[c])  # DON'T DO THIS
 
@@ -165,6 +207,25 @@ Example 1: "Clean text columns" or "Clean all text data"
     "result_type": "dataframe"
   }]
 }
+
+Example 1b: "Format phone numbers to (XXX) XXX-XXXX" or "standardize phone numbers"
+{
+  "operations": [{
+    "python_code": "phone_cols = [col for col in df.columns if 'phone' in col.lower() or 'mobile' in col.lower() or 'contact' in col.lower()]; df = TextCleaner.format_phone_numbers(df, phone_cols[0]) if phone_cols else TextCleaner.format_phone_numbers(df, df.columns[1] if len(df.columns) > 1 else df.columns[0])",
+    "description": "Format phone numbers to (XXX) XXX-XXXX format",
+    "result_type": "dataframe"
+  }]
+}
+
+Example 1c: "split text of col a and fill in D and e" or "split column A into D and E"
+{
+  "operations": [{
+    "python_code": "split_data = df[df.columns[0]].astype(str).str.split(' ', n=1, expand=True); df['D'] = split_data[0]; df['E'] = split_data[1] if len(split_data.columns) > 1 else ''",
+    "description": "Split first column by space into columns D and E using pandas str.split()",
+    "result_type": "dataframe"
+  }]
+}
+Note: For text splitting, ALWAYS use pandas str.split() method (e.g., df['Col'].astype(str).str.split(' ', expand=True)) - NEVER use re.split() or re module. DO NOT assign to 're' variable.
 
 **CORRECT way to clean text columns:**
 - Get text columns: text_cols = df.select_dtypes(include=['object']).columns.tolist()
@@ -203,11 +264,20 @@ Example 3: "Calculate total revenue"
   }]
 }
 
-Example 4: "If revenue > 1000, mark as High"
+Example 4: "If revenue > 1000, mark as High" (single column condition)
 {
   "operations": [{
     "python_code": "df['Status'] = df['Revenue'].apply(lambda x: 'High' if x > 1000 else 'Low')",
     "description": "Mark status based on revenue",
+    "result_type": "new_column"
+  }]
+}
+
+Example 4b: "Fill column based on multiple column conditions" (GENERAL PATTERN)
+{
+  "operations": [{
+    "python_code": "df['Result'] = df.apply(lambda row: 'Value1' if (condition_on_col1) or (condition_on_col2) else 'Value2', axis=1)",
+    "description": "Fill column based on multiple column conditions",
     "result_type": "new_column"
   }]
 }
@@ -247,6 +317,36 @@ Example 7: "Group similar items" (if user wants to replace data with grouped res
     "result_type": "dataframe"
   }]
 }
+
+Example 8: "Highlight cells HR with Red and IT with yellow" (multiple conditional formats - NO operations, NO temporary columns)
+{
+  "operations": [],
+  "conditional_format": [
+    {
+      "format_type": "text_equals",
+      "config": {
+        "column": "Title",
+        "text": "HR",
+        "bg_color": "#FF0000"
+      }
+    },
+    {
+      "format_type": "text_equals",
+      "config": {
+        "column": "Title",
+        "text": "IT",
+        "bg_color": "#FFFF00"
+      }
+    }
+  ]
+}
+
+CRITICAL FOR CONDITIONAL FORMATTING:
+- Conditional formatting is VISUAL ONLY - it does NOT modify the dataframe
+- DO NOT create temporary columns (like "_hr_contains_hr_") for conditional formatting
+- DO NOT add Python operations to create flag columns
+- ONLY return conditional_format JSON (as single object or array for multiple formats)
+- The system automatically detects matching cells and applies formatting - no columns needed
 
 **IMPORTANT - GROUPING SIMILAR ROWS:**
 When user says "group similar items", "total quantity of each product", "combine duplicate rows", "group data of similar ones", etc.:
@@ -716,6 +816,30 @@ PATTERN RECOGNITION PRINCIPLES:
 - Analyze sample data FIRST to determine the correct extraction pattern
 - Use column name semantics to guide extraction type
 - Handle edge cases: missing values, different formats in same column, special characters
+
+**MULTI-COLUMN CONDITIONAL LOGIC (GENERAL PATTERN):**
+
+When filling a column based on conditions from multiple columns, use this PATTERN:
+
+PATTERN 1 - df.apply with lambda (works for ANY number of columns and complex logic):
+df['Result'] = df.apply(lambda row: value_if_true if (condition) else value_if_false, axis=1)
+- Use 'or' for "ANY condition is true" (e.g., if ANY score < 60)
+- Use 'and' for "ALL conditions are true" (e.g., if BOTH scores >= 60)
+- For multiple conditions: (row['Col1'] < 60) or (row['Col2'] < 60)
+- Access columns via row['ColumnName'] or row[df.columns[index]]
+
+PATTERN 2 - np.where for simple two-value conditions:
+df['Result'] = np.where((df['Col1'] < 60) | (df['Col2'] < 60), 'Value1', 'Value2')
+
+PATTERN 3 - Column letters (B, C, E) to actual names:
+col_b = df.columns[1]; col_c = df.columns[2]; target_col = df.columns[4] if len(df.columns) > 4 else 'Result'
+Then use: df.apply(lambda row: ..., axis=1) with row[col_b], row[col_c], etc.
+
+KEY RULES:
+- ALWAYS use df.apply(lambda row: ..., axis=1) for multi-column row-by-row operations
+- Convert to numeric with pd.to_numeric(row['Col'], errors='coerce') if needed
+- DO NOT use regex (re) or str methods for numeric comparisons
+- Apply this pattern to ANY multi-column conditional task (Pass/Fail, Grade, Status, Category, etc.)
 
 **CRITICAL RULES:**
 1. ALWAYS generate python_code in operations (never leave empty)

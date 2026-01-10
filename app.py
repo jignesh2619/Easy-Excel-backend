@@ -341,9 +341,8 @@ async def process_file(
                 file_manager.delete_file(temp_file_path)
                 raise HTTPException(status_code=400, detail=error)
         
-        # 7. Process file
-        processor = ExcelProcessor(temp_file_path)
-        processor.load_data()
+        # 7. Process file (reuse already-loaded df for performance)
+        processor = ExcelProcessor(temp_file_path, df=df)
         
         # Check if user mentioned cleaning operations in prompt
         cleaning_keywords = ['remove duplicates', 'clean', 'fix formatting', 'handle missing', 'duplicate', 'remove empty', 'normalize']

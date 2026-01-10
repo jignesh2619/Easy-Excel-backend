@@ -279,7 +279,7 @@ class ChartBuilder:
         ax.grid(axis='y', alpha=0.3, linestyle='--')
     
     def _create_line_chart(self, ax, df: pd.DataFrame, x_column: str, y_column: str, title: Optional[str]):
-        """Create line chart"""
+        """Create line chart - handles all data types (numeric, string, mixed, float, int)"""
         # Prepare data
         if y_column == "Count":
             data = df.groupby(x_column).size().reset_index(name=y_column)
@@ -294,24 +294,97 @@ class ChartBuilder:
             x_data = x_data[valid_mask]
             y_data = pd.Series([y for y, valid in zip(y_data, valid_mask) if valid])
         
-        # Sort by x if numeric or convert to numeric index
-        if pd.api.types.is_numeric_dtype(x_data):
-            sorted_indices = x_data.argsort()
-            x_data = x_data.iloc[sorted_indices]
-            y_data = y_data.iloc[sorted_indices]
+        # Check if we have valid numeric data for y
+        if len(y_data) == 0:
+            # Try alternative: convert entire column to numeric
+            try:
+                y_data = pd.to_numeric(df[y_column], errors='coerce')
+                valid_mask = ~y_data.isna()
+                x_data = df[x_column][valid_mask]
+                y_data = y_data[valid_mask]
+            except Exception:
+                pass
+            
+            if len(y_data) == 0:
+                raise ValueError(
+                    f"No valid numeric data found in column '{y_column}'. "
+                    f"Column contains: {df[y_column].dtype} type data. "
+                    f"Sample values: {list(df[y_column].head(5))}. "
+                    f"Please ensure the Y-axis column contains numeric values (numbers or numeric strings)."
+                )
+        
+        # Determine if x_data is numeric (int, float) or categorical (string, object)
+        is_x_numeric = pd.api.types.is_numeric_dtype(x_data)
+        
+        # Prepare data for plotting
+        if is_x_numeric:
+            # Numeric x-axis: use values directly, sort them
+            try:
+                x_numeric = pd.to_numeric(x_data, errors='coerce')
+                valid_mask = ~x_numeric.isna()
+                x_plot_values = x_numeric[valid_mask]
+                y_plot_values = y_data[valid_mask]
+                # Sort by x values
+                sorted_indices = x_plot_values.argsort()
+                x_plot = x_plot_values.iloc[sorted_indices]
+                y_plot = y_plot_values.iloc[sorted_indices]
+                # For numeric axes, let matplotlib handle formatting automatically
+                use_auto_formatting = True
+            except Exception:
+                # If numeric conversion fails, treat as categorical
+                is_x_numeric = False
+                use_auto_formatting = False
+        
+        if not is_x_numeric or not use_auto_formatting:
+            # Categorical x-axis: use integer positions, preserve original values as labels
+            x_labels_list = [str(x) if pd.notna(x) else '' for x in x_data]
+            positions = list(range(len(x_labels_list)))
+            x_plot = positions
+            y_plot = y_data
+            use_auto_formatting = False
         
         # Create line chart
-        ax.plot(x_data, y_data, marker='o', linewidth=2.5, markersize=8, 
-                color='#00A878', markerfacecolor='#00c98c', markeredgecolor='#008c67')
+        try:
+            # Plot the data - matplotlib accepts any numeric type (int, float, etc.)
+            ax.plot(x_plot, y_plot, marker='o', linewidth=2.5, markersize=8, 
+                    color='#00A878', markerfacecolor='#00c98c', markeredgecolor='#008c67')
+            
+            # Handle x-axis ticks and labels based on data type
+            if use_auto_formatting:
+                # For numeric x-axis: let matplotlib auto-format, but ensure tick positions are set
+                # Convert to list to avoid any pandas Series issues
+                tick_positions = x_plot.tolist() if hasattr(x_plot, 'tolist') else list(x_plot)
+                ax.set_xticks(tick_positions)
+                # Don't set labels manually - let matplotlib format them automatically
+                # This avoids the "must be str or bytes" error
+            else:
+                # For categorical x-axis: set positions and string labels
+                ax.set_xticks(x_plot)
+                # Ensure all labels are strings (handle any type: int, float, str, etc.)
+                string_labels = [str(label) if pd.notna(label) else '' for label in x_labels_list]
+                ax.set_xticklabels(string_labels,
+                                  rotation=45 if len(string_labels) > 10 else 0,
+                                  ha='right' if len(string_labels) > 10 else 'center')
+            
+            # Rotate x-axis labels if there are many data points
+            if len(x_plot) > 10 and use_auto_formatting:
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+        except Exception as e:
+            # Ultimate fallback: use simplest approach that handles all types
+            positions = list(range(len(y_data)))
+            ax.plot(positions, y_data.tolist(), marker='o', linewidth=2.5, markersize=8, 
+                    color='#00A878', markerfacecolor='#00c98c', markeredgecolor='#008c67')
+            ax.set_xticks(positions)
+            # Convert all x values to strings - handles any type (int, float, str, etc.)
+            x_labels_str = [str(x) if pd.notna(x) else '' for x in x_data]
+            ax.set_xticklabels(x_labels_str,
+                              rotation=45 if len(x_labels_str) > 10 else 0,
+                              ha='right' if len(x_labels_str) > 10 else 'center')
         
         # Customize
         ax.set_xlabel(x_column, fontsize=12, fontweight='bold')
         ax.set_ylabel(y_column, fontsize=12, fontweight='bold')
         ax.set_title(title or f"{y_column} over {x_column}", fontsize=14, fontweight='bold', pad=20)
-        
-        # Rotate x-axis labels if needed
-        if len(x_data) > 10:
-            plt.xticks(rotation=45, ha='right')
         
         # Grid
         ax.grid(True, alpha=0.3, linestyle='--')

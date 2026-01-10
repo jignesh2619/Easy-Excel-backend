@@ -33,21 +33,85 @@ from services.dataframe_normalizer import normalize_dataframe
 class ExcelProcessor:
     """Processes Excel/CSV files based on action plans"""
     
-    def __init__(self, file_path: str):
+    def __init__(self, file_path: str, df: Optional[pd.DataFrame] = None):
         """
         Initialize Excel Processor
         
         Args:
             file_path: Path to input Excel/CSV file
+            df: Optional pre-loaded DataFrame (avoids reloading file)
         """
         self.file_path = file_path
-        self.df: Optional[pd.DataFrame] = None
+        self.df: Optional[pd.DataFrame] = df.copy() if df is not None else None
         self.original_df: Optional[pd.DataFrame] = None
         self.summary: List[str] = []
         self.formatting_rules: List[Dict] = []  # Store formatting instructions
         self.formula_result: Optional[Any] = None  # Store formula computation result
         self.file_summary: Optional[Dict] = None  # Store file summary from ExcelSummarizer
         self.tracer = DataTracer()  # Data traceability tracker
+        
+        # If DataFrame provided, initialize from it instead of loading file
+        if df is not None:
+            self._initialize_from_dataframe(df)
+    
+    def _initialize_from_dataframe(self, df: pd.DataFrame):
+        """Initialize processor from pre-loaded DataFrame (performance optimization)"""
+        try:
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            if df is None or df.empty:
+                raise ValueError("DataFrame is None or empty")
+            
+            # Validate DataFrame
+            if not isinstance(df, pd.DataFrame):
+                raise ValueError(f"Expected DataFrame, got {type(df)}")
+            
+            file_ext = Path(self.file_path).suffix.lower()
+            
+            # Limit rows to prevent OOM on 512MB server
+            MAX_ROWS_FOR_PROCESSING = 1000
+            if len(df) > MAX_ROWS_FOR_PROCESSING:
+                original_row_count = len(df)
+                logger.warning(
+                    f"File has {original_row_count} rows, limiting to {MAX_ROWS_FOR_PROCESSING} rows "
+                    f"to prevent memory issues on low-memory servers"
+                )
+                self.df = df.head(MAX_ROWS_FOR_PROCESSING).copy()
+                self.summary.append(
+                    f"⚠️ File limited from {original_row_count} rows to {MAX_ROWS_FOR_PROCESSING} rows "
+                    f"for memory safety"
+                )
+            else:
+                self.df = df.copy()
+            
+            # Keep original copy
+            self.original_df = self.df.copy()
+            self.summary.append(f"Loaded {len(self.df)} rows and {len(self.df.columns)} columns")
+            
+            # Try to load existing formatting rules from Excel file if it exists
+            if file_ext in ['.xlsx', '.xls']:
+                self._load_existing_formatting()
+            
+            # Track data source
+            self.tracer.reset()
+            self.tracer.track_data_source(self.file_path, list(self.df.columns))
+            self.tracer.set_dataframe_state(len(self.df), list(self.df.columns), "before")
+            
+            # Generate summary using new summarizer module
+            try:
+                summarizer = ExcelSummarizer(self.df)
+                self.file_summary = summarizer.generate_summary()
+            except Exception as e:
+                # If summarizer fails, continue without it
+                logger.debug(f"Failed to generate file summary: {e}")
+                self.file_summary = None
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to initialize from DataFrame: {str(e)}")
+            raise
 
     def _extract_columns_from_code(self, code: str) -> List[str]:
         """
@@ -338,6 +402,10 @@ class ExcelProcessor:
             self.original_df = self.df.copy()
             self.summary.append(f"Loaded {len(self.df)} rows and {len(self.df.columns)} columns")
             
+            # Try to load existing formatting rules from Excel file if it exists
+            if file_ext in ['.xlsx', '.xls']:
+                self._load_existing_formatting()
+            
             # Track data source
             self.tracer.reset()
             self.tracer.track_data_source(self.file_path, list(self.df.columns))
@@ -350,6 +418,10 @@ class ExcelProcessor:
             except Exception as e:
                 # If summarizer fails, continue without it
                 self.file_summary = None
+            
+            # Try to load existing formatting rules from Excel file if it exists
+            if file_ext in ['.xlsx', '.xls']:
+                self._load_existing_formatting()
             
             return True
             
@@ -463,8 +535,8 @@ class ExcelProcessor:
             # Handle data operations (Python code execution)
             operations = action_plan.get("operations", [])
             if operations:
-                logger.info(f"🔍 Executing {len(operations)} operations before add_row")
-                logger.info(f"🔍 Operations list: {[op.get('description', 'No description') for op in operations]}")
+                logger.debug(f"🔍 Executing {len(operations)} operations before add_row")
+                logger.debug(f"🔍 Operations list: {[op.get('description', 'No description') for op in operations]}")
                 python_executor = PythonExecutor(self.df)
                 execution_result = python_executor.execute_multiple(operations)
                 self.df = python_executor.get_dataframe()
@@ -474,17 +546,17 @@ class ExcelProcessor:
                 self.df = normalize_dataframe(self.df)
                 
                 # Log columns after operations for debugging
-                logger.info(f"🔍 Columns after operations: {list(self.df.columns)}")
+                logger.debug(f"🔍 Columns after operations: {list(self.df.columns)}")
                 
                 # Debug: Log sample data from Student Name and Contact No. columns
                 if 'Student Name' in self.df.columns:
                     student_name_sample = self.df['Student Name'].head(10).tolist()
                     non_empty_student = self.df['Student Name'].notna().sum()
-                    logger.info(f"🔍 Student Name column: {non_empty_student}/{len(self.df)} non-empty, sample: {student_name_sample}")
+                    logger.debug(f"🔍 Student Name column: {non_empty_student}/{len(self.df)} non-empty, sample: {student_name_sample}")
                 if 'Contact No.' in self.df.columns:
                     contact_sample = self.df['Contact No.'].head(10).tolist()
                     non_empty_contact = self.df['Contact No.'].notna().sum()
-                    logger.info(f"🔍 Contact No. column: {non_empty_contact}/{len(self.df)} non-empty, sample: {contact_sample}")
+                    logger.debug(f"🔍 Contact No. column: {non_empty_contact}/{len(self.df)} non-empty, sample: {contact_sample}")
                 
                 # Track operations and columns used
                 for op in operations:
@@ -531,7 +603,7 @@ class ExcelProcessor:
             
             # Handle add_row (must be after operations to use temporary columns)
             if "add_row" in action_plan:
-                logger.info(f"🔍 Executing add_row, current columns: {list(self.df.columns)}")
+                logger.debug(f"🔍 Executing add_row, current columns: {list(self.df.columns)}")
                 self._execute_add_row(action_plan)
             
             # Handle add_column
@@ -1022,6 +1094,10 @@ class ExcelProcessor:
             )
             
             logger.info(f"✅ File saved successfully: {output_path}")
+            
+            # Save formatting rules as metadata in Excel file for persistence
+            self._save_formatting_metadata(output_path)
+            
             return output_path
             
         except Exception as e:
@@ -1790,10 +1866,10 @@ class ExcelProcessor:
         import logging
         logger = logging.getLogger(__name__)
         
-        logger.info(f"🔍 _execute_conditional_format called with action_plan keys: {list(action_plan.keys())}")
+        logger.debug(f"🔍 _execute_conditional_format called with action_plan keys: {list(action_plan.keys())}")
         conditional_format = action_plan.get("conditional_format", {})
         
-        logger.info(f"🔍 Extracted conditional_format: {conditional_format}, type: {type(conditional_format)}")
+        logger.debug(f"🔍 Extracted conditional_format: {conditional_format}, type: {type(conditional_format)}")
         
         # Handle case where conditional_format is a list
         if isinstance(conditional_format, list):
@@ -1913,8 +1989,8 @@ class ExcelProcessor:
             "cell_formats": {}
         }
         
-        logger.info(f"🔍 get_formatting_metadata called with {len(self.formatting_rules)} formatting rules")
-        logger.info(f"🔍 DataFrame has {len(df)} rows and columns: {list(df.columns)}")
+        logger.debug(f"🔍 get_formatting_metadata called with {len(self.formatting_rules)} formatting rules")
+        logger.debug(f"🔍 DataFrame has {len(df)} rows and columns: {list(df.columns)}")
         
         for rule_idx, rule in enumerate(self.formatting_rules):
             rule_type = rule.get("type")
@@ -2436,5 +2512,83 @@ class ExcelProcessor:
         
         except Exception as e:
             raise RuntimeError(f"Formula execution failed: {str(e)}")
+    
+    def _save_formatting_metadata(self, file_path: str):
+        """Save formatting rules as metadata in Excel file for persistence"""
+        try:
+            import openpyxl
+            import json
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            if not Path(file_path).exists():
+                return
+            
+            try:
+                workbook = openpyxl.load_workbook(file_path)
+                # Store formatting rules as custom property
+                if self.formatting_rules:
+                    rules_json = json.dumps(self.formatting_rules)
+                    # Use workbook properties to store formatting rules
+                    if not hasattr(workbook, 'custom_doc_props'):
+                        from openpyxl.workbook.properties import CustomDocumentProperty
+                        workbook.custom_doc_props = []
+                    
+                    # Remove existing formatting_rules property if it exists
+                    workbook.custom_doc_props = [
+                        prop for prop in workbook.custom_doc_props 
+                        if getattr(prop, 'name', '') != 'formatting_rules'
+                    ]
+                    
+                    # Add new formatting rules property
+                    from openpyxl.workbook.properties import CustomDocumentProperty
+                    prop = CustomDocumentProperty(name='formatting_rules', value=rules_json)
+                    workbook.custom_doc_props.append(prop)
+                    workbook.save(file_path)
+                    logger.info(f"✅ Saved {len(self.formatting_rules)} formatting rules as metadata")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not save formatting metadata: {str(e)}")
+        except ImportError:
+            # openpyxl not available, skip
+            pass
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"⚠️ Error saving formatting metadata: {str(e)}")
+    
+    def _load_existing_formatting(self):
+        """Load existing formatting rules from Excel file metadata"""
+        try:
+            import openpyxl
+            import json
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            if not Path(self.file_path).exists():
+                return
+            
+            try:
+                workbook = openpyxl.load_workbook(self.file_path, read_only=False)
+                # Load formatting rules from custom property
+                if hasattr(workbook, 'custom_doc_props'):
+                    for prop in workbook.custom_doc_props:
+                        if hasattr(prop, 'name') and prop.name == 'formatting_rules':
+                            rules_json = prop.value
+                            if rules_json:
+                                existing_rules = json.loads(rules_json)
+                                if existing_rules:
+                                    # Preserve existing formatting rules
+                                    self.formatting_rules.extend(existing_rules)
+                                    logger.info(f"✅ Loaded {len(existing_rules)} existing formatting rules from file")
+                                    break
+            except Exception as e:
+                logger.debug(f"⚠️ Could not load formatting metadata (file may not have it): {str(e)}")
+        except ImportError:
+            # openpyxl not available, skip
+            pass
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.debug(f"⚠️ Error loading formatting metadata: {str(e)}")
 
 

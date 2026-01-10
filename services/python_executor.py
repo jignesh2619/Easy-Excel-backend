@@ -50,7 +50,7 @@ class PythonExecutor:
         result_type = operation_meta.get("result_type", "dataframe")
         
         # Step 1: Validate code
-        validation_result = self._validate_code(python_code)
+        validation_result = self._validate_code(python_code, description=description)
         if not validation_result["valid"]:
             error_msg = f"Code validation failed: {validation_result['error']}"
             self.errors.append(error_msg)
@@ -60,6 +60,11 @@ class PythonExecutor:
         
         # Use cleaned code if available, otherwise use original
         code_to_execute = validation_result.get("cleaned_code", python_code)
+        
+        # Additional check: Log if code uses 're' module for phone formatting (warning)
+        if 'phone' in description.lower() or 'format' in description.lower():
+            if 're.sub' in code_to_execute or 're.findall' in code_to_execute or 're.match' in code_to_execute:
+                logger.warning(f"⚠️ Generated code uses 're' module for phone formatting - should use TextCleaner.format_phone_numbers() instead:\n{code_to_execute[:800]}")
         
         # Step 2: Prepare execution environment
         exec_globals = self._build_execution_environment()
@@ -110,7 +115,13 @@ class PythonExecutor:
             }
             
         except NameError as e:
-            error_msg = self._handle_name_error(e, python_code)
+            error_str = str(e)
+            # Special handling for 're' variable scoping issues
+            if "'re'" in error_str or "'re' is not defined" in error_str.lower() or "cannot access local variable 're'" in error_str.lower():
+                logger.error(f"❌ 're' scoping error detected in generated code:\n{python_code[:500]}")
+                error_msg = f"Variable 're' scoping error: {error_str}. DO NOT use 're' module for phone formatting. Use TextCleaner.format_phone_numbers() instead. Generated code:\n{python_code[:300]}"
+            else:
+                error_msg = self._handle_name_error(e, python_code)
             self.errors.append(error_msg)
             self.execution_log.append(f"✗ {description}: {error_msg}")
             raise RuntimeError(error_msg)
@@ -120,9 +131,7 @@ class PythonExecutor:
             # Check if this is a drop operation trying to drop non-existent columns
             # If so, handle gracefully (columns might have been dropped already or never created)
             if "drop" in python_code.lower() and ("not found in axis" in error_str or "not found" in error_str.lower()):
-                # Extract column names from error if possible
-                import re
-                # Try to extract column names from error message
+                # Extract column names from error if possible (re is already imported at module level)
                 col_match = re.search(r"\[(.*?)\]", error_str)
                 if col_match:
                     missing_cols = col_match.group(1)
@@ -162,11 +171,34 @@ class PythonExecutor:
             logger.error(f"Execution error: {error_msg}\nCode: {python_code[:200]}")
             raise RuntimeError(error_msg)
             
+        except UnboundLocalError as e:
+            error_str = str(e)
+            # Special handling for 're' variable scoping errors
+            if "cannot access local variable 're'" in error_str.lower() or "local variable 're'" in error_str.lower():
+                logger.error(f"❌ 're' scoping error in generated code:\n{python_code[:1000]}")
+                error_msg = f"Execution failed: Variable 're' scoping error. DO NOT use 're' module for phone formatting. Use TextCleaner.format_phone_numbers() instead. Error: {error_str}\nGenerated code:\n{python_code[:500]}"
+                self.errors.append(error_msg)
+                self.execution_log.append(f"✗ {description}: {error_msg}")
+                logger.error(f"Execution error: {error_msg}")
+                raise RuntimeError(error_msg)
+            else:
+                error_msg = f"Execution failed: {error_str}"
+                self.errors.append(error_msg)
+                self.execution_log.append(f"✗ {description}: {error_msg}")
+                logger.error(f"Execution error: {error_msg}\nCode: {python_code[:200]}")
+                raise RuntimeError(error_msg)
+            
         except Exception as e:
-            error_msg = f"Execution failed: {str(e)}"
+            error_str = str(e)
+            # Check for 're' scoping errors in general Exception catch
+            if "cannot access local variable 're'" in error_str.lower() or "local variable 're'" in error_str.lower():
+                logger.error(f"❌ 're' scoping error in generated code:\n{python_code[:1000]}")
+                error_msg = f"Execution failed: Variable 're' scoping error. DO NOT use 're' module for phone formatting. Use TextCleaner.format_phone_numbers() instead. Error: {error_str}\nGenerated code:\n{python_code[:500]}"
+            else:
+                error_msg = f"Execution failed: {error_str}"
             self.errors.append(error_msg)
             self.execution_log.append(f"✗ {description}: {error_msg}")
-            logger.error(f"Execution error: {error_msg}\nCode: {python_code[:200]}")
+            logger.error(f"Execution error: {error_msg}\nCode: {python_code[:500]}")
             raise RuntimeError(error_msg)
     
     def _build_execution_environment(self) -> Dict[str, Any]:
@@ -180,6 +212,7 @@ class PythonExecutor:
             
             # Standard library modules
             're': re,
+            'regex': re,  # Alternative name to avoid conflicts
             
             # Date/Time
             'datetime': datetime,
@@ -190,6 +223,10 @@ class PythonExecutor:
             'DateCleaner': DateCleaner,
             'CurrencyCleaner': CurrencyCleaner,
             'TextCleaner': TextCleaner,
+            
+            # TextCleaner methods (for convenience)
+            'format_phone_numbers': TextCleaner.format_phone_numbers,
+            'split_column': TextCleaner.split_column,
             
             # Math functions
             'abs': abs,
@@ -309,7 +346,7 @@ class PythonExecutor:
         
         return code.strip()
     
-    def _validate_code(self, python_code: str) -> Dict[str, Any]:
+    def _validate_code(self, python_code: str, description: str = "") -> Dict[str, Any]:
         """
         Validate code before execution - simplified
         
@@ -320,7 +357,7 @@ class PythonExecutor:
         cleaned_code = self._clean_code(python_code)
         
         # Log the cleaned code for debugging
-        logger.info(f"🔍 Cleaned code (first 500 chars): {cleaned_code[:500]}")
+        logger.debug(f"🔍 Cleaned code (first 500 chars): {cleaned_code[:500]}")
         
         # Check if code is empty
         if not cleaned_code or not cleaned_code.strip():
@@ -330,7 +367,41 @@ class PythonExecutor:
         if re.search(r'\bimport\s+\w+|from\s+\w+\s+import', cleaned_code):
             return {"valid": False, "error": "Import statements are not allowed"}
         
-        # Check 2: No dangerous operations
+        # Check 2: Prevent problematic use of 're' module that causes scoping errors
+        # Only block if there's an assignment to 're' (which causes UnboundLocalError)
+        # Allow legitimate use of 're' module (it's in the execution context)
+        lines = cleaned_code.split('\n')
+        problematic_lines = []
+        
+        for i, line in enumerate(lines, 1):
+            line_stripped = line.strip()
+            
+            # CRITICAL: Only block assignments to 're' variable (this causes UnboundLocalError)
+            # Allow using 're' module (re.sub, re.findall, etc.) - it's available in execution context
+            # But if code assigns to 're', Python treats it as local, causing scoping issues
+            
+            # Check for direct assignment: re = ... (this causes UnboundLocalError)
+            # Use word boundary to match 're' as a standalone word, not part of 'result', 'return', etc.
+            # Pattern: \b matches word boundary, ensuring 're' is not part of another word
+            if re.search(r'\bre\s*=', line_stripped):
+                # This is an assignment to 're' variable - problematic!
+                # The \b word boundary ensures it won't match 'result =', 'return =', etc.
+                problematic_lines.append(f"Line {i}: {line_stripped} (assigns to 're' variable - causes scoping errors. Use 'result', 'regex_result', or another variable name instead.)")
+            
+            # Also check for patterns like: for re in ... (loop variable) or re, = ... (tuple unpacking)
+            if re.search(r'\bfor\s+re\s+in\b', line_stripped):
+                problematic_lines.append(f"Line {i}: {line_stripped} (uses 're' as loop variable - causes scoping errors)")
+            if re.search(r'\bre\s*,\s*\w+\s*=\s*', line_stripped):
+                problematic_lines.append(f"Line {i}: {line_stripped} (unpacks to 're' variable - causes scoping errors)")
+        
+        if problematic_lines:
+            logger.error(f"❌ Code assigns to 're' variable which causes scoping errors:\n" + "\n".join(problematic_lines[:5]))
+            return {
+                "valid": False, 
+                "error": f"Code cannot assign to 're' variable (causes scoping errors). For text splitting, use pandas str.split() method (e.g., df['Col'].astype(str).str.split(' ', expand=True)). For phone formatting, use TextCleaner.format_phone_numbers(). For regex operations, use 'result' or 'regex_result' as variable name instead of 're'. Problematic lines:\n" + "\n".join(problematic_lines[:3])
+            }
+        
+        # Check 3: No dangerous operations
         dangerous_patterns = [
             r'\bopen\s*\(', r'\bread\s*\(', r'\bwrite\s*\(',
             r'__file__', r'__import__', r'eval\s*\(', r'exec\s*\(',
@@ -340,7 +411,7 @@ class PythonExecutor:
             if re.search(pattern, cleaned_code):
                 return {"valid": False, "error": f"Dangerous operation detected: {pattern}"}
         
-        # Check 3: Basic syntax validation
+        # Check 4: Basic syntax validation
         try:
             compile(cleaned_code, '<string>', 'exec')
         except SyntaxError as e:
@@ -390,12 +461,13 @@ class PythonExecutor:
                 'pandas': "Use 'pd' instead of 'pandas'",
                 'numpy': "Use 'np' instead of 'numpy'",
                 'DataFrame': "Use 'pd.DataFrame' instead of 'DataFrame'",
+                're': "'re' module is available in the execution environment. Check if code is shadowing it with a local variable assignment.",
             }
             
             if missing_name in suggestions:
                 return f"{error_str}. {suggestions[missing_name]}"
             
-            return f"{error_str}. Available: df, pd, np, DateCleaner, TextCleaner, CurrencyCleaner, and standard Python functions"
+            return f"{error_str}. Available: df, pd, np, re, DateCleaner, TextCleaner, CurrencyCleaner, and standard Python functions"
         
         return str(error)
     
