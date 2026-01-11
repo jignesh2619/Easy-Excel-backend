@@ -187,7 +187,8 @@ When user requests to split text from one column into multiple columns (e.g., "s
 
 DateCleaner - Use static methods, returns modified DataFrame:
 - CORRECT: df = DateCleaner.parse_dates(df, 'DateColumn')
-- CORRECT: df = DateCleaner.normalize_format(df, 'DateColumn', format='YYYY-MM-DD')
+- CORRECT: df = DateCleaner.normalize_dates(df, 'DateColumn', target_format='%m/%d/%Y')  # For MM/DD/YYYY format
+- CORRECT: df = DateCleaner.normalize_dates(df, 'DateColumn', target_format='%Y-%m-%d')  # For YYYY-MM-DD format
 
 CurrencyCleaner - Use static methods, returns modified DataFrame:
 - CORRECT: df = CurrencyCleaner.extract_numeric(df, 'PriceColumn')
@@ -226,6 +227,16 @@ Example 1c: "split text of col a and fill in D and e" or "split column A into D 
   }]
 }
 Note: For text splitting, ALWAYS use pandas str.split() method (e.g., df['Col'].astype(str).str.split(' ', expand=True)) - NEVER use re.split() or re module. DO NOT assign to 're' variable.
+
+Example 1d: "Convert all dates to MM/DD/YYYY format" or "format dates in column B to MM/DD/YYYY"
+{
+  "operations": [{
+    "python_code": "date_col = df.columns[1] if len(df.columns) > 1 else df.columns[0]; df = DateCleaner.normalize_dates(df, date_col, target_format='%m/%d/%Y')",
+    "description": "Convert all dates in Date column to MM/DD/YYYY format",
+    "result_type": "dataframe"
+  }]
+}
+Note: For date formatting, ALWAYS use DateCleaner.normalize_dates() with target_format parameter. Use '%m/%d/%Y' for MM/DD/YYYY, '%Y-%m-%d' for YYYY-MM-DD, etc. The method handles all date formats automatically and preserves original values if parsing fails.
 
 **CORRECT way to clean text columns:**
 - Get text columns: text_cols = df.select_dtypes(include=['object']).columns.tolist()

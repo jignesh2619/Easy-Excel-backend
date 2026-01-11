@@ -22,13 +22,16 @@ class DateCleaner:
         '%Y/%m/%d',
         '%d-%m-%Y',
         '%m-%d-%Y',
+        '%d-%b-%Y',  # For "18-Sep-2024" format
+        '%d-%B-%Y',  # For "18-September-2024" format
+        '%m-%d-%y',  # For "04-20-24" format (2-digit year)
         '%Y.%m.%d',
         '%d.%m.%Y',
         '%m.%d.%Y',
-        '%B %d, %Y',
-        '%d %B %Y',
-        '%b %d, %Y',
-        '%d %b %Y',
+        '%B %d, %Y',  # "November 20, 2024"
+        '%d %B %Y',   # "20 November 2024"
+        '%b %d, %Y',  # "Nov 20, 2024"
+        '%d %b %Y',   # "20 Nov 2024"
         '%Y-%m-%d %H:%M:%S',
         '%m/%d/%Y %H:%M:%S',
         '%d/%m/%Y %H:%M:%S',
@@ -92,10 +95,21 @@ class DateCleaner:
         
         for col in columns:
             if col in df.columns:
+                # Store original values for fallback
+                original_values = df[col].copy()
+                
                 # Parse dates
-                df[col] = DateCleaner.parse_dates(df[col])
-                # Format to target format (as string)
-                df[col] = df[col].dt.strftime(target_format)
+                parsed_dates = DateCleaner.parse_dates(df[col])
+                
+                # Format to target format (as string), but keep original value if parsing failed
+                formatted_dates = parsed_dates.dt.strftime(target_format)
+                
+                # Replace NaT strings with original values (dates that couldn't be parsed)
+                mask = parsed_dates.isna()
+                if mask.any():
+                    formatted_dates[mask] = original_values[mask]
+                
+                df[col] = formatted_dates
         
         return df
     
