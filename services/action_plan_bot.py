@@ -246,16 +246,19 @@ Example 1e: "extract emails from column B and fill in new columns" or "extract e
     "default_value": ""
   },
   "operations": [{
-    "python_code": "notes_col = df.columns[1] if len(df.columns) > 1 else df.columns[0]; df['Email'] = df[notes_col].astype(str).str.extract(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})')[0]",
-    "description": "Extract email addresses from Notes column using regex with capture group",
+    "python_code": "notes_col = df.columns[1] if len(df.columns) > 1 else df.columns[0]; df['Email'] = df[notes_col].astype(str).str.extract(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})', expand=False)",
+    "description": "Extract first email address from Notes column using regex with capture group",
     "result_type": "dataframe"
   }]
 }
-⚠️ CRITICAL: str.extract() REQUIRES capture groups (parentheses) in regex pattern
-- WRONG: .str.extract(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}') ❌ (no capture group - will fail)
-- CORRECT: .str.extract(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})')[0] ✓ (has capture group)
-- Always add [0] after str.extract() to get the first (and only) capture group as a Series
-- Email regex pattern: r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})' (matches standard email formats)
+⚠️ CRITICAL: str.extract() REQUIRES capture groups (parentheses) in the regex pattern ⚠️
+- WRONG: df['Email'] = df['Notes'].str.extract(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}') ❌ (no capture group - will fail with "pattern contains no capture groups")
+- CORRECT: df['Email'] = df['Notes'].astype(str).str.extract(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})', expand=False) ✓ (has capture group)
+- The pattern MUST be wrapped in parentheses: r'(PATTERN)' not r'PATTERN'
+- Use expand=False to get a Series directly (no need for [0])
+- Always use .astype(str) before str.extract() to handle NaN/None values
+- If cell has multiple emails, str.extract() returns the FIRST match (this is correct behavior)
+- If cell has no email, result will be NaN (this is acceptable)
 
 **CORRECT way to clean text columns:**
 - Get text columns: text_cols = df.select_dtypes(include=['object']).columns.tolist()
@@ -775,6 +778,14 @@ When removing or replacing special characters (asterisk, question mark, plus, pa
 
 **EXTRACTION OPERATIONS (GENERALIZED PATTERN RECOGNITION):**
 
+⚠️⚠️⚠️ CRITICAL: str.extract() REQUIRES CAPTURE GROUPS ⚠️⚠️⚠️
+- str.extract() will FAIL with error "pattern contains no capture groups" if regex has no parentheses
+- ALL extraction patterns MUST have capture groups: r'(PATTERN)' not r'PATTERN'
+- WRONG: df['Email'] = df['Notes'].str.extract(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}') ❌
+- CORRECT: df['Email'] = df['Notes'].str.extract(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})')[0] ✓
+- Always use [0] after str.extract() to get the first capture group as a Series
+- This applies to ALL extractions: emails, phone numbers, dates, currency, numbers, text, etc.
+
 When extracting values between columns, follow this pattern recognition workflow:
 
 STEP 1: ANALYZE SOURCE COLUMN FORMAT (from sample data)
@@ -792,15 +803,17 @@ STEP 2: DETERMINE TARGET SEMANTICS (from column name)
 - If target name suggests date but source has mixed → extract date part only
 
 STEP 3: GENERATE EXTRACTION CODE (pattern-based)
-- For numeric extraction: Use str.extract() with regex pattern matching value position
-- Pattern template: df['Target'] = df['Source'].str.extract(r'PATTERN')[0].str.replace(',', '', regex=False).astype(float)
-- ⚠️ CRITICAL: str.extract() REQUIRES capture groups (parentheses) in the regex pattern
-- Pattern MUST have parentheses: r'(PATTERN)' not r'PATTERN'
-- Always add [0] after str.extract() to get the first capture group as a Series
-- Examples:
-  * Email: df['Email'] = df['Notes'].str.extract(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})')[0]
-  * Currency: df['Amount'] = df['Text'].str.extract(r'\\$([\\d,]+)')[0].str.replace(',', '', regex=False).astype(float)
-  * Phone: df['Phone'] = df['Contact'].str.extract(r'(\\d{3}-\\d{3}-\\d{4})')[0]
+⚠️ CRITICAL: str.extract() REQUIRES CAPTURE GROUPS (parentheses) ⚠️
+- str.extract() will FAIL with "pattern contains no capture groups" if pattern has no parentheses
+- Pattern MUST have capture groups: r'PATTERN' → r'(PATTERN)' or r'PREFIX(PATTERN)SUFFIX'
+- ALWAYS use .astype(str) before str.extract() to handle NaN/None values: df['Source'].astype(str).str.extract(...)
+- Use expand=False to get a Series directly (recommended): df['Target'] = df['Source'].astype(str).str.extract(r'(PATTERN)', expand=False)
+- Pattern template: df['Target'] = df['Source'].astype(str).str.extract(r'(PATTERN)', expand=False)
+- For numeric extraction: df['Target'] = df['Source'].astype(str).str.extract(r'(PATTERN)', expand=False).str.replace(',', '', regex=False).astype(float)
+- WRONG: df['Email'] = df['Notes'].str.extract(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}') ❌ (no capture group - will fail)
+- CORRECT: df['Email'] = df['Notes'].astype(str).str.extract(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', expand=False) ✓ (has capture group)
+- If multiple matches exist in one cell, str.extract() returns the FIRST match (this is correct)
+- If no match exists, result will be NaN (this is acceptable - don't try to handle it)
 
 **CRITICAL - EXTRACTING NAMES AND CONTACT NUMBERS FROM MIXED DATA:**
 - When user says "fill name in C and contact in D from column B" or similar:
@@ -833,19 +846,21 @@ STEP 3: GENERATE EXTRACTION CODE (pattern-based)
   - DO NOT use .str.isalpha() or .str.isnumeric() - these fail for strings with spaces or mixed content
   - NEVER use .str.isalpha() for names (fails on strings with spaces like "am Sandier")
   - NEVER use .str.isnumeric() for contact numbers in mixed data (use regex pattern matching instead)
-- Common regex patterns (apply to similar formats):
-  * Currency after separator: r'\\$([\\d,]+(?:\\.\\d+)?)' → remove commas → float
-  * Currency with decimals: r'\\$([\\d.]+)' → float
-  * Number after separator (|, :, -): r'[|:-]\\s*([\\d,]+(?:\\.\\d+)?)' → remove commas → float
-  * Number with commas: r'([\\d,]+)' → remove commas → float
-  * Text before separator: r'^([^|:]+)' or r'(.+?)\\s*[|:]' → string
-  * Date extraction: r'(\\d{4}-\\d{2}-\\d{2})' or r'(\\d{1,2}/\\d{1,2}/\\d{4})' → datetime
-  * Email extraction: r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})' → string (MUST have capture group parentheses)
-- ⚠️ CRITICAL: str.extract() REQUIRES capture groups (parentheses) in the regex pattern
-- WRONG: df['Email'] = df['Notes'].str.extract(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}') ❌ (no capture group)
-- CORRECT: df['Email'] = df['Notes'].str.extract(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})')[0] ✓ (has capture group)
+- Common regex patterns (apply to similar formats) - ALL MUST HAVE CAPTURE GROUPS:
+  * Email extraction: df['Email'] = df['Notes'].astype(str).str.extract(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})', expand=False)
+  * Currency after separator: df['Amount'] = df['Source'].astype(str).str.extract(r'\\$([\\d,]+(?:\\.\\d+)?)', expand=False).str.replace(',', '', regex=False).astype(float)
+  * Currency with decimals: df['Price'] = df['Source'].astype(str).str.extract(r'\\$([\\d.]+)', expand=False).astype(float)
+  * Number after separator (|, :, -): df['Value'] = df['Source'].astype(str).str.extract(r'[|:-]\\s*([\\d,]+(?:\\.\\d+)?)', expand=False).str.replace(',', '', regex=False).astype(float)
+  * Number with commas: df['Number'] = df['Source'].astype(str).str.extract(r'([\\d,]+)', expand=False).str.replace(',', '', regex=False).astype(float)
+  * Text before separator: df['Text'] = df['Source'].astype(str).str.extract(r'^([^|:]+)', expand=False) or df['Text'] = df['Source'].astype(str).str.extract(r'(.+?)\\s*[|:]', expand=False)
+  * Date extraction: df['Date'] = df['Source'].astype(str).str.extract(r'(\\d{4}-\\d{2}-\\d{2})', expand=False) or df['Date'] = df['Source'].astype(str).str.extract(r'(\\d{1,2}/\\d{1,2}/\\d{4})', expand=False)
+  * Phone number: df['Phone'] = df['Source'].astype(str).str.extract(r'(\\d{3}-\\d{3}-\\d{4})', expand=False) or df['Phone'] = df['Source'].astype(str).str.extract(r'(\\(\\d{3}\\)\\s*\\d{3}-\\d{4})', expand=False)
+- ⚠️ CRITICAL RULE: ALL str.extract() patterns MUST have capture groups (parentheses) ⚠️
+- ALWAYS use .astype(str) before str.extract() to handle NaN/None values
+- Use expand=False to get a Series directly (cleaner than [0])
 - Always handle commas: extract → remove commas → convert to float
-- Handle NaN: extraction may fail for some rows (acceptable, will be NaN)
+- Handle NaN: extraction may fail for some rows (acceptable, will be NaN - don't try to handle it)
+- If multiple matches exist in one cell, str.extract() returns the FIRST match (this is correct behavior)
 
 STEP 4: VALIDATION RULE
 - If source column contains formatted data (has separators/currency/text mix) AND target column name suggests single type (Sales, Amount, Name, Date) → MUST extract, not copy

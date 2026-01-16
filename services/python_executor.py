@@ -292,6 +292,37 @@ class PythonExecutor:
         # Remove any remaining ``` markers
         code = re.sub(r'```[a-z]*\n?', '', code)
         
+        # 2.5. Fix str.extract() patterns missing capture groups (CRITICAL FIX)
+        # Pattern: .str.extract(r'PATTERN') -> .str.extract(r'(PATTERN)')
+        # This is a common LLM error that causes "pattern contains no capture groups"
+        # Match .str.extract(r'...') or .str.extract(r"...") patterns without capture groups
+        extract_pattern = re.compile(
+            r'\.str\.extract\s*\(\s*(r[\'"])([^\'"]+?)([\'"])',
+            re.IGNORECASE
+        )
+        
+        def fix_extract_match(match):
+            quote_start = match.group(1)  # r' or r"
+            pattern_content = match.group(2)  # The pattern content
+            quote_end = match.group(3)  # ' or "
+            
+            # Check if pattern already has balanced capture groups
+            # Simple check: if it has ( and ) and they're balanced, assume it's fine
+            if '(' in pattern_content and ')' in pattern_content:
+                # Check if parentheses are balanced (simple check)
+                open_count = pattern_content.count('(')
+                close_count = pattern_content.count(')')
+                if open_count == close_count and open_count > 0:
+                    return match.group(0)  # Already has capture groups, don't modify
+            
+            # Wrap pattern in capture group
+            fixed = f".str.extract({quote_start}({pattern_content}){quote_end}"
+            logger.warning(f"🔧 Fixed str.extract() pattern missing capture group: {match.group(0)[:80]} → {fixed[:80]}")
+            return fixed
+        
+        # Replace all matches
+        code = extract_pattern.sub(fix_extract_match, code)
+        
         # 3. Fix for/if statements on same line with semicolons (CRITICAL - Python syntax requirement)
         if ';' in code and (re.search(r';\s*for\s+\w+\s+in\s+', code) or re.search(r';\s*if\s+', code) or re.search(r';\s*elif\s+', code) or re.search(r';\s*else\s*:', code)):
             parts = []
