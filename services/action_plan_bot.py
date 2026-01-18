@@ -959,16 +959,26 @@ KEY RULES:
 - If user wants to combine existing data horizontally (as new columns), check if the data is already in `df` or if it's a restructuring operation
 - Most likely: User wants to combine data that's already in `df` horizontally (axis=1) - this might already be done or might require identifying separate "table" regions
 
-**CORRECT - Vertical stacking (if you have separate DataFrames to combine):**
-⚠️ THIS REQUIRES FIRST LOADING/IDENTIFYING THE SEPARATE TABLES FROM `df` OR FILE
-- If tables are in separate sheets, you cannot access them - only current sheet is in `df`
-- If tables are regions in current `df`, split them first, then: df = pd.concat([table1, table2, table3, table4, table5], ignore_index=True)
+**IMPORTANT LIMITATIONS:**
+- The execution environment ONLY has a single `df` variable
+- You CANNOT reference `df1`, `df2`, `df3`, `df4`, `df5` - these DO NOT EXIST
+- If user says "combine all 5 tables" and you think you need multiple DataFrames, you must work with the single `df` that exists
+- If tables are in separate Excel sheets, only the CURRENT sheet is loaded in `df` - other sheets are not accessible
 
-**CORRECT - Horizontal combination (combining as new columns within same df):**
-⚠️ WORK WITH THE SINGLE `df` - cannot reference df1, df2, etc.
-- If data is already in `df` as separate column groups, you might just need to reorder: df = df[col_list]
-- If you need to combine multiple datasets horizontally but only have one `df`, you may need to clarify with user or assume data is already structured
-- Example (if splitting df into parts first): part1 = df.iloc[:, 0:5]; part2 = df.iloc[:, 5:10]; df = pd.concat([part1, part2], axis=1)
+**POSSIBLE INTERPRETATIONS WHEN USER SAYS "COMBINE ALL 5 TABLES IN NEW COLUMNS":**
+1. Data is already in `df` as separate column groups - just reorganize: df = df[reordered_col_list]
+2. Data is in `df` but needs to be split into parts first - then: part1 = df.iloc[:, start1:end1]; part2 = df.iloc[:, start2:end2]; ...; df = pd.concat([part1, part2, part3, part4, part5], axis=1)
+3. User means "combine existing columns" - might already be done or needs column reordering
+
+**CORRECT EXAMPLE - If splitting df into parts first (horizontal combination):**
+⚠️ FIRST CREATE PARTS FROM THE SINGLE `df`, THEN COMBINE
+{
+  "operations": [{
+    "python_code": "part1 = df.iloc[:, 0:3]; part2 = df.iloc[:, 3:6]; part3 = df.iloc[:, 6:9]; part4 = df.iloc[:, 9:12]; part5 = df.iloc[:, 12:15]; df = pd.concat([part1, part2, part3, part4, part5], axis=1)",
+    "description": "Combine 5 table regions from df as new columns (horizontal combination)",
+    "result_type": "dataframe"
+  }]
+}
 
 **CRITICAL FOR VERTICAL STACKING:**
 → After combining, columns may have mixed types (object dtype) - NEVER apply numeric aggregation functions (.mean(), .sum(), .median(), etc.) to object columns
