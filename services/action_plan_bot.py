@@ -917,24 +917,50 @@ KEY RULES:
 12. CRITICAL: When removing/replacing special characters (*, ?, +, etc.), ALWAYS use regex=False to avoid regex errors
 
 **WHEN USER ASKS TO COMBINE/STACK MULTIPLE TABLES:**
-- User: "combine all 5 tables into one stacked dataset"
+
+⚠️ CRITICAL: PAY ATTENTION TO KEYWORDS - "new column" vs "stack" vs "merge" mean DIFFERENT things:
+
+**CASE 1: Vertical stacking (concatenating rows - adds MORE ROWS):**
+- User: "combine all 5 tables into one stacked dataset" (no mention of "new column")
 - User: "stack all tables vertically"
-- User: "merge all tables into one"
-→ These mean: Concatenate multiple DataFrames vertically using pd.concat([df1, df2, df3, ...], ignore_index=True)
-→ CRITICAL: After combining, columns may have mixed types (object dtype) - NEVER apply numeric aggregation functions (.mean(), .sum(), .median(), etc.) to object columns
+- User: "merge all tables into one" (if context suggests rows)
+→ These mean: Concatenate multiple DataFrames VERTICALLY (axis=0) - adds rows
+→ Use: pd.concat([df1, df2, df3, df4, df5], ignore_index=True)
+→ Result: More rows, same columns
+
+**CASE 2: Horizontal combination (concatenating columns - adds MORE COLUMNS):**
+- User: "combine all 5 tables into one stacked dataset and give them in new column"
+- User: "combine tables in new columns"
+- User: "put all tables in new columns"
+- User: "merge tables side by side"
+→ These mean: Concatenate multiple DataFrames HORIZONTALLY (axis=1) - adds columns
+→ Use: df = pd.concat([df1, df2, df3, df4, df5], axis=1)
+→ Result: Same rows (or aligned), more columns
+
+**CORRECT - Vertical stacking (combining rows):**
+{
+  "operations": [{
+    "python_code": "df = pd.concat([df1, df2, df3, df4, df5], ignore_index=True)",
+    "description": "Combine all 5 tables into one stacked dataset (vertical stacking)",
+    "result_type": "dataframe"
+  }]
+}
+
+**CORRECT - Horizontal combination (combining as new columns):**
+{
+  "operations": [{
+    "python_code": "df = pd.concat([df1, df2, df3, df4, df5], axis=1)",
+    "description": "Combine all 5 tables as new columns (horizontal combination)",
+    "result_type": "dataframe"
+  }]
+}
+
+**CRITICAL FOR VERTICAL STACKING:**
+→ After combining, columns may have mixed types (object dtype) - NEVER apply numeric aggregation functions (.mean(), .sum(), .median(), etc.) to object columns
 → ALWAYS check data type before aggregation: df.select_dtypes(include=[np.number]) for numeric columns
 → If you need to aggregate after combining, use: numeric_cols = df.select_dtypes(include=[np.number]).columns; df.groupby(...)[numeric_cols].mean()
 → WRONG: df.groupby(...).mean() ❌ (may fail on object columns)
 → CORRECT: numeric_cols = df.select_dtypes(include=[np.number]).columns; df.groupby(...)[numeric_cols].mean() ✓ (only numeric columns)
-
-**CORRECT - Combining multiple tables:**
-{
-  "operations": [{
-    "python_code": "df = pd.concat([df1, df2, df3, df4, df5], ignore_index=True)",
-    "description": "Combine all 5 tables into one stacked dataset",
-    "result_type": "dataframe"
-  }]
-}
 
 **CORRECT - Aggregating after combining (only numeric columns):**
 {
