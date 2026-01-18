@@ -14,7 +14,10 @@ import os
 import traceback
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date
+from pandas import Timestamp
+import pandas as pd
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -111,6 +114,33 @@ try:
 except ValueError as e:
     print(f"Warning: {e}")
     llm_agent = None
+
+
+def convert_datetime_to_string(obj):
+    """
+    Recursively convert datetime, date, and Timestamp objects to strings
+    for JSON serialization.
+    
+    Args:
+        obj: Object to convert (can be dict, list, or scalar)
+    
+    Returns:
+        Object with datetime objects converted to strings
+    """
+    if isinstance(obj, Timestamp):
+        # Convert pandas Timestamp to ISO format string, handling NaT
+        if pd.isna(obj):
+            return None
+        return obj.strftime('%Y-%m-%d %H:%M:%S')
+    elif isinstance(obj, (datetime, date)):
+        # Convert datetime/date to ISO format string
+        return obj.isoformat() if obj else None
+    elif isinstance(obj, dict):
+        return {key: convert_datetime_to_string(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_datetime_to_string(item) for item in obj]
+    else:
+        return obj
 
 
 # Request/Response models
@@ -242,6 +272,8 @@ async def process_file(
             sample_df = sample_result.dataframe
             sample_explanation = sample_result.explanation
             sample_data = sample_df.to_dict("records")
+            # Convert datetime objects to strings for JSON serialization
+            sample_data = convert_datetime_to_string(sample_data)
             
             import json
             data_json = json.dumps(sample_data)
@@ -291,6 +323,8 @@ async def process_file(
             import pandas as pd
             import numpy as np
             processed_data = processor.df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
+            # Convert datetime objects to strings for JSON serialization
+            processed_data = convert_datetime_to_string(processed_data)
             
             return ProcessFileResponse(
                 status="success",
@@ -409,6 +443,8 @@ async def process_file(
         preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
         # Replace NaN/None values with null for proper JSON serialization
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
+        # Convert datetime objects to strings for JSON serialization
+        processed_data = convert_datetime_to_string(processed_data)
         columns = list(processed_df.columns)
         row_count = len(processed_df)
         
@@ -639,6 +675,8 @@ async def process_data(
             sample_df = sample_result.dataframe
             sample_explanation = sample_result.explanation
             sample_data = sample_df.to_dict("records")
+            # Convert datetime objects to strings for JSON serialization
+            sample_data = convert_datetime_to_string(sample_data)
             
             import json
             data_json = json.dumps(sample_data)
@@ -754,6 +792,8 @@ async def process_data(
         # 12. Convert processed dataframe to JSON for preview
         preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
+        # Convert datetime objects to strings for JSON serialization
+        processed_data = convert_datetime_to_string(processed_data)
         columns = list(processed_df.columns)
         row_count = len(processed_df)
         
