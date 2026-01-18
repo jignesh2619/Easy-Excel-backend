@@ -947,23 +947,28 @@ KEY RULES:
 → Use: df = pd.concat([df1, df2, df3, df4, df5], axis=1)
 → Result: Same rows (or aligned), more columns
 
-**CORRECT - Vertical stacking (combining rows):**
-{
-  "operations": [{
-    "python_code": "df = pd.concat([df1, df2, df3, df4, df5], ignore_index=True)",
-    "description": "Combine all 5 tables into one stacked dataset (vertical stacking)",
-    "result_type": "dataframe"
-  }]
-}
+**⚠️ CRITICAL: EXECUTION ENVIRONMENT ONLY HAS ONE `df` VARIABLE ⚠️**
+- The execution environment ONLY has a single `df` variable - there is NO `df1`, `df2`, `df3`, etc.
+- Available variables: df (single DataFrame), pd, np, re, DateCleaner, TextCleaner, CurrencyCleaner
+- DO NOT generate code that references `df1`, `df2`, `df3`, `df4`, `df5` - these variables DO NOT EXIST
+- If user says "combine all 5 tables" and you need multiple DataFrames, you must WORK WITH THE SINGLE `df` that exists
 
-**CORRECT - Horizontal combination (combining as new columns):**
-{
-  "operations": [{
-    "python_code": "df = pd.concat([df1, df2, df3, df4, df5], axis=1)",
-    "description": "Combine all 5 tables as new columns (horizontal combination)",
-    "result_type": "dataframe"
-  }]
-}
+**WHEN USER SAYS "COMBINE ALL 5 TABLES":**
+- If the tables are already in different parts of the current `df`, you may need to split and recombine
+- If the tables are in separate Excel sheets, they are NOT automatically loaded - only the current sheet is in `df`
+- If user wants to combine existing data horizontally (as new columns), check if the data is already in `df` or if it's a restructuring operation
+- Most likely: User wants to combine data that's already in `df` horizontally (axis=1) - this might already be done or might require identifying separate "table" regions
+
+**CORRECT - Vertical stacking (if you have separate DataFrames to combine):**
+⚠️ THIS REQUIRES FIRST LOADING/IDENTIFYING THE SEPARATE TABLES FROM `df` OR FILE
+- If tables are in separate sheets, you cannot access them - only current sheet is in `df`
+- If tables are regions in current `df`, split them first, then: df = pd.concat([table1, table2, table3, table4, table5], ignore_index=True)
+
+**CORRECT - Horizontal combination (combining as new columns within same df):**
+⚠️ WORK WITH THE SINGLE `df` - cannot reference df1, df2, etc.
+- If data is already in `df` as separate column groups, you might just need to reorder: df = df[col_list]
+- If you need to combine multiple datasets horizontally but only have one `df`, you may need to clarify with user or assume data is already structured
+- Example (if splitting df into parts first): part1 = df.iloc[:, 0:5]; part2 = df.iloc[:, 5:10]; df = pd.concat([part1, part2], axis=1)
 
 **CRITICAL FOR VERTICAL STACKING:**
 → After combining, columns may have mixed types (object dtype) - NEVER apply numeric aggregation functions (.mean(), .sum(), .median(), etc.) to object columns

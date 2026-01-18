@@ -504,6 +504,11 @@ class PythonExecutor:
                 'numpy': "Use 'np' instead of 'numpy'",
                 'DataFrame': "Use 'pd.DataFrame' instead of 'DataFrame'",
                 're': "'re' module is available in the execution environment. Check if code is shadowing it with a local variable assignment.",
+                'df1': "Variable 'df1' does not exist. The execution environment only has a single 'df' variable. If you need to combine multiple tables, work with the single 'df' that's available. For horizontal combination, you may need to split the current df or work with existing columns.",
+                'df2': "Variable 'df2' does not exist. The execution environment only has a single 'df' variable. Work with the single 'df' available.",
+                'df3': "Variable 'df3' does not exist. The execution environment only has a single 'df' variable. Work with the single 'df' available.",
+                'df4': "Variable 'df4' does not exist. The execution environment only has a single 'df' variable. Work with the single 'df' available.",
+                'df5': "Variable 'df5' does not exist. The execution environment only has a single 'df' variable. Work with the single 'df' available.",
             }
             
             if missing_name in suggestions:
