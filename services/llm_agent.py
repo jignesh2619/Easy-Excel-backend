@@ -325,12 +325,29 @@ Answer:"""
             model_used = self.complex_model if is_complex else self.default_model
             logger.info(f"📊 Routing to ChartBot ({model_used}) - Complex: {is_complex}")
             
-            result = chart_bot.generate_chart_plan(
-                user_prompt=user_prompt,
-                available_columns=available_columns,
-                sample_data=sample_data,
-                df=df  # Pass DataFrame for data analysis
-            )
+            # Try with selected model, fallback to mini if rate limited
+            try:
+                result = chart_bot.generate_chart_plan(
+                    user_prompt=user_prompt,
+                    available_columns=available_columns,
+                    sample_data=sample_data,
+                    df=df  # Pass DataFrame for data analysis
+                )
+            except Exception as e:
+                error_str = str(e)
+                # Check if rate limit error and we tried gpt-4o
+                if ("rate_limit" in error_str.lower() or "429" in error_str or "tokens per min" in error_str.lower()) and is_complex and model_used == self.complex_model:
+                    logger.warning(f"⚠️ Rate limit hit for {model_used}, falling back to {self.default_model}")
+                    # Fallback to mini model
+                    result = self.chart_bot_mini.generate_chart_plan(
+                        user_prompt=user_prompt,
+                        available_columns=available_columns,
+                        sample_data=sample_data,
+                        df=df
+                    )
+                else:
+                    # Re-raise other errors
+                    raise
             # Handle multiple charts (generic requests) or single chart
             chart_config = result["chart_config"]
             if "charts" in chart_config:
