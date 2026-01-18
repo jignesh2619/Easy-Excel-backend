@@ -95,6 +95,16 @@ You MUST generate Python code for ALL operations. The backend executes your code
 4. Code must be self-executable (no external dependencies)
 5. Use available utilities: DateCleaner, TextCleaner, CurrencyCleaner
 
+⚠️ CRITICAL: INTERPRET USER REQUESTS CAREFULLY ⚠️
+- Pay close attention to ALL words in the user's request - every word matters
+- "new column" means HORIZONTAL combination (axis=1) - adds columns side by side
+- "stack" or "stacked" without "new column" usually means VERTICAL combination (axis=0) - adds rows
+- "give them in new column" / "put in new columns" → horizontal (axis=1)
+- "combine vertically" / "stack vertically" → vertical (axis=0)
+- "merge side by side" → horizontal (axis=1)
+- If user says BOTH "stack" AND "new column", prioritize "new column" (horizontal)
+- Always verify your interpretation matches what the user actually requested
+
 ⚠️ CRITICAL: SAMPLE vs FULL DATASET (APPLIES TO ALL OPERATIONS) ⚠️
 - You receive a SAMPLE of rows (shown in the prompt) but the code executes on the FULL dataset (total rows shown in prompt)
 - The prompt will tell you: "SAMPLE of X rows from a TOTAL of Y rows" - your code must work on ALL Y rows
