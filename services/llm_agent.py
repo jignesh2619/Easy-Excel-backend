@@ -358,16 +358,35 @@ Answer:"""
             logger.info(f"🔄 Routing to ActionPlanBot ({model_used}) - Complex: {is_complex}")
             logger.info(f"📝 User prompt: {user_prompt}")
             
-            result = action_bot.generate_action_plan(
-                user_prompt=user_prompt,
-                available_columns=available_columns,
-                sample_data=sample_data,
-                sample_explanation=sample_explanation
-            )
-            logger.info(f"📤 ActionPlanBot returned action plan with keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
-            if isinstance(result, dict) and "conditional_format" in result:
-                logger.info(f"✅ Conditional format in result: {result['conditional_format']}")
-            return result
+            # Try with selected model, fallback to mini if rate limited
+            try:
+                result = action_bot.generate_action_plan(
+                    user_prompt=user_prompt,
+                    available_columns=available_columns,
+                    sample_data=sample_data,
+                    sample_explanation=sample_explanation
+                )
+                logger.info(f"📤 ActionPlanBot returned action plan with keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+                if isinstance(result, dict) and "conditional_format" in result:
+                    logger.info(f"✅ Conditional format in result: {result['conditional_format']}")
+                return result
+            except Exception as e:
+                error_str = str(e)
+                # Check if rate limit error and we tried gpt-4o
+                if ("rate_limit" in error_str.lower() or "429" in error_str or "tokens per min" in error_str.lower()) and is_complex and model_used == self.complex_model:
+                    logger.warning(f"⚠️ Rate limit hit for {model_used}, falling back to {self.default_model}")
+                    # Fallback to mini model
+                    result = self.action_plan_bot_mini.generate_action_plan(
+                        user_prompt=user_prompt,
+                        available_columns=available_columns,
+                        sample_data=sample_data,
+                        sample_explanation=sample_explanation
+                    )
+                    logger.info(f"📤 ActionPlanBot (fallback) returned action plan")
+                    return result
+                else:
+                    # Re-raise other errors
+                    raise
     
     def _legacy_interpret_prompt(
         self, 
