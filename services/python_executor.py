@@ -66,6 +66,13 @@ class PythonExecutor:
             if 're.sub' in code_to_execute or 're.findall' in code_to_execute or 're.match' in code_to_execute:
                 logger.warning(f"⚠️ Generated code uses 're' module for phone formatting - should use TextCleaner.format_phone_numbers() instead:\n{code_to_execute[:800]}")
         
+        # Additional check: Warn if mean/sum/median/std might be applied to object columns
+        # This is a common error when combining tables - columns become object dtype
+        aggregation_patterns = [r'\.mean\(\)', r'\.sum\(\)', r'\.median\(\)', r'\.std\(\)', r'\.agg\([^)]*mean', r'\.agg\([^)]*sum']
+        has_aggregation = any(re.search(pattern, code_to_execute) for pattern in aggregation_patterns)
+        if has_aggregation and not any(pattern in code_to_execute for pattern in ['select_dtypes', 'is_numeric_dtype', 'dtype']):
+            logger.warning(f"⚠️ Code contains aggregation functions but may not check for numeric columns. After combining tables, use df.select_dtypes(include=[np.number]) before aggregation:\n{code_to_execute[:800]}")
+        
         # Step 2: Prepare execution environment
         exec_globals = self._build_execution_environment()
         

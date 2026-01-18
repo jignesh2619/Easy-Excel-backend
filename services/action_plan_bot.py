@@ -915,6 +915,41 @@ KEY RULES:
 10. Calculate values in operations first, then reference them in add_row.data using expressions
 11. NEVER assign a list of values directly to df[column] or df.loc - always use pd.concat with DataFrame
 12. CRITICAL: When removing/replacing special characters (*, ?, +, etc.), ALWAYS use regex=False to avoid regex errors
+
+**WHEN USER ASKS TO COMBINE/STACK MULTIPLE TABLES:**
+- User: "combine all 5 tables into one stacked dataset"
+- User: "stack all tables vertically"
+- User: "merge all tables into one"
+→ These mean: Concatenate multiple DataFrames vertically using pd.concat([df1, df2, df3, ...], ignore_index=True)
+→ CRITICAL: After combining, columns may have mixed types (object dtype) - NEVER apply numeric aggregation functions (.mean(), .sum(), .median(), etc.) to object columns
+→ ALWAYS check data type before aggregation: df.select_dtypes(include=[np.number]) for numeric columns
+→ If you need to aggregate after combining, use: numeric_cols = df.select_dtypes(include=[np.number]).columns; df.groupby(...)[numeric_cols].mean()
+→ WRONG: df.groupby(...).mean() ❌ (may fail on object columns)
+→ CORRECT: numeric_cols = df.select_dtypes(include=[np.number]).columns; df.groupby(...)[numeric_cols].mean() ✓ (only numeric columns)
+
+**CORRECT - Combining multiple tables:**
+{
+  "operations": [{
+    "python_code": "df = pd.concat([df1, df2, df3, df4, df5], ignore_index=True)",
+    "description": "Combine all 5 tables into one stacked dataset",
+    "result_type": "dataframe"
+  }]
+}
+
+**CORRECT - Aggregating after combining (only numeric columns):**
+{
+  "operations": [{
+    "python_code": "numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist(); grouped = df.groupby(['Region'])[numeric_cols].mean().reset_index()",
+    "description": "Calculate mean for each region using only numeric columns",
+    "result_type": "dataframe"
+  }]
+}
+
+**CRITICAL RULES FOR AGGREGATION:**
+1. NEVER use .mean(), .sum(), .median(), .std() on entire DataFrame - always select numeric columns first
+2. ALWAYS use df.select_dtypes(include=[np.number]) before numeric aggregation
+3. When combining tables, columns may become object dtype - check data types before aggregation
+4. For groupby aggregation: numeric_cols = df.select_dtypes(include=[np.number]).columns; df.groupby(...)[numeric_cols].agg(...)
 """
 
 
