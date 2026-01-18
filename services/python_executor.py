@@ -201,6 +201,10 @@ class PythonExecutor:
             if "cannot access local variable 're'" in error_str.lower() or "local variable 're'" in error_str.lower():
                 logger.error(f"❌ 're' scoping error in generated code:\n{python_code[:1000]}")
                 error_msg = f"Execution failed: Variable 're' scoping error. DO NOT use 're' module for phone formatting. Use TextCleaner.format_phone_numbers() instead. Error: {error_str}\nGenerated code:\n{python_code[:500]}"
+            # Check for aggregation function errors on object dtype columns
+            elif "agg function failed" in error_str.lower() or ("dtype->object" in error_str.lower() and ("mean" in error_str.lower() or "sum" in error_str.lower() or "median" in error_str.lower())):
+                logger.error(f"❌ Aggregation error on object dtype column:\n{python_code[:1000]}")
+                error_msg = f"Execution failed: Cannot apply aggregation function (mean/sum/median) to object dtype columns. After combining tables, columns may become object dtype. Use df.select_dtypes(include=[np.number]) to select only numeric columns before aggregation. Example: numeric_cols = df.select_dtypes(include=[np.number]).columns; df.groupby(...)[numeric_cols].mean(). Error: {error_str}\nGenerated code:\n{python_code[:500]}"
             else:
                 error_msg = f"Execution failed: {error_str}"
             self.errors.append(error_msg)
