@@ -28,41 +28,29 @@ logger = logging.getLogger(__name__)
 
 CHART_BOT_SYSTEM_PROMPT = """You are a Chart Generation Specialist. Generate chart configurations as JSON.
 
-CRITICAL RULE - ALWAYS RESPECT USER'S EXPLICIT CHART TYPE REQUEST:
-- If user says "line graph" or "line chart" → use chart_type="line"
-- If user says "bar graph" or "bar chart" → use chart_type="bar"
-- If user says "pie chart" → use chart_type="pie"
-- If user says "scatter" → use chart_type="scatter"
-- If user says "histogram" → use chart_type="histogram"
-- NEVER change the chart type the user explicitly requests
-
-RULES:
+OUTPUT FORMAT (REQUIRED):
+- Single chart: {"chart_type": "line|bar|pie|scatter|histogram", "x_column": "ColumnName", "y_column": "ColumnName", "title": "Title", "description": "Description"}
+- Multiple charts: {"charts": [{"chart_type": "...", "x_column": "...", "y_column": "...", "title": "...", "description": "..."}, ...]}
+- Use ACTUAL column names from available_columns (not Excel letters like A, B, C)
 - Generic requests ("dashboard", "graphs", "visualize"): Return {"charts": [...]} with 2-4 charts
 - Specific requests: Return single chart config
-- Use ACTUAL column names from available_columns (not Excel letters)
-- Chart types: bar (categories), line (time/trends), pie (proportions), scatter (numeric pairs), histogram (distribution)
 
-EXCEL COLUMN REFERENCES:
-- "graph between A and B" → A = first column, B = second column (use actual names from available_columns)
+CHART TYPE MAPPING:
+- "line graph/chart" → chart_type="line"
+- "bar graph/chart" → chart_type="bar"
+- "pie chart" → chart_type="pie"
+- "scatter" → chart_type="scatter"
+- "histogram" → chart_type="histogram"
+- If user doesn't specify, choose based on data: time/dates → line, categories → bar, proportions → pie
+
+EXCEL COLUMN RESOLUTION:
+- "graph between A and B" → resolve A/B to actual column names from available_columns
 - "chart of column A" → A = available_columns[0]
-- "column B vs C" → B = available_columns[1], C = available_columns[2]
-- Always resolve Excel letters (A, B, C, etc.) to actual column names from available_columns
-
-CHART TYPE RULES:
-- Bar chart: X-axis categorical, Y-axis numeric → chart_type="bar"
-- Line chart: X-axis time/dates or sequential, Y-axis numeric → chart_type="line"
-- Pie chart: Categorical with numeric values → chart_type="pie"
-- Scatter: Both X and Y numeric → chart_type="scatter"
-- Histogram: Single numeric column distribution → chart_type="histogram"
-
-OUTPUT FORMATS:
-Single: {"chart_type": "line", "x_column": "Name", "y_column": "Value", "title": "Title", "description": "Desc"}
-Multiple: {"charts": [{"chart_type": "bar", "x_column": "X", "y_column": "Y", "title": "T", "description": "D"}, ...]}
+- Always use actual column names in output, not Excel letters
 
 EXAMPLES:
 "line graph of sales" → {"chart_type": "line", "x_column": "Date", "y_column": "Sales", "title": "Sales Over Time", "description": "Line graph"}
 "bar chart of revenue by country" → {"chart_type": "bar", "x_column": "Country", "y_column": "Revenue", "title": "Revenue by Country", "description": "Bar chart"}
-"graph between A and B" → {"chart_type": "bar", "x_column": "ColumnA", "y_column": "ColumnB", "title": "ColumnB by ColumnA", "description": "Bar chart"}
 "create dashboard" → {"charts": [{"chart_type": "bar", ...}, {"chart_type": "line", ...}]}
 
 Return ONLY valid JSON, no markdown or explanations.
@@ -306,10 +294,15 @@ class ChartBot:
         x_column = chart_config.get("x_column")
         y_column = chart_config.get("y_column")
         
-        # Validate chart type
+        # Validate chart type - preserve LLM's choice, only fix if truly invalid
         valid_types = ["bar", "line", "pie", "histogram", "scatter"]
         if chart_type not in valid_types:
-            chart_type = "bar"  # Default
+            # If LLM generated invalid type, preserve it but log warning
+            # Don't override user's request by defaulting to "bar"
+            logger.warning(f"Invalid chart_type '{chart_type}' from LLM, but preserving it. Valid types: {valid_types}")
+            # Only default if completely missing
+            if not chart_type:
+                chart_type = "bar"
         
         # Validate columns - use column resolution (handles Excel letters)
         if x_column:
@@ -407,19 +400,7 @@ class ChartBot:
         categorical_cols = analysis["categorical_columns"]
         datetime_cols = analysis["datetime_columns"]
         
-        # 1. Bar chart: categorical x numeric
-        if categorical_cols and numeric_cols:
-            for cat_col in categorical_cols[:2]:  # Top 2 categorical
-                for num_col in numeric_cols[:2]:  # Top 2 numeric
-                    analysis["suggested_charts"].append({
-                        "chart_type": "bar",
-                        "x_column": cat_col,
-                        "y_column": num_col,
-                        "title": f"{num_col} by {cat_col}",
-                        "description": f"Bar chart comparing {num_col} across {cat_col} categories"
-                    })
-        
-        # 2. Line chart: datetime x numeric
+        # 1. Line chart: datetime x numeric (prioritize time-based charts)
         if datetime_cols and numeric_cols:
             for dt_col in datetime_cols[:1]:  # First datetime
                 for num_col in numeric_cols[:2]:  # Top 2 numeric
@@ -429,6 +410,18 @@ class ChartBot:
                         "y_column": num_col,
                         "title": f"{num_col} Over Time",
                         "description": f"Line chart showing {num_col} trends over {dt_col}"
+                    })
+        
+        # 2. Bar chart: categorical x numeric
+        if categorical_cols and numeric_cols:
+            for cat_col in categorical_cols[:2]:  # Top 2 categorical
+                for num_col in numeric_cols[:2]:  # Top 2 numeric
+                    analysis["suggested_charts"].append({
+                        "chart_type": "bar",
+                        "x_column": cat_col,
+                        "y_column": num_col,
+                        "title": f"{num_col} by {cat_col}",
+                        "description": f"Bar chart comparing {num_col} across {cat_col} categories"
                     })
         
         # 3. Pie chart: categorical x numeric (count or sum)

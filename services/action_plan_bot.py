@@ -43,6 +43,19 @@ If user requests charts/visualization:
 Chart keywords to ignore: "chart", "graph", "plot", "visualize", "dashboard"
 
 ═══════════════════════════════════════════════════════════════════════════════
+📝 HANDLING AMBIGUOUS/GENERAL PROMPTS
+═══════════════════════════════════════════════════════════════════════════════
+
+When user gives general prompts like "clean this sheet", "fix this data", "organize this":
+- Analyze the data structure (columns, data types, sample values) to infer what needs cleaning
+- Common cleaning operations: remove duplicates, trim whitespace, normalize dates, format numbers
+- Apply multiple cleaning operations if needed (e.g., trim whitespace + normalize case + remove duplicates)
+- For "clean this sheet": typically means remove duplicates, trim whitespace in text columns, normalize dates
+- For "fix this data": analyze sample data to identify issues (inconsistent formats, missing values, etc.)
+- For "organize this": typically means sort by primary column or remove duplicates
+- Use your judgment based on data structure - LLM is good at understanding context
+
+═══════════════════════════════════════════════════════════════════════════════
 🐍 PYTHON CODE GENERATION (MANDATORY)
 ═══════════════════════════════════════════════════════════════════════════════
 
@@ -212,11 +225,20 @@ CurrencyCleaner - Use static methods, returns modified DataFrame:
 
 **EXAMPLES:**
 
-Example 1: "Clean text columns" or "Clean all text data"
+Example 1: "Clean text columns" or "Clean all text data" or "clean this sheet"
 {
   "operations": [{
-    "python_code": "text_cols = df.select_dtypes(include=['object']).columns.tolist(); df = TextCleaner.trim_whitespace(df, text_cols); df = TextCleaner.normalize_case(df, text_cols, case='lower')",
-    "description": "Clean all text columns: trim whitespace and normalize to lowercase",
+    "python_code": "text_cols = df.select_dtypes(include=['object']).columns.tolist(); df = TextCleaner.trim_whitespace(df, text_cols); df = TextCleaner.normalize_case(df, text_cols, case='lower'); df = df.drop_duplicates().reset_index(drop=True)",
+    "description": "Clean all text columns: trim whitespace, normalize to lowercase, and remove duplicates",
+    "result_type": "dataframe"
+  }]
+}
+
+Example 1f: "fix this data" or "organize this" (general prompts - infer from data structure)
+{
+  "operations": [{
+    "python_code": "df = df.drop_duplicates().reset_index(drop=True); text_cols = df.select_dtypes(include=['object']).columns.tolist(); df = TextCleaner.trim_whitespace(df, text_cols); date_cols = [col for col in df.columns if 'date' in col.lower() or 'time' in col.lower()]; df = DateCleaner.parse_dates(df, date_cols[0]) if date_cols else df",
+    "description": "General data cleaning: remove duplicates, trim whitespace, normalize dates",
     "result_type": "dataframe"
   }]
 }
