@@ -6,7 +6,7 @@ FastAPI server for processing Excel/CSV files with AI-powered prompts.
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Request, Header, Depends
 from fastapi.responses import JSONResponse, FileResponse
-# CORS is handled by nginx - no FastAPI CORS middleware needed
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -51,8 +51,19 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS is handled by nginx - no need for FastAPI CORS middleware
-# This prevents duplicate CORS headers which browsers reject
+# Configure CORS to allow both domains
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://www.easyexcel.in",
+        "https://www.lazyexcel.pro",
+        "http://localhost:5173",  # For local development
+        "http://localhost:3000",  # For local development
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Initialize services
 file_manager = FileManager()
