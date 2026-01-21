@@ -5,9 +5,10 @@ FastAPI server for processing Excel/CSV files with AI-powered prompts.
 """
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Request, Header, Depends
-from fastapi.responses import JSONResponse, FileResponse
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import os
@@ -51,19 +52,51 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS to allow both domains
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://www.easyexcel.in",
-        "https://www.lazyexcel.pro",
-        "http://localhost:5173",  # For local development
-        "http://localhost:3000",  # For local development
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Custom CORS middleware that only adds headers if nginx hasn't already
+# This prevents duplicate CORS headers which browsers reject
+ALLOWED_ORIGINS = [
+    "https://www.easyexcel.in",
+    "https://www.lazyexcel.pro",
+    "https://lazyexcel.pro",
+    "https://easyexcel.in",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+
+class SmartCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        # Handle preflight requests
+        if request.method == "OPTIONS":
+            origin = request.headers.get("origin")
+            if origin in ALLOWED_ORIGINS:
+                response = Response()
+                # Only add CORS headers if they don't already exist (nginx might have added them)
+                if "access-control-allow-origin" not in {k.lower(): v for k, v in response.headers.items()}:
+                    response.headers["Access-Control-Allow-Origin"] = origin
+                    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+                    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+                    response.headers["Access-Control-Allow-Credentials"] = "true"
+                return response
+        
+        # Handle actual requests
+        response = await call_next(request)
+        
+        # Add CORS headers only if they don't already exist
+        origin = request.headers.get("origin")
+        if origin and origin in ALLOWED_ORIGINS:
+            # Check if CORS headers already exist (from nginx)
+            existing_headers = {k.lower(): v for k, v in response.headers.items()}
+            if "access-control-allow-origin" not in existing_headers:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+            if "access-control-allow-methods" not in existing_headers:
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+            if "access-control-allow-headers" not in existing_headers:
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+        
+        return response
+
+app.add_middleware(SmartCORSMiddleware)
 
 # Initialize services
 file_manager = FileManager()
