@@ -380,6 +380,46 @@ class PythonExecutor:
             i += 1
         code = '\n'.join(fixed_lines)
         
+        # 4.5. CRITICAL: Fix statements concatenated without line breaks
+        # Pattern: statement) for col in ... or statement) if condition: ...
+        # This happens when LLM generates code without proper newlines
+        # Detect patterns like: ...) for ... or ...) if ... or ...) while ...
+        # These need to be split into separate lines
+        
+        # Split on control flow keywords that appear after closing parentheses/brackets
+        # Pattern: ) for|) if|) while|) elif|) else
+        # Find patterns where control flow appears after a closing paren/bracket
+        # Match: ) for, ) if, ) while, etc. but not inside strings
+        pattern = r'(\)|\])\s+(for|if|while|elif|else)\s+'
+        
+        def split_control_flow(match):
+            closing = match.group(1)  # ) or ]
+            keyword = match.group(2)  # for, if, while, etc.
+            return f'{closing}\n{keyword} '
+        
+        code = re.sub(pattern, split_control_flow, code)
+        
+        # Also fix cases where control flow appears after method calls without closing paren
+        # Pattern: .method() for or .method() if
+        pattern2 = r'(\))\s+(for|if|while|elif|else)\s+'
+        code = re.sub(pattern2, lambda m: f'{m.group(1)}\n{m.group(2)} ', code)
+        
+        # Fix indentation issues: if a line starts with 'if', 'for', 'while' after another statement,
+        # it should be on a new line (already handled above) but also ensure proper indentation
+        lines = code.split('\n')
+        fixed_lines = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            # If line starts with control flow keyword and previous line didn't end with ':'
+            if i > 0 and regex_module.match(r'^\s*(for|if|while|elif|else)\s+', stripped):
+                prev_line = fixed_lines[-1] if fixed_lines else ''
+                # If previous line doesn't end with ':' and isn't empty, ensure this is on new line
+                if prev_line and not prev_line.rstrip().endswith(':'):
+                    # Already on new line from above fix, just ensure proper formatting
+                    pass
+            fixed_lines.append(line)
+        code = '\n'.join(fixed_lines)
+        
         # 5. Fix common syntax errors
         code = re.sub(r'\[None\)\*\(', '[None] * (', code)  # [None)*( -> [None] * (
         code = re.sub(r'\bgrouped\.co\b', 'grouped.columns', code)  # grouped.co -> grouped.columns
