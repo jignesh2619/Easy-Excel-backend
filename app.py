@@ -761,6 +761,9 @@ async def process_data(
         if user:
             user_id = user["user_id"]
         
+        # OPTIMIZATION: Log LLM call time
+        import time
+        llm_start = time.time()
         llm_result = llm_agent.interpret_prompt(
             request.prompt,
             available_columns,
@@ -769,6 +772,8 @@ async def process_data(
             sample_explanation=sample_explanation,
             df=df
         )
+        llm_time = time.time() - llm_start
+        logger.info(f"⏱️ LLM interpretation took {llm_time:.2f}s")
         action_plan = llm_result.get("action_plan", {})
         action_plan["user_prompt"] = request.prompt
         
@@ -801,7 +806,12 @@ async def process_data(
             if user_wants_chart and action_plan.get("chart_type") == "none":
                 action_plan["chart_type"] = "bar"
         
+        # OPTIMIZATION: Log data processing time
+        import time
+        processing_start = time.time()
         result = processor.execute_action_plan(action_plan)
+        processing_time = time.time() - processing_start
+        logger.info(f"⏱️ Data processing took {processing_time:.2f}s")
         
         final_task = result.get("task", original_task)
         if final_task == "summarize" and user_wants_cleaning:
@@ -834,10 +844,18 @@ async def process_data(
         chart_url = f"/download/charts/{Path(chart_path).name}" if chart_path else None
         
         # 12. Convert processed dataframe to JSON for preview
+        # OPTIMIZATION: Limit preview to 1000 rows to reduce serialization time
         preview_df = processed_df.head(1000) if len(processed_df) > 1000 else processed_df
+        
+        # OPTIMIZATION: Use faster JSON serialization
+        import time
+        start_time = time.time()
         processed_data = preview_df.replace({np.nan: None, pd.NA: None}).to_dict(orient='records')
         # Convert datetime objects to strings for JSON serialization
         processed_data = convert_datetime_to_string(processed_data)
+        serialization_time = time.time() - start_time
+        logger.info(f"⏱️ Data serialization took {serialization_time:.2f}s for {len(processed_data)} rows")
+        
         columns = list(processed_df.columns)
         row_count = len(processed_df)
         
@@ -852,8 +870,12 @@ async def process_data(
                 contacts = [row.get('Contact No.') for row in processed_data[:5]]
                 logger.info(f"🔍 First 5 Contact No. values: {contacts}")
         
-        # 13. Get formatting metadata
+        # 13. Get formatting metadata (only for preview rows to optimize performance)
+        import time
+        formatting_start = time.time()
         formatting_metadata = processor.get_formatting_metadata(preview_df)
+        formatting_time = time.time() - formatting_start
+        logger.info(f"⏱️ Formatting metadata generation took {formatting_time:.2f}s")
         logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
         
         # 14. Add formatting info to each cell

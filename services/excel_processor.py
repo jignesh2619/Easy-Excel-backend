@@ -2118,16 +2118,22 @@ class ExcelProcessor:
                                     sample_matches = series[word_matches].head(5).tolist()
                                     logger.info(f"🔍 Sample matches for '{word}': {sample_matches}")
                         
-                        # Build cell format map: "row_col" -> format info
-                        for row_idx, match in enumerate(matches):
-                            if match:
-                                cell_key = f"{row_idx}_{column}"
-                                formatting_metadata["cell_formats"][cell_key] = {
-                                    "bg_color": bg_color,
-                                    "text_color": config.get("text_color") or config.get("font_color"),
-                                    "bold": config.get("bold", False),
-                                    "italic": config.get("italic", False)
-                                }
+                        # OPTIMIZED: Use vectorized operation to build cell format map
+                        # Get matching row indices
+                        matching_indices = df.index[matches].tolist()
+                        
+                        # Build cell format info once
+                        cell_format = {
+                            "bg_color": bg_color,
+                            "text_color": config.get("text_color") or config.get("font_color"),
+                            "bold": config.get("bold", False),
+                            "italic": config.get("italic", False)
+                        }
+                        
+                        # Add all matching cells at once
+                        for row_idx in matching_indices:
+                            cell_key = f"{row_idx}_{column}"
+                            formatting_metadata["cell_formats"][cell_key] = cell_format
                         
                         formatting_metadata["conditional_formatting"].append({
                             "type": format_type,
@@ -2152,15 +2158,22 @@ class ExcelProcessor:
                         
                         logger.info(f"🔍 Found {match_count} exact matches for text '{text}' in column '{column}'")
                         
-                        for row_idx, match in enumerate(matches):
-                            if match:
-                                cell_key = f"{row_idx}_{column}"
-                                formatting_metadata["cell_formats"][cell_key] = {
-                                    "bg_color": bg_color,
-                                    "text_color": config.get("text_color") or config.get("font_color"),
-                                    "bold": config.get("bold", False),
-                                    "italic": config.get("italic", False)
-                                }
+                        # OPTIMIZED: Use vectorized operation to build cell format map
+                        # Get matching row indices
+                        matching_indices = df.index[matches].tolist()
+                        
+                        # Build cell format info once
+                        cell_format = {
+                            "bg_color": bg_color,
+                            "text_color": config.get("text_color") or config.get("font_color"),
+                            "bold": config.get("bold", False),
+                            "italic": config.get("italic", False)
+                        }
+                        
+                        # Add all matching cells at once
+                        for row_idx in matching_indices:
+                            cell_key = f"{row_idx}_{column}"
+                            formatting_metadata["cell_formats"][cell_key] = cell_format
                     else:
                         logger.warning(f"⚠️ Column '{column}' not found in DataFrame columns: {list(df.columns)}")
         
