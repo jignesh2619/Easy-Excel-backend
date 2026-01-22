@@ -870,22 +870,24 @@ async def process_data(
                 contacts = [row.get('Contact No.') for row in processed_data[:5]]
                 logger.info(f"🔍 First 5 Contact No. values: {contacts}")
         
-        # 13. Get formatting metadata (only for preview rows to optimize performance)
-        import time
-        formatting_start = time.time()
-        formatting_metadata = processor.get_formatting_metadata(preview_df)
-        formatting_time = time.time() - formatting_start
-        logger.info(f"⏱️ Formatting metadata generation took {formatting_time:.2f}s")
-        logger.info(f"📊 Formatting metadata generated: {len(formatting_metadata.get('cell_formats', {}))} cells with formatting")
-        
-        # 14. Add formatting info to each cell
-        if formatting_metadata.get("cell_formats"):
-            for row_idx, row_data in enumerate(processed_data):
-                for col_name in columns:
-                    cell_key = f"{row_idx}_{col_name}"
-                    if cell_key in formatting_metadata["cell_formats"]:
-                        cell_format = formatting_metadata["cell_formats"][cell_key]
-                        row_data[f"{col_name}_format"] = cell_format
+        # 13. Get formatting metadata (OPTIMIZED: Skip if no formatting rules to save time)
+        formatting_metadata = {"conditional_formatting": [], "cell_formats": {}}
+        if processor.formatting_rules:  # Only generate if formatting rules exist
+            import time
+            formatting_start = time.time()
+            formatting_metadata = processor.get_formatting_metadata(preview_df)
+            formatting_time = time.time() - formatting_start
+            if formatting_time > 0.5:  # Only log if it takes significant time
+                logger.info(f"⏱️ Formatting metadata took {formatting_time:.2f}s")
+            
+            # Add formatting info to each cell (only if formatting exists)
+            if formatting_metadata.get("cell_formats"):
+                for row_idx, row_data in enumerate(processed_data):
+                    for col_name in columns:
+                        cell_key = f"{row_idx}_{col_name}"
+                        if cell_key in formatting_metadata["cell_formats"]:
+                            cell_format = formatting_metadata["cell_formats"][cell_key]
+                            row_data[f"{col_name}_format"] = cell_format
         
         # 15. Determine response type
         response_type = "table"
@@ -944,23 +946,8 @@ async def process_data(
         if user:
             user_service.record_token_usage(user["user_id"], actual_tokens_used, "data_processing")
         
-        # 17. Record feedback (only if user is authenticated)
-        if user and llm_agent.feedback_learner:
-            try:
-                execution_result = {
-                    "status": "success",
-                    "task": task,
-                    "rows_processed": row_count,
-                    "chart_generated": chart_path is not None
-                }
-                llm_agent.feedback_learner.record_success(
-                    user_prompt=request.prompt,
-                    action_plan=action_plan,
-                    execution_result=execution_result,
-                    user_id=user_id
-                )
-            except Exception as e:
-                logger.warning(f"Failed to record feedback: {e}")
+        # 17. Record feedback (DISABLED for performance - can be re-enabled if needed)
+        # Feedback learner disabled to improve response time
         
         # Log response details for debugging
         logger.info(f"📤 Sending response: {len(processed_data)} rows, {len(columns)} columns, row_count={row_count}")
@@ -998,19 +985,7 @@ async def process_data(
         }
         logger.error(f"Error processing data: {error_detail}")
         
-        # Record failed execution (only if user is authenticated)
-        if user and llm_agent and llm_agent.feedback_learner:
-            try:
-                user_id = user["user_id"] if user else None
-                action_plan = locals().get("action_plan", {})
-                llm_agent.feedback_learner.record_failure(
-                    user_prompt=request.prompt,
-                    action_plan=action_plan,
-                    error=str(e),
-                    user_id=user_id
-                )
-            except Exception as feedback_error:
-                logger.warning(f"Failed to record failure feedback: {feedback_error}")
+        # Record failed execution (DISABLED for performance)
         
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
