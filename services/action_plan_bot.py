@@ -132,20 +132,48 @@ You MUST generate Python code for ALL operations. The backend executes your code
 - DO NOT assume the sample shows all unique values, all matching rows, or complete data - there may be many more in the full dataset
 - The number of rows can be ANY number (23, 50, 100, 1000, etc.) - your code must handle all of them
 
-**CRITICAL - CODE FORMATTING RULES (MUST FOLLOW):**
+**CRITICAL - CODE FORMATTING RULES (MUST FOLLOW - SYNTAX ERRORS IF VIOLATED):**
+
+⚠️⚠️⚠️ ABSOLUTE RULE: CONTROL FLOW STATEMENTS (for, if, while, elif, else) MUST BE ON SEPARATE LINES ⚠️⚠️⚠️
+
 6. KEEP METHOD CHAINS ON SINGLE LINE - Never split method calls across lines
    - WRONG: "df.groupby(['A'])\n['B'].sum()" (invalid - method chain split)
    - CORRECT: "df.groupby(['A'])['B'].sum()" (all on one line)
    - CORRECT: "grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index()"
    
-7. FOR LOOPS - Must be on separate lines with proper indentation
-   - WRONG: "statement1; for col in cols: statement2" (invalid syntax)
-   - CORRECT: "statement1\nfor col in cols:\n    statement2"
-   - If you need multiple statements, use semicolons for simple statements, but for loops need separate lines
+7. ⚠️ CRITICAL: FOR/IF/WHILE LOOPS - MUST BE ON SEPARATE LINES - NEVER CONCATENATE ⚠️
+   - ❌ WRONG: "grouped = df.groupby(['A'])['B'].sum().reset_index() for col in df.columns: if col not in grouped.columns: grouped[col] = None"
+   - ❌ WRONG: "statement1; for col in cols: statement2" (invalid syntax - causes "expected an indented block")
+   - ❌ WRONG: "result = df.sum() if condition else 0" (this is OK - ternary operator, but NOT for loops/blocks)
+   - ✅ CORRECT: "grouped = df.groupby(['A'])['B'].sum().reset_index()\nfor col in df.columns:\n    if col not in grouped.columns:\n        grouped[col] = None"
+   - ✅ CORRECT: "statement1\nfor col in cols:\n    statement2"
+   - ✅ CORRECT: "grouped = df.groupby(['Region'], as_index=False)[['Units Sold', 'Revenue']].sum().reset_index()\nfor col in df.columns:\n    if col not in grouped.columns:\n        grouped[col] = None\n grouped = grouped[df.columns]"
+   
+   RULE: If your code has "for", "if", "while", "elif", or "else" followed by a colon (:), it MUST be on a NEW LINE, not concatenated with previous statements.
+   
+8. MULTIPLE SIMPLE STATEMENTS - Use semicolons ONLY for simple statements (no control flow)
+   - ✅ CORRECT: "df = df.dropna(); df = df.reset_index(drop=True)" (simple statements)
+   - ✅ CORRECT: "grouped = df.groupby(['A'])['B'].sum(); df = grouped.reset_index()" (simple statements)
+   - ❌ WRONG: "grouped = df.groupby(['A'])['B'].sum(); for col in df.columns: grouped[col] = None" (for loop cannot be after semicolon)
+   - ✅ CORRECT: "grouped = df.groupby(['A'])['B'].sum()\nfor col in df.columns:\n    grouped[col] = None" (for loop on new line)
 
-8. MULTIPLE STATEMENTS - Use semicolons to separate simple statements on one line
-   - CORRECT: "df = df.dropna(); df = df.reset_index(drop=True)"
-   - CORRECT: "grouped = df.groupby(['A'])['B'].sum(); df = grouped.reset_index()"
+9. ⚠️ CRITICAL EXAMPLES - LEARN FROM THESE MISTAKES ⚠️
+   
+   EXAMPLE OF WRONG CODE (will cause syntax error):
+   "grouped = df.groupby(['Region'], as_index=False)[['Units Sold', 'Revenue']].sum().reset_index() for col in df.columns: if col not in grouped.columns: grouped[col] = None"
+   
+   EXAMPLE OF CORRECT CODE (properly formatted):
+   "grouped = df.groupby(['Region'], as_index=False)[['Units Sold', 'Revenue']].sum().reset_index()\nfor col in df.columns:\n    if col not in grouped.columns:\n        grouped[col] = None\n grouped = grouped[df.columns]"
+   
+   Notice: The "for" loop starts on a NEW LINE after the previous statement ends with ")"
+   Notice: The "if" statement inside the for loop is INDENTED (4 spaces)
+   Notice: The code inside the if block is INDENTED (8 spaces total)
+   
+10. WHEN TO USE SEMICOLONS vs NEW LINES:
+    - Use SEMICOLONS (;) for: simple assignments, method calls, calculations
+      Example: "df = df.dropna(); df = df.reset_index(drop=True); result = df.sum()"
+    - Use NEW LINES (\n) for: for loops, if statements, while loops, elif, else blocks
+      Example: "grouped = df.groupby(['A'])['B'].sum()\nfor col in df.columns:\n    if col not in grouped.columns:\n        grouped[col] = None"
 
 **CRITICAL - PRESERVE ALL COLUMNS:**
 ⚠️ DO NOT drop or remove columns unless the user EXPLICITLY asks to remove them.
@@ -370,11 +398,12 @@ Example 6: "Group similar items in columns E, F, G" (preserve original data, add
 Example 6b: "Group similar items in columns E, F, G" (alternative: add grouped results as new rows at bottom)
 {
   "operations": [{
-    "python_code": "grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index(); grouped.columns = ['Item.1', 'Size.1', 'Quantity.1']; original_cols = df.columns.tolist(); missing_cols = [col for col in original_cols if col not in grouped.columns]; for col in missing_cols: grouped[col] = None; grouped = grouped.reindex(columns=original_cols + ['Item.1', 'Size.1', 'Quantity.1']); df = pd.concat([df, grouped], ignore_index=True)",
+    "python_code": "grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index(); grouped.columns = ['Item.1', 'Size.1', 'Quantity.1']; original_cols = df.columns.tolist(); missing_cols = [col for col in original_cols if col not in grouped.columns]\nfor col in missing_cols:\n    grouped[col] = None\ngrouped = grouped.reindex(columns=original_cols + ['Item.1', 'Size.1', 'Quantity.1']); df = pd.concat([df, grouped], ignore_index=True)",
     "description": "Group by Item and Size, add grouped results as new rows at bottom with original columns",
     "result_type": "dataframe"
   }]
 }
+⚠️ CRITICAL: Notice the for loop is on a NEW LINE (\n) after the semicolon-separated statements. The for loop and its body are properly indented.
 
 Example 7: "Group similar items" (if user wants to replace data with grouped results only)
 {
