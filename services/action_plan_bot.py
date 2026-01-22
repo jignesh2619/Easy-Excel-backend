@@ -457,7 +457,8 @@ CRITICAL: Check if user specifies target columns (e.g., "in E, F, G", "in column
     - CORRECT FORMAT: "grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index(); grouped.columns = ['Item.1', 'Size.1', 'Quantity.1']; original_len = len(df); grouped_len = len(grouped); empty_rows = pd.DataFrame({col: [None] * (original_len - grouped_len) for col in grouped.columns}) if grouped_len < original_len else pd.DataFrame(); grouped = pd.concat([grouped, empty_rows], ignore_index=True) if len(empty_rows) > 0 else grouped; df = pd.concat([df, grouped], axis=1)"
   
   - Option 2: Add as new rows at bottom (preserve all original rows, append grouped summary)
-    - CORRECT FORMAT: "grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index(); grouped.columns = ['Item.1', 'Size.1', 'Quantity.1']; original_cols = df.columns.tolist(); missing_cols = [col for col in original_cols if col not in grouped.columns]; for col in missing_cols: grouped[col] = None; df = pd.concat([df, grouped], ignore_index=True)"
+    - CORRECT FORMAT: "grouped = df.groupby(['Item', 'Size'])['Quantity'].sum().reset_index(); grouped.columns = ['Item.1', 'Size.1', 'Quantity.1']; original_cols = df.columns.tolist(); missing_cols = [col for col in original_cols if col not in grouped.columns]\nfor col in missing_cols:\n    grouped[col] = None\ndf = pd.concat([df, grouped], ignore_index=True)"
+    - ⚠️ CRITICAL: The for loop MUST be on a new line (\n), not concatenated with semicolons
   
   - DEFAULT: Use Option 2 (add as new rows) to preserve all original data clearly
 
