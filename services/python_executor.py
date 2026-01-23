@@ -394,47 +394,64 @@ class PythonExecutor:
         code = re.sub(r'\]\s*\n\s*\[', '][', code)  # ]\n[ -> ][
         code = re.sub(r'\]\s+\[', '][', code)  # ] [ -> ][
         
-        # 4.5. CRITICAL: Fix statements concatenated without line breaks
-        # Pattern: statement) for col in ... or statement) if condition: ...
-        # OR: variable = value for i in ... (like col_a_idx = 0 for i in range)
-        # This happens when LLM generates code without proper newlines
-        # Detect patterns like: ...) for ... or ...) if ... or ...) while ...
-        # OR: ... = ... for ... (variable assignment followed by for loop)
-        # These need to be split into separate lines
+        # 4.5. CRITICAL: UNIVERSAL FIX for missing line breaks before control flow
+        # This handles ALL cases where control flow keywords appear without proper line breaks
+        # Pattern: ANYTHING followed by control flow keyword (if, elif, else, for, while)
+        # Examples:
+        #   "def func(): if" -> "def func():\n    if"
+        #   "return 'Low' elif" -> "return 'Low'\nelif"
+        #   "col_a_idx = 0 for" -> "col_a_idx = 0\nfor"
+        #   ") if" -> ")\nif"
+        #   "statement: if" -> "statement:\nif"
         
-        # First, fix patterns where control flow appears after variable assignments
-        # Pattern: variable = value for|variable = value if|variable = value while
-        # Example: col_a_idx = 0 for i in range(len(df)):
-        # More aggressive pattern that handles various cases
-        # Pattern 1: "var = value for" -> "var = value\nfor"
-        code = re.sub(r'(\w+\s*=\s*[^\n;:]+?)\s+(for|if|while|elif|else)\s+', r'\1\n\2 ', code)
+        # UNIVERSAL PATTERN: Insert newline before control flow keywords
+        # Match: word boundary, then control flow keyword, but NOT if it's already at start of line
+        # This pattern catches ALL cases where control flow appears mid-line
         
-        # Pattern 2: Handle cases with more complex assignments: "var = df[...].tolist() for"
-        code = re.sub(r'(\w+\s*=\s*[^=]+?\.\w+\(\))\s+(for|if|while|elif|else)\s+', r'\1\n\2 ', code)
+        # Step 1: Fix control flow that appears after statements (not at start of line)
+        # Pattern: Any non-whitespace, non-colon character followed by control flow
+        # But exclude cases where it's part of a valid expression like "if x in y"
+        control_flow_keywords = r'(if|elif|else|for|while)'
         
-        # Pattern 3: Handle cases where if statement is followed by another if: "if condition: if condition2:"
-        code = re.sub(r'(if\s+[^:]+):\s+(if|for|while|elif|else)\s+', r'\1:\n\2 ', code)
+        # Pattern: End of statement (word, number, ), ], }, ', ") followed by control flow
+        # This catches: "statement if", "value for", ") if", "] elif", etc.
+        code = re.sub(
+            r'([a-zA-Z0-9_\)\]\}\'"])\s+' + control_flow_keywords + r'\s+',
+            r'\1\n\2 ',
+            code
+        )
         
-        # Pattern 4: Handle cases where statement ends with colon followed by control flow: "statement: if"
-        code = re.sub(r'([^:]):\s+(if|for|while|elif|else)\s+', r'\1:\n\2 ', code)
+        # Step 2: Fix control flow that appears after colons (except in if/for/while statements)
+        # Pattern: "statement: if" -> "statement:\nif" (but not "if x: if y" which is valid)
+        code = re.sub(
+            r'([^:\n]):\s+' + control_flow_keywords + r'\s+(?!\w+\s+in\s+)',
+            r'\1:\n\2 ',
+            code
+        )
         
-        # Split on control flow keywords that appear after closing parentheses/brackets
-        # Pattern: ) for|) if|) while|) elif|) else
-        # Find patterns where control flow appears after a closing paren/bracket
-        # Match: ) for, ) if, ) while, etc. but not inside strings
-        pattern = r'(\)|\])\s+(for|if|while|elif|else)\s+'
+        # Step 3: Fix control flow that appears after closing parentheses/brackets
+        # Pattern: ") if", "] for", etc.
+        code = re.sub(
+            r'(\)|\])\s+' + control_flow_keywords + r'\s+',
+            r'\1\n\2 ',
+            code
+        )
         
-        def split_control_flow(match):
-            closing = match.group(1)  # ) or ]
-            keyword = match.group(2)  # for, if, while, etc.
-            return f'{closing}\n{keyword} '
+        # Step 4: Fix control flow that appears after return/break/continue/pass
+        # Pattern: "return 'Low' elif" -> "return 'Low'\nelif"
+        code = re.sub(
+            r'(return|break|continue|pass)\s+([^\n]+?)\s+' + control_flow_keywords + r'\s+',
+            r'\1 \2\n\3 ',
+            code
+        )
         
-        code = re.sub(pattern, split_control_flow, code)
-        
-        # Also fix cases where control flow appears after method calls without closing paren
-        # Pattern: .method() for or .method() if
-        pattern2 = r'(\))\s+(for|if|while|elif|else)\s+'
-        code = re.sub(pattern2, lambda m: f'{m.group(1)}\n{m.group(2)} ', code)
+        # Step 5: Fix control flow that appears after variable assignments
+        # Pattern: "var = value for" -> "var = value\nfor"
+        code = re.sub(
+            r'(\w+\s*=\s*[^\n=]+?)\s+' + control_flow_keywords + r'\s+',
+            r'\1\n\2 ',
+            code
+        )
         
         # Additional fix: Any statement ending with identifier/number followed by control flow
         # Pattern: identifier for|number for|identifier if|number if
