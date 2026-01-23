@@ -522,12 +522,11 @@ class PythonExecutor:
         # But be careful not to break valid code like "if x in y:"
         code = re.sub(r'([^:\n])\s+(for|if|while|elif|else)\s+([^i][^n]|i[^n]|in[^\s])', r'\1\n\2 \3', code)
         
-        # 7. Fix indentation: Properly track nested indentation levels
-        # CRITICAL: Preserve existing indentation when correct, only fix when wrong
-        # This is a simpler, more reliable approach that preserves correct indentation
+        # 7. Fix indentation: SIMPLIFIED - Only fix when clearly wrong, preserve when correct
+        # CRITICAL: The LLM often generates correct code - we should preserve it!
+        # Only fix indentation if it's clearly broken (e.g., elif/else at wrong level)
         lines = code.split('\n')
         fixed_lines = []
-        indent_stack = []  # Stack to track indentation levels
         
         for i, line in enumerate(lines):
             stripped = line.strip()
@@ -596,20 +595,10 @@ class PythonExecutor:
                         continue
                     # If already properly indented, fall through to preserve it
             
-            # For all other lines, preserve existing indentation if it looks reasonable
-            # Only fix if it's clearly wrong (e.g., control flow at wrong level)
-            if re.match(r'^(for|if|while)\s+', stripped):
-                # Control flow statement
-                # If it's at base level (0) or reasonably indented, preserve it
-                if existing_indent_level == 0 or (existing_indent_level > 0 and existing_indent % 4 == 0):
-                    fixed_lines.append(line)
-                else:
-                    # Fix to nearest 4-space boundary
-                    fixed_indent = (existing_indent_level * 4)
-                    fixed_lines.append(' ' * fixed_indent + stripped)
-            else:
-                # Regular line - preserve existing indentation
-                fixed_lines.append(line)
+            # For all other lines, PRESERVE existing indentation
+            # The LLM usually generates correct indentation - don't break it!
+            # Only fix if it's clearly broken (which we've already handled above)
+            fixed_lines.append(line)
         
         code = '\n'.join(fixed_lines)
         
