@@ -98,7 +98,7 @@ class ActionPlanBot:
         self.client = OpenAI(api_key=self.api_key)
         
         # DISABLED for performance
-            self.feedback_learner = None
+        self.feedback_learner = None
         
         # Initialize training data loader
         try:
