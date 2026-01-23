@@ -363,6 +363,7 @@ class PythonExecutor:
         
         # 4. Fix method chains split across lines (common LLM error)
         # Pattern: method()\n['key'] or method()\n.method2()
+        # Also handles: df[...]\n['key'] or df[...]\n.tolist()
         # Join them back to single line
         lines = code.split('\n')
         fixed_lines = []
@@ -372,13 +373,28 @@ class PythonExecutor:
             # Check if next line starts with [ or . (method chain continuation)
             if i + 1 < len(lines):
                 next_line = lines[i + 1].strip()
-                if next_line.startswith('[') or next_line.startswith('.'):
+                # Also check if current line ends with ] and next starts with [ or .
+                if (next_line.startswith('[') or next_line.startswith('.')) and not next_line.startswith('[') == False:
                     # Join them together
                     line = line + next_line
                     i += 1  # Skip next line since we merged it
+                    # Continue checking if there are more continuations
+                    while i < len(lines):
+                        next_line = lines[i].strip()
+                        if next_line.startswith('[') or next_line.startswith('.'):
+                            line = line + next_line
+                            i += 1
+                        else:
+                            break
             fixed_lines.append(line)
             i += 1
         code = '\n'.join(fixed_lines)
+        
+        # 4.1. Fix method chains that are split with spaces/newlines in the middle
+        # Pattern: df[...]\n['key'] or df[...] ['key'] (space before bracket)
+        # This handles cases like: df[df['Dept'] == 'Sales']\n['Employee'].tolist()
+        code = re.sub(r'\]\s*\n\s*\[', '][', code)  # ]\n[ -> ][
+        code = re.sub(r'\]\s+\[', '][', code)  # ] [ -> ][
         
         # 4.5. CRITICAL: Fix statements concatenated without line breaks
         # Pattern: statement) for col in ... or statement) if condition: ...
@@ -391,12 +407,19 @@ class PythonExecutor:
         # First, fix patterns where control flow appears after variable assignments
         # Pattern: variable = value for|variable = value if|variable = value while
         # Example: col_a_idx = 0 for i in range(len(df)):
+        # Also handles: variable = value\nfor (with newline but no proper separation)
+        # More robust pattern that handles both same-line and newline cases
         pattern_assign = r'(\w+\s*=\s*[^\n;]+?)\s+(for|if|while|elif|else)\s+'
         def split_after_assignment(match):
             assignment = match.group(1).strip()
             keyword = match.group(2)
             return f'{assignment}\n{keyword} '
         code = re.sub(pattern_assign, split_after_assignment, code)
+        
+        # Also fix cases where assignment and control flow are on same line but separated by space
+        # Pattern: "col_a_idx = 0 for i" -> "col_a_idx = 0\nfor i"
+        # This is a more aggressive pattern that catches edge cases
+        code = re.sub(r'(\w+\s*=\s*\w+)\s+(for|if|while|elif|else)\s+', r'\1\n\2 ', code)
         
         # Split on control flow keywords that appear after closing parentheses/brackets
         # Pattern: ) for|) if|) while|) elif|) else
@@ -424,21 +447,55 @@ class PythonExecutor:
         pattern3 = r'(\b\w+\b|\d+)\s+(for|if|while|elif|else)\s+(?!\w+\s+in\s+|\w+\s*\(|\w+\s*:)'
         # Actually, this is too risky - might break valid code. Let's skip this and rely on the assignment pattern above.
         
-        # Fix indentation issues: if a line starts with 'if', 'for', 'while' after another statement,
-        # it should be on a new line (already handled above) but also ensure proper indentation
+        # Fix indentation issues: ensure proper indentation for control flow blocks
         lines = code.split('\n')
         fixed_lines = []
+        indent_level = 0
         for i, line in enumerate(lines):
             stripped = line.strip()
-            # If line starts with control flow keyword and previous line didn't end with ':'
-            if i > 0 and re.match(r'^\s*(for|if|while|elif|else)\s+', stripped):
-                prev_line = fixed_lines[-1] if fixed_lines else ''
-                # If previous line doesn't end with ':' and isn't empty, ensure this is on new line
-                if prev_line and not prev_line.rstrip().endswith(':'):
-                    # Already on new line from above fix, just ensure proper formatting
-                    pass
-            fixed_lines.append(line)
+            if not stripped:  # Empty line
+                fixed_lines.append('')
+                continue
+            
+            # Check if this is a control flow statement
+            if re.match(r'^(for|if|while|elif|else)\s+', stripped):
+                # Control flow statement - should be at base indent (0)
+                fixed_lines.append(stripped)
+                indent_level = 1  # Next line should be indented
+            elif re.match(r'^elif\s+|^else\s*:', stripped):
+                # elif/else - should be at base indent (0)
+                indent_level = 0
+                fixed_lines.append(stripped)
+                indent_level = 1  # Next line should be indented
+            elif indent_level > 0 and not stripped.startswith('    '):
+                # This should be indented but isn't - add indentation
+                fixed_lines.append('    ' * indent_level + stripped)
+            else:
+                # Check if line ends with ':' - next line should be indented
+                if stripped.endswith(':'):
+                    fixed_lines.append(line)
+                    indent_level = 1
+                else:
+                    fixed_lines.append(line)
+                    # If this line doesn't continue a block, reset indent
+                    if not stripped.endswith('\\'):
+                        indent_level = 0
+        
         code = '\n'.join(fixed_lines)
+        
+        # Final pass: fix any remaining indentation issues
+        # If a line starts with 'if', 'for', 'while' and previous line doesn't end with ':', ensure it's on new line
+        lines = code.split('\n')
+        final_lines = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if i > 0 and re.match(r'^(for|if|while|elif|else)\s+', stripped):
+                prev_line = final_lines[-1] if final_lines else ''
+                if prev_line and not prev_line.rstrip().endswith(':') and prev_line.strip():
+                    # Ensure proper separation
+                    pass
+            final_lines.append(line)
+        code = '\n'.join(final_lines)
         
         # 5. Fix common syntax errors
         code = re.sub(r'\[None\)\*\(', '[None] * (', code)  # [None)*( -> [None] * (
