@@ -81,7 +81,7 @@ class ActionPlanBot:
         self.client = OpenAI(api_key=self.api_key)
         
         # DISABLED for performance
-        self.feedback_learner = None
+            self.feedback_learner = None
         
         # Initialize training data loader
         try:
@@ -178,6 +178,13 @@ class ActionPlanBot:
                     logger.error(f"Could not parse JSON from response: {content[:200]}")
                     raise ValueError(f"Could not parse JSON from response: {content[:200]}")
             
+            # Log generated code for debugging
+            if action_plan.get("operations"):
+                for i, op in enumerate(action_plan["operations"]):
+                    python_code = op.get("python_code", "")
+                    if python_code:
+                        logger.info(f"🤖 LLM Generated Code (Operation {i+1}):\n{python_code[:1000]}")
+            
             # Normalize action plan
             normalized_plan = self._normalize_action_plan(action_plan)
             
@@ -217,6 +224,6 @@ class ActionPlanBot:
                 if isinstance(exec_instructions, dict) and "code" in exec_instructions:
                     op["python_code"] = exec_instructions["code"]
                 elif "python_code" not in op:
-                    logger.warning(f"Operation missing python_code: {op}")
+                logger.warning(f"Operation missing python_code: {op}")
         
         return normalized

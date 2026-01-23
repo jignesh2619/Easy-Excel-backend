@@ -506,24 +506,47 @@ class PythonExecutor:
         code = re.sub(r'([^:\n])\s+(for|if|while|elif|else)\s+([^i][^n]|i[^n]|in[^\s])', r'\1\n\2 \3', code)
         
         # 7. Fix indentation: Ensure proper indentation after control flow
+        # This is CRITICAL - lines after ':' must be indented
         lines = code.split('\n')
         fixed_lines = []
+        indent_stack = [0]  # Track indentation levels
+        
         for i, line in enumerate(lines):
             stripped = line.strip()
             if not stripped:
                 fixed_lines.append('')
                 continue
             
-            # If line starts with control flow, it should be at base level (0 indent)
+            # Check if previous line ended with ':' - current line MUST be indented
+            if i > 0 and fixed_lines:
+                prev_line = fixed_lines[-1].strip()
+                if prev_line.endswith(':'):
+                    # Previous line was a control flow statement - this line MUST be indented
+                    if not stripped.startswith('    '):
+                        # Add 4 spaces of indentation
+                        fixed_lines.append('    ' + stripped)
+                        indent_stack.append(4)
+                        continue
+                    else:
+                        # Already indented, check indentation level
+                        indent_count = len(line) - len(line.lstrip())
+                        if indent_count < 4:
+                            # Not indented enough, fix it
+                            fixed_lines.append('    ' + stripped)
+                            indent_stack.append(4)
+                            continue
+            
+            # Check if this is a control flow statement
             if re.match(r'^(for|if|while|elif|else)\s+', stripped):
+                # Control flow at base level - reset indent stack
+                indent_stack = [0]
                 fixed_lines.append(stripped)
-            # If previous line ended with ':', this line should be indented
-            elif i > 0 and fixed_lines and fixed_lines[-1].strip().endswith(':'):
-                if not stripped.startswith('    '):
-                    fixed_lines.append('    ' + stripped)
-                else:
-                    fixed_lines.append(line)
+            elif re.match(r'^elif\s+|^else\s*:', stripped):
+                # elif/else at base level
+                indent_stack = [0]
+                fixed_lines.append(stripped)
             else:
+                # Regular line - preserve existing indentation or use current level
                 fixed_lines.append(line)
         
         code = '\n'.join(fixed_lines)
@@ -541,7 +564,9 @@ class PythonExecutor:
         cleaned_code = self._clean_code(python_code)
         
         # Log the cleaned code for debugging
-        logger.debug(f"🔍 Cleaned code (first 500 chars): {cleaned_code[:500]}")
+        logger.info(f"🔍 Original code (first 500 chars): {python_code[:500]}")
+        logger.info(f"🔍 Cleaned code (first 500 chars): {cleaned_code[:500]}")
+        logger.info(f"🔍 Full cleaned code:\n{cleaned_code}")
         
         # Check if code is empty
         if not cleaned_code or not cleaned_code.strip():
