@@ -61,6 +61,7 @@ ALLOWED_ORIGINS = [
     "https://easyexcel.in",
     "http://localhost:5173",
     "http://localhost:3000",
+    "https://lazyexcel.pro",  # Also allow without www
 ]
 
 class SmartCORSMiddleware(BaseHTTPMiddleware):
