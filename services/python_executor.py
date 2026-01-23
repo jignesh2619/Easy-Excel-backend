@@ -505,11 +505,11 @@ class PythonExecutor:
         # But be careful not to break valid code like "if x in y:"
         code = re.sub(r'([^:\n])\s+(for|if|while|elif|else)\s+([^i][^n]|i[^n]|in[^\s])', r'\1\n\2 \3', code)
         
-        # 7. Fix indentation: Ensure proper indentation after control flow
-        # This is CRITICAL - lines after ':' must be indented
+        # 7. Fix indentation: Properly track nested indentation levels
+        # CRITICAL: Preserve existing indentation when correct, only fix when wrong
         lines = code.split('\n')
         fixed_lines = []
-        indent_stack = [0]  # Track indentation levels
+        current_indent = 0  # Current indentation level (in multiples of 4 spaces)
         
         for i, line in enumerate(lines):
             stripped = line.strip()
@@ -517,37 +517,53 @@ class PythonExecutor:
                 fixed_lines.append('')
                 continue
             
-            # Check if previous line ended with ':' - current line MUST be indented
+            # Calculate existing indentation
+            existing_indent = len(line) - len(line.lstrip())
+            existing_indent_level = existing_indent // 4
+            
+            # Check if previous line ended with ':' - next line should be indented
             if i > 0 and fixed_lines:
-                prev_line = fixed_lines[-1].strip()
-                if prev_line.endswith(':'):
-                    # Previous line was a control flow statement - this line MUST be indented
-                    if not stripped.startswith('    '):
-                        # Add 4 spaces of indentation
-                        fixed_lines.append('    ' + stripped)
-                        indent_stack.append(4)
+                prev_line_stripped = fixed_lines[-1].strip()
+                if prev_line_stripped.endswith(':'):
+                    # Previous line was control flow - this line MUST be indented one level more
+                    required_indent = current_indent + 1
+                    if existing_indent_level < required_indent:
+                        # Not indented enough - fix it
+                        fixed_lines.append('    ' * required_indent + stripped)
+                        current_indent = required_indent
                         continue
                     else:
-                        # Already indented, check indentation level
-                        indent_count = len(line) - len(line.lstrip())
-                        if indent_count < 4:
-                            # Not indented enough, fix it
-                            fixed_lines.append('    ' + stripped)
-                            indent_stack.append(4)
-                            continue
+                        # Already properly indented - use it and update current_indent
+                        fixed_lines.append(line)
+                        current_indent = existing_indent_level
+                        continue
             
             # Check if this is a control flow statement
             if re.match(r'^(for|if|while|elif|else)\s+', stripped):
-                # Control flow at base level - reset indent stack
-                indent_stack = [0]
-                fixed_lines.append(stripped)
+                # Control flow statement - should be at current_indent level
+                # If it's not, it might be dedented (elif/else at same level as if)
+                if existing_indent_level <= current_indent:
+                    # This is at the correct level or dedented (elif/else)
+                    fixed_lines.append('    ' * existing_indent_level + stripped)
+                    current_indent = existing_indent_level
+                else:
+                    # Unexpected indentation - preserve it but might be wrong
+                    fixed_lines.append(line)
+                    current_indent = existing_indent_level
             elif re.match(r'^elif\s+|^else\s*:', stripped):
-                # elif/else at base level
-                indent_stack = [0]
-                fixed_lines.append(stripped)
+                # elif/else - should be at same level as the matching if/for
+                # Dedent to current_indent level
+                fixed_lines.append('    ' * current_indent + stripped)
+                # Don't change current_indent - elif/else is at same level
             else:
-                # Regular line - preserve existing indentation or use current level
+                # Regular line - preserve existing indentation
                 fixed_lines.append(line)
+                # Update current_indent based on the line's indentation
+                # If line doesn't end with ':', we might be ending a block
+                if not stripped.endswith(':'):
+                    # Check if this line is less indented than current - we're dedenting
+                    if existing_indent_level < current_indent:
+                        current_indent = existing_indent_level
         
         code = '\n'.join(fixed_lines)
         
