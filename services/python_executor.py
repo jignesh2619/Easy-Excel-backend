@@ -568,33 +568,20 @@ class PythonExecutor:
                     prev_indent = len(prev_line) - len(prev_line.lstrip())
                     required_indent = prev_indent + 4
                     
-                    # CRITICAL: Check if we're inside a function definition
-                    # If so, ensure control flow statements are indented relative to the function, not just previous line
-                    is_inside_function = False
-                    function_indent = 0
-                    for j in range(len(fixed_lines) - 1, -1, -1):
-                        check_line = fixed_lines[j]
-                        check_stripped = check_line.strip()
-                        if check_stripped.startswith('def ') or check_stripped.startswith('lambda '):
-                            function_indent = len(check_line) - len(check_line.lstrip())
-                            # Check if we're still inside this function (current indent >= function indent)
-                            # AND the previous line is also inside the function
-                            if prev_indent >= function_indent:
-                                is_inside_function = True
-                            break
+                    # CRITICAL: The standard rule is: line after ':' should be indented by prev_indent + 4
+                    # This works for:
+                    # - Function definitions: def func(): -> next line at function_indent + 4
+                    # - Control flow: if condition: -> next line at if_indent + 4
+                    # - Nested control flow: if inside function -> next line at (function_indent + 4) + 4 = function_indent + 8
                     
-                    # If we're inside a function and this is a control flow statement or return,
-                    # ensure it's properly indented relative to the function (function_indent + 4)
-                    if is_inside_function and (re.match(r'^(if|for|while|return)\s+', stripped) or stripped.startswith('return ')):
-                        # Control flow/return inside function - should be at function_indent + 4
-                        if existing_indent < function_indent + 4:
-                            fixed_lines.append(' ' * (function_indent + 4) + stripped)
-                            continue
-                        # If already properly indented, preserve it
-                        fixed_lines.append(line)
-                        continue
+                    # Check if previous line is a control flow statement (if/for/while)
+                    is_control_flow = re.match(r'^(if|for|while|elif|else)\s+', prev_line_stripped) or prev_line_stripped.startswith('else:')
                     
-                    # For non-function contexts or non-control-flow statements, use standard indentation
+                    # If previous line is control flow AND we're inside a function, we need to be careful
+                    # But the standard rule (prev_indent + 4) should handle this correctly
+                    # because if the if is at function_indent + 4, then return should be at function_indent + 8
+                    # which is (function_indent + 4) + 4 = prev_indent + 4
+                    
                     if existing_indent < required_indent:
                         # Not indented enough - fix it
                         fixed_lines.append(' ' * required_indent + stripped)
