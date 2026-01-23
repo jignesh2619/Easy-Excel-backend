@@ -539,23 +539,8 @@ class PythonExecutor:
             existing_indent = len(line) - len(line.lstrip())
             existing_indent_level = existing_indent // 4
             
-            # Check if previous line ended with ':' - next line should be indented
-            if i > 0 and fixed_lines:
-                prev_line_stripped = fixed_lines[-1].strip()
-                if prev_line_stripped.endswith(':'):
-                    # Previous line was control flow/function - this line MUST be indented
-                    # Calculate required indent from the previous line's indent
-                    prev_line = fixed_lines[-1]
-                    prev_indent = len(prev_line) - len(prev_line.lstrip())
-                    required_indent = prev_indent + 4
-                    
-                    if existing_indent < required_indent:
-                        # Not indented enough - fix it
-                        fixed_lines.append(' ' * required_indent + stripped)
-                        continue
-                    # If already properly indented, fall through to preserve it
-            
-            # Check if this is elif/else - should be at same level as matching if/for
+            # CRITICAL: Check if this is elif/else FIRST - before checking for indentation after ':'
+            # elif/else should be at same level as matching if/for, NOT indented after the previous ':'
             if re.match(r'^elif\s+|^else\s*:', stripped):
                 # Find the matching if/for by looking back
                 # elif/else should be at the same indent as the matching if/for
@@ -572,6 +557,23 @@ class PythonExecutor:
                 # Don't use existing indent if it's wrong - always use matching indent
                 fixed_lines.append(' ' * matching_indent + stripped)
                 continue
+            
+            # Check if previous line ended with ':' - next line should be indented
+            # BUT: Skip this check for elif/else (already handled above)
+            if i > 0 and fixed_lines:
+                prev_line_stripped = fixed_lines[-1].strip()
+                if prev_line_stripped.endswith(':'):
+                    # Previous line was control flow/function - this line MUST be indented
+                    # Calculate required indent from the previous line's indent
+                    prev_line = fixed_lines[-1]
+                    prev_indent = len(prev_line) - len(prev_line.lstrip())
+                    required_indent = prev_indent + 4
+                    
+                    if existing_indent < required_indent:
+                        # Not indented enough - fix it
+                        fixed_lines.append(' ' * required_indent + stripped)
+                        continue
+                    # If already properly indented, fall through to preserve it
             
             # For all other lines, preserve existing indentation if it looks reasonable
             # Only fix if it's clearly wrong (e.g., control flow at wrong level)
