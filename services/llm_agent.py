@@ -328,7 +328,8 @@ Answer:"""
         user_id: Optional[str] = None,
         sample_data: Optional[List[Dict]] = None,
         sample_explanation: Optional[str] = None,
-        df: Optional[pd.DataFrame] = None
+        df: Optional[pd.DataFrame] = None,
+        is_dashboard: bool = False
     ) -> Dict:
         """
         Interpret user prompt and route to appropriate bot with hybrid model selection
@@ -341,8 +342,8 @@ Answer:"""
         - gpt-4o-mini: For simple operations (default, cost-effective, optimized for structured outputs)
         - gpt-4o: For complex operations (better accuracy, optimized for JSON/schema outputs)
         """
-        # Check if chart request
-        is_chart = self._is_chart_request(user_prompt)
+        # Check if chart request - only allow on dashboard
+        is_chart = self._is_chart_request(user_prompt) and is_dashboard
         
         # Detect complexity (ultra-lightweight, runs before any heavy operations)
         is_complex = self._is_complex_operation(user_prompt, available_columns, sample_data)

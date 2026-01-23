@@ -216,6 +216,7 @@ class ProcessDataRequest(BaseModel):
     columns: List[str]  # Column names
     prompt: str  # User prompt for processing
     row_count: Optional[int] = None  # Total number of rows (if data is a preview/sample)
+    is_dashboard: Optional[bool] = False  # True if request is from dashboard page, False if from preview page
 
 
 @app.get("/", response_model=HealthResponse)
@@ -749,7 +750,24 @@ async def process_data(
                     detail=token_check.get("error", "Insufficient tokens. Please upgrade your plan.")
                 )
         
-        # 6. Interpret prompt with LLM
+        # 6. Check if chart request from preview page (not allowed)
+        is_dashboard = request.is_dashboard if hasattr(request, 'is_dashboard') else False
+        prompt_lower = request.prompt.lower()
+        
+        # Chart keywords that should only work on dashboard
+        chart_keywords = ['chart', 'graph', 'plot', 'visualize', 'visualization', 'dashboard', 'bar chart', 'line chart', 'pie chart']
+        has_chart_keywords = any(keyword in prompt_lower for keyword in chart_keywords)
+        
+        # If chart keywords detected but NOT on dashboard, return helpful error
+        if has_chart_keywords and not is_dashboard:
+            if temp_file_path and Path(temp_file_path).exists():
+                file_manager.delete_file(temp_file_path)
+            raise HTTPException(
+                status_code=400,
+                detail="Chart generation is only available on the Dashboard page. Please go to the Dashboard page to generate graphs and charts. In the Preview page, you can only perform data operations on the sheet."
+            )
+        
+        # 7. Interpret prompt with LLM
         if llm_agent is None:
             if temp_file_path and Path(temp_file_path).exists():
                 file_manager.delete_file(temp_file_path)
@@ -764,13 +782,15 @@ async def process_data(
         # OPTIMIZATION: Log LLM call time
         import time
         llm_start = time.time()
+        # Pass is_dashboard context to LLM agent for chart detection
         llm_result = llm_agent.interpret_prompt(
             request.prompt,
             available_columns,
             user_id=user_id,
             sample_data=sample_data,
             sample_explanation=sample_explanation,
-            df=df
+            df=df,
+            is_dashboard=is_dashboard
         )
         llm_time = time.time() - llm_start
         logger.info(f"⏱️ LLM interpretation took {llm_time:.2f}s")
