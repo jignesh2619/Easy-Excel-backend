@@ -545,17 +545,38 @@ class PythonExecutor:
                 # Find the matching if/for by looking back
                 # elif/else should be at the same indent as the matching if/for
                 matching_indent = 0
+                found_match = False
                 for j in range(len(fixed_lines) - 1, -1, -1):
-                    prev_stripped = fixed_lines[j].strip()
+                    prev_line = fixed_lines[j]
+                    prev_stripped = prev_line.strip()
+                    # Check if this is an if/for/while statement (not elif/else)
                     if re.match(r'^(if|for|while)\s+', prev_stripped):
-                        # Found matching if/for - get its indent
-                        prev_line = fixed_lines[j]
+                        # Found matching if/for - get its indent from the actual line (not stripped)
                         matching_indent = len(prev_line) - len(prev_line.lstrip())
+                        found_match = True
                         break
                 
                 # CRITICAL: elif/else MUST be at the same indent as the matching if/for
-                # Don't use existing indent if it's wrong - always use matching indent
-                fixed_lines.append(' ' * matching_indent + stripped)
+                # If we found a match, use its indent. Otherwise, preserve existing indent if reasonable.
+                if found_match:
+                    fixed_lines.append(' ' * matching_indent + stripped)
+                else:
+                    # No matching if found - preserve existing indent if it looks reasonable
+                    # But if it's at base level (0) and we're inside a function, that's wrong
+                    if existing_indent == 0 and i > 0:
+                        # We're probably inside a function - try to find function definition
+                        for j in range(len(fixed_lines) - 1, -1, -1):
+                            prev_line = fixed_lines[j]
+                            if prev_line.strip().startswith('def '):
+                                func_indent = len(prev_line) - len(prev_line.lstrip())
+                                # Use function indent + 4 (standard Python indentation)
+                                fixed_lines.append(' ' * (func_indent + 4) + stripped)
+                                break
+                        else:
+                            # No function found - use existing indent
+                            fixed_lines.append(line)
+                    else:
+                        fixed_lines.append(line)
                 continue
             
             # Check if previous line ended with ':' - next line should be indented
