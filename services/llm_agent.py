@@ -146,6 +146,20 @@ class LLMAgent:
             True if chart request, False otherwise
         """
         prompt_lower = prompt.lower()
+        
+        # EXCLUDE conditional filling operations (these are NOT chart requests)
+        # Patterns like "fill col X with ref Y if...", "if below X then Y", etc.
+        conditional_filling_patterns = [
+            "fill col", "fill column", "fill in col", "fill in column",
+            "if below", "if above", "if between", "then low", "then high", "then medium",
+            "ref c", "reference", "based on", "depending on"
+        ]
+        
+        # If it's clearly a conditional filling operation, it's NOT a chart
+        if any(pattern in prompt_lower for pattern in conditional_filling_patterns):
+            logger.info(f"Chart detection: prompt='{prompt[:50]}...' - EXCLUDED (conditional filling operation)")
+            return False
+        
         chart_keywords = [
             "chart", "graph", "plot", "visualize", "visualization",
             "bar chart", "bar graph", "line chart", "line graph",
@@ -155,7 +169,7 @@ class LLMAgent:
             "make chart", "make graph", "draw chart", "draw graph",
             "display chart", "display graph", "show graph",
             # Additional patterns
-            "between", "compare", "relationship", "correlation",
+            "compare", "relationship", "correlation",
             # Chart type variations
             "bar", "line", "pie", "scatter", "histogram"
         ]
@@ -164,6 +178,7 @@ class LLMAgent:
         has_chart_keyword = any(keyword in prompt_lower for keyword in chart_keywords)
         
         # Also check for patterns like "between X and Y" which often indicate chart requests
+        # BUT only if it's NOT a conditional filling operation
         has_between_pattern = "between" in prompt_lower and ("and" in prompt_lower or "&" in prompt_lower)
         
         # Check for visualization intent words
