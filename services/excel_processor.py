@@ -2622,5 +2622,76 @@ class ExcelProcessor:
             import logging
             logger = logging.getLogger(__name__)
             logger.debug(f"⚠️ Error loading formatting metadata: {str(e)}")
+    
+    def _convert_style_apply_to_conditional_format(self, python_code: str, description: str):
+        """Detect df.style.apply() calls and convert to conditional formatting rules"""
+        import re
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            # Extract function definition and column reference from code
+            # Pattern: def function_name(row): ... if row['Column'] == 'Value': return ['background-color: color']
+            func_match = re.search(r'def\s+(\w+)\s*\([^)]*\)\s*:(.*?)(?=df\.style\.apply|$)', python_code, re.DOTALL)
+            if not func_match:
+                logger.warning("⚠️ Could not extract function from style.apply code")
+                return
+            
+            func_body = func_match.group(2)
+            
+            # Extract column name and conditions
+            # Pattern: row['Column'] == 'Value'
+            column_match = re.search(r"row\['([^']+)'\]", func_body)
+            if not column_match:
+                logger.warning("⚠️ Could not extract column name from style.apply code")
+                return
+            
+            column = column_match.group(1)
+            if column not in self.df.columns:
+                logger.warning(f"⚠️ Column '{column}' not found in dataframe")
+                return
+            
+            # Extract color mappings: if row['Column'] == 'Value': return ['background-color: color']
+            color_mappings = {}
+            pattern = r"if\s+row\['[^']+'\]\s*==\s*'([^']+)':\s*return\s*\['background-color:\s*([^']+)'\]"
+            matches = re.finditer(pattern, func_body)
+            
+            for match in matches:
+                value = match.group(1)
+                color = match.group(2)
+                color_mappings[value] = color
+            
+            # Also check elif statements
+            elif_pattern = r"elif\s+row\['[^']+'\]\s*==\s*'([^']+)':\s*return\s*\['background-color:\s*([^']+)'\]"
+            elif_matches = re.finditer(elif_pattern, func_body)
+            for match in elif_matches:
+                value = match.group(1)
+                color = match.group(2)
+                color_mappings[value] = color
+            
+            # Create conditional formatting rules for each color mapping
+            for value, color in color_mappings.items():
+                rule = {
+                    "type": "conditional",
+                    "format_type": "text_equals",
+                    "config": {
+                        "column": column,
+                        "text": value,
+                        "bg_color": color,
+                        "background_color": color
+                    }
+                }
+                self.formatting_rules.append(rule)
+                logger.info(f"✅ Added conditional format rule: {column} == '{value}' -> {color}")
+            
+            if color_mappings:
+                colors_desc = ", ".join([f"{k}: {v}" for k, v in color_mappings.items()])
+                self.summary.append(f"Applied conditional formatting to '{column}' column ({colors_desc})")
+            else:
+                self.summary.append(description if description else "Applied cell highlighting")
+                
+        except Exception as e:
+            logger.error(f"❌ Error converting style.apply to conditional format: {str(e)}")
+            self.summary.append(description if description else "Applied cell highlighting")
 
 
