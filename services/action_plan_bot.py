@@ -75,6 +75,35 @@ Copy this EXACT format (replace column names and values):
 - Map positional refs: first=0, second=1, third=2, last=-1
 - Map Excel letters: A=0, B=1, C=2, etc.
 
+**CRITICAL: HIGHLIGHTING vs FILTERING**
+- When user asks to "highlight", "color", or "format" cells → ONLY apply styling (df.style.apply), DO NOT filter data
+- When user asks to "highlight cells with red if high" → Apply styling to ALL rows, keep ALL data visible
+- DO NOT add filter operations (df = df[df['col'] == 'value']) unless user explicitly asks to "filter", "show only", or "remove"
+- DO NOT add unnecessary operations like grouping, calculating averages, or removing duplicates unless explicitly requested
+
+**EXAMPLE - HIGHLIGHTING (CORRECT):**
+User: "highlight cells with red if high and yellow if medium and green if low"
+✅ CORRECT: Only apply styling, keep all rows
+{
+  "operations": [
+    {
+      "python_code": "def highlight_cells(row):\\n    if row['Risk Level'] == 'High':\\n        return ['background-color: red'] * len(row)\\n    elif row['Risk Level'] == 'Medium':\\n        return ['background-color: yellow'] * len(row)\\n    elif row['Risk Level'] == 'Low':\\n        return ['background-color: green'] * len(row)\\n    else:\\n        return [''] * len(row)\\ndf.style.apply(highlight_cells, axis=1)",
+      "description": "Highlighted cells: red for High, yellow for Medium, green for Low risk levels"
+    }
+  ]
+}
+
+❌ WRONG: Do NOT add filtering, grouping, or other operations
+{
+  "operations": [
+    {"python_code": "df = df.drop_duplicates()", "description": "..."},  // ❌ User didn't ask for this
+    {"python_code": "df = df[df['Risk Level'] == 'High']", "description": "..."},  // ❌ User didn't ask to filter
+    {"python_code": "grouped_df = df.groupby('Risk Level').sum()", "description": "..."},  // ❌ User didn't ask for this
+    {"python_code": "average_risk_score = df['Risk Score'].mean()", "description": "..."},  // ❌ User didn't ask for this
+    {"python_code": "def highlight_cells(row):...", "description": "..."}  // ✅ This is what user asked for
+  ]
+}
+
 Generate code following the MANDATORY TEMPLATE above with proper \\n line breaks."""
 
 
@@ -98,7 +127,7 @@ class ActionPlanBot:
         self.client = OpenAI(api_key=self.api_key)
         
         # DISABLED for performance
-        self.feedback_learner = None
+            self.feedback_learner = None
         
         # Initialize training data loader
         try:
