@@ -540,41 +540,65 @@ class PythonExecutor:
             
             # CRITICAL: Check if this is elif/else FIRST - before checking for indentation after ':'
             # elif/else should be at same level as matching if/for, NOT indented after the previous ':'
+            # This must work for ALL function types: def, lambda, nested functions, etc.
             if re.match(r'^elif\s+|^else\s*:', stripped):
-                # Find the matching if/for by looking back
-                # elif/else should be at the same indent as the matching if/for
+                # Find the matching if/for/while by looking back
+                # elif/else should be at the same indent as the matching if/for/while
                 matching_indent = 0
                 found_match = False
+                
+                # Track indentation levels to find the correct matching if/for/while
+                # We need to find the if/for/while at the same indentation level or higher
                 for j in range(len(fixed_lines) - 1, -1, -1):
                     prev_line = fixed_lines[j]
                     prev_stripped = prev_line.strip()
+                    prev_indent = len(prev_line) - len(prev_line.lstrip())
+                    
+                    # Skip empty lines
+                    if not prev_stripped:
+                        continue
+                    
                     # Check if this is an if/for/while statement (not elif/else)
                     if re.match(r'^(if|for|while)\s+', prev_stripped):
-                        # Found matching if/for - get its indent from the actual line (not stripped)
-                        matching_indent = len(prev_line) - len(prev_line.lstrip())
+                        # Found matching if/for/while - use its indent
+                        matching_indent = prev_indent
                         found_match = True
                         break
+                    # If we encounter another elif/else at same or higher level, we've gone too far
+                    elif re.match(r'^(elif|else)\s*:', prev_stripped):
+                        # This is another elif/else - continue looking for the matching if
+                        # But if it's at a higher indent level, we might have passed the matching if
+                        if prev_indent < existing_indent:
+                            # This elif/else is at a higher level - we've probably passed the matching if
+                            # Continue looking
+                            continue
                 
-                # CRITICAL: elif/else MUST be at the same indent as the matching if/for
-                # If we found a match, use its indent. Otherwise, preserve existing indent if reasonable.
+                # CRITICAL: elif/else MUST be at the same indent as the matching if/for/while
                 if found_match:
                     fixed_lines.append(' ' * matching_indent + stripped)
                 else:
-                    # No matching if found - preserve existing indent if it looks reasonable
-                    # But if it's at base level (0) and we're inside a function, that's wrong
+                    # No matching if/for/while found - this is unusual but preserve existing indent
+                    # If existing indent is 0 and we're clearly inside a block, try to fix it
                     if existing_indent == 0 and i > 0:
-                        # We're probably inside a function - try to find function definition
+                        # Look for any function definition or control flow that might indicate we're in a block
                         for j in range(len(fixed_lines) - 1, -1, -1):
                             prev_line = fixed_lines[j]
-                            if prev_line.strip().startswith('def '):
+                            prev_stripped = prev_line.strip()
+                            if prev_stripped.startswith('def ') or prev_stripped.startswith('lambda '):
                                 func_indent = len(prev_line) - len(prev_line.lstrip())
                                 # Use function indent + 4 (standard Python indentation)
                                 fixed_lines.append(' ' * (func_indent + 4) + stripped)
                                 break
+                            elif re.match(r'^(if|for|while)\s+', prev_stripped):
+                                # Found a control flow - use its indent
+                                control_indent = len(prev_line) - len(prev_line.lstrip())
+                                fixed_lines.append(' ' * control_indent + stripped)
+                                break
                         else:
-                            # No function found - use existing indent
+                            # No function or control flow found - preserve existing
                             fixed_lines.append(line)
                     else:
+                        # Existing indent is non-zero - preserve it
                         fixed_lines.append(line)
                 continue
             
