@@ -582,11 +582,30 @@ class PythonExecutor:
                     # because if the if is at function_indent + 4, then return should be at function_indent + 8
                     # which is (function_indent + 4) + 4 = prev_indent + 4
                     
+                    # CRITICAL: Always enforce indentation after ':'
+                    # If existing indent is less than required, fix it
+                    # If existing indent equals required, preserve it
+                    # If existing indent is greater than required, it might be intentional (e.g., nested blocks)
+                    # but we should still check if it's reasonable
                     if existing_indent < required_indent:
                         # Not indented enough - fix it
                         fixed_lines.append(' ' * required_indent + stripped)
                         continue
-                    # If already properly indented, fall through to preserve it
+                    elif existing_indent == required_indent:
+                        # Already correctly indented - preserve it
+                        fixed_lines.append(line)
+                        continue
+                    else:
+                        # Existing indent is greater than required
+                        # This might be intentional (nested blocks), but check if it's reasonable
+                        # If it's way too much (more than required + 4), it might be wrong
+                        if existing_indent > required_indent + 4:
+                            # Probably wrong - fix to required indent
+                            fixed_lines.append(' ' * required_indent + stripped)
+                            continue
+                        # Otherwise, preserve it (might be intentional nested indentation)
+                        fixed_lines.append(line)
+                        continue
             
             # For all other lines, PRESERVE existing indentation
             # The LLM usually generates correct indentation - don't break it!
