@@ -1280,213 +1280,49 @@ Use this sample to:
         last_col = available_columns[-1] if available_columns else 'N/A'
         last_idx = len(available_columns) - 1 if available_columns else 0
         
-        # Build reminder text safely without nested quotes in f-strings
+        # Simplified reminder text
         reminder_text = f"""
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-DATASET SUMMARY:
-  • Total Rows: {total_rows}
-  • Total Columns: {len(available_columns)}
-  • Column Names: {', '.join(available_columns)}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DATASET: {total_rows} rows, {len(available_columns)} columns
+Columns: {', '.join(available_columns[:10])}{'...' if len(available_columns) > 10 else ''}
 
-═══════════════════════════════════════════════════════════════════════════════
-🔍 STEP 1: ANALYZE THE DATASET (DO THIS FIRST, BEFORE ANY ACTION)
-═══════════════════════════════════════════════════════════════════════════════
+**CRITICAL RULES:**
+1. Use ACTUAL column names from available_columns (case-sensitive)
+2. Positional refs: first=0, second=1, third=2, last={len(available_columns)-1}
+3. Excel letters: A=0, B=1, C=2, etc.
+4. Search ALL rows to find columns by content
+5. Code runs on FULL dataset ({total_rows} rows), not just sample
 
-YOU HAVE THE COMPLETE EXCEL DATASET ABOVE WITH ALL {total_rows} ROWS.
+**COLUMN MAPPING:**
+- Positional: "delete second column" → available_columns[1]
+- Excel letter: "column A" → available_columns[0]
+- By content: "phone column" → search rows, find column with phone data
+- By name: "remove UY7F9" → find "UY7F9" in available_columns
 
-⚠️ MANDATORY ANALYSIS WORKFLOW:
-
-1. **READ THE ENTIRE DATASET**: Go through ALL {total_rows} rows provided above
-2. **UNDERSTAND THE STRUCTURE**: 
-   - Column positions: first={first_col} (index 0), second={second_col} (index 1), third={third_col} (index 2), last={last_col} (index {last_idx})
-   - Excel letters: A={first_col}, B={second_col}, C={third_col}, etc.
-3. **SEARCH FOR CONTENT**: 
-   - If user mentions text like "Car detailing service" → Search ALL rows to find which column(s) contain it
-   - If user says "phone column" → Search ALL rows to find which column has phone data
-   - If user says "column with X" → Search ALL rows to identify the actual column name
-4. **VERIFY BEFORE ACTING**:
-   - If user says "remove 3rd column" → Check what the 3rd column actually contains
-   - If user says "delete column X" → Verify X exists in the column list
-   - Don't blindly follow instructions - understand the data first
-
-═══════════════════════════════════════════════════════════════════════════════
-🎯 CRITICAL INSTRUCTIONS - READ THIS CAREFULLY:
-═══════════════════════════════════════════════════════════════════════════════
-
-COLUMN NAME MATCHING RULES (MANDATORY):
-1. Column names can be ANYTHING: codes (UY7F9, ABC123), numbers (123, 456), text (Name, Phone), or mixed
-2. When user mentions a column name (e.g., "remove column name UY7F9"), you MUST:
-   a. Check the available_columns list above EXACTLY as shown
-   b. Find the column name that matches (case-insensitive, but preserve exact case in response)
-   c. Use that EXACT column name from available_columns in your JSON response
-3. If user says "remove column name X" or "delete column X", X is the ACTUAL column name - use it directly
-4. NEVER ignore a column name the user provides - if they say "UY7F9", look for "UY7F9" in available_columns
-5. Column names are case-sensitive in Excel - match them exactly as they appear in available_columns
-
-POSITIONAL REFERENCES (when user says "first", "second", "third", "last"):
-1. Look at the available_columns list above
-2. Map positions: first=index 0, second=index 1, third=index 2, last=index (length-1)
-3. Return the ACTUAL column name at that position from available_columns
-4. Example: If available_columns = ["Name", "UY7F9", "Phone"], then "second column" = "UY7F9"
-
-EXCEL COLUMN LETTERS (when user says "column A", "column B", "column A to Z"):
-1. Excel uses letters: A=index 0, B=index 1, C=index 2, ..., Z=index 25, AA=index 26, etc.
-2. When user says "column A" → map to index 0, get actual column name from available_columns[0]
-3. When user says "column B" → map to index 1, get actual column name from available_columns[1]
-4. When user says "column A to Z" or "columns A through Z" → get all columns from index 0 to 25 (or last column)
-5. Always return the ACTUAL column name(s) from available_columns, not the letter
-6. Example: If available_columns = ["Name", "Age", "City"], then "column A" = "Name", "column B" = "Age", "column C" = "City"
-
-TEXT-BASED SEARCH (when user says "highlight cells with X" or "highlight column with X" or "cells containing X"):
-1. Search through ALL {total_rows} rows in the dataset above
-2. Find which column(s) contain the specified text/pattern (e.g., "Car detailing service")
-3. Identify the ACTUAL column name(s) from available_columns
-4. Return JSON with conditional_format:
-   {{"task": "conditional_format", "conditional_format": {{"format_type": "contains_text", "config": {{"column": "ActualColumnName", "text": "X", "bg_color": "#FFFF00"}}}}}}
-5. The "text" in config should be the exact search text the user provided (e.g., "Car detailing service")
-6. Use format_type: "contains_text" for partial matches, "text_equals" for exact matches
-
-JSON RESPONSE FORMAT:
-- ALWAYS use actual column names from available_columns list
-- NEVER use positional references ("2nd", "second") in JSON
-- NEVER use vague descriptions ("phone column") in JSON
-- NEVER return empty column_name - if you can't find it, check available_columns again
-- Column names must match EXACTLY (case-sensitive) as they appear in available_columns
-
-EXAMPLES OF CORRECT BEHAVIOR:
-- User: "remove column name UY7F9" → Check available_columns, find "UY7F9", return: {{"task": "delete_column", "delete_column": {{"column_name": "UY7F9"}}}}
-- User: "delete second column" → Check available_columns[1], return actual name at index 1
-- User: "highlight column with phone" → Search all rows, find column containing "phone", return actual column name
-
-═══════════════════════════════════════════════════════════════════════════════
+**RESPONSE FORMAT:**
+- Return JSON with actual column names (never use "2nd", "second", or descriptions)
+- Never return empty column_name
 """
         sample_data_text += reminder_text
     else:
         sample_data_text = "\n⚠️ NOTE: No Excel data provided in this request.\n"
     
-    # Build prompt by concatenating SYSTEM_PROMPT (which has JSON examples) with f-string
-    # This prevents Python from interpreting curly braces in SYSTEM_PROMPT as format specifiers
-    prompt = SYSTEM_PROMPT + f"""
+    # Simplified prompt - essential info only
+    prompt = f"""USER REQUEST: {user_prompt}
 
-═══════════════════════════════════════════════════════════════════════════════
-📋 USER REQUEST:
-═══════════════════════════════════════════════════════════════════════════════
-{user_prompt}
-
-═══════════════════════════════════════════════════════════════════════════════
-📊 AVAILABLE COLUMNS (with positional indices):
-═══════════════════════════════════════════════════════════════════════════════
+AVAILABLE COLUMNS:
 {columns_info}
 
-Column List: {columns_list}
-
 {sample_data_text}
-═══════════════════════════════════════════════════════════════════════════════
 
-CRITICAL INSTRUCTIONS FOR POSITIONAL REFERENCES & ERROR TOLERANCE:
-- If user says "delete second column" or "delete 2nd column" (or with typos), look at the column list above AND the complete data
-- Positional mapping: "1st"/"first" = index 0, "2nd"/"second" = index 1, "3rd"/"third" = index 2, "4th"/"fourth" = index 3, "last" = index (length-1)
-- You MUST use the actual column name from the list above - NEVER return empty column_name
-- ALWAYS identify the actual column name from available_columns based on position
-- Use the complete data to verify which column is which (especially for positional references)
-- Handle typos: "colum" → "column", "delet" → "delete", "remvoe" → "remove", "spllit" → "split"
-- Handle number formats: "2nd" = "second" = index 1, "3rd" = "third" = index 2, etc.
+**INSTRUCTIONS:**
+- Return JSON with operations array containing python_code
+- Use ACTUAL column names from available_columns (never "2nd", "second", or descriptions)
+- Map positions: first=0, second=1, third=2, last={len(available_columns)-1}
+- Map Excel letters: A=0, B=1, C=2, etc.
+- Search dataset to find columns by content
+- Code runs on FULL dataset ({total_rows if total_rows else 'all'} rows)
 
-═══════════════════════════════════════════════════════════════════════════════
-🔄 JSON CONVERSION PROCESS (Apply these rules to ANY request)
-═══════════════════════════════════════════════════════════════════════════════
-
-GENERAL RULE FOR ALL REQUESTS:
-- Input: Natural language (can be ANY form: typos, slang, broken English, unclear)
-- Your Analysis: Apply interpretation rules above to understand intent
-- Output: JSON with ACTUAL column names from available_columns (never use descriptions or positions)
-- Process: Use complete dataset to identify columns, then return executable JSON
-
-SCENARIO-BASED RULES (Apply these patterns, not memorize examples):
-
-SCENARIO 1: User provides specific column name
-- Pattern: "remove column name X", "delete column X", "remove X column"
-- Rule: X is the actual column name - check available_columns, use it exactly
-- JSON: {{"task": "delete_column", "delete_column": {{"column_name": "X"}}}}
-
-SCENARIO 2: User uses positional reference OR Excel column letters
-- Pattern: "delete 2nd column", "remove first column", "delete last column", "delete column A", "remove column B", "column A to Z"
-- Rule: 
-  * For positional: Map position to index (first=0, second=1, etc.), get actual name from available_columns[index]
-  * For Excel letters: Map letter to index (A=0, B=1, C=2, ..., Z=25, AA=26, etc.), get actual name from available_columns[index]
-- JSON: {{"task": "delete_column", "delete_column": {{"column_name": "ActualNameFromIndex"}}}}
-- Example: "delete column A" → available_columns[0], "delete column B" → available_columns[1]
-
-SCENARIO 3: User describes content (highlighting cells)
-- Pattern: "highlight cells with X", "highlight column with X", "cells containing X", "highlight cells which have X"
-- Rule: Search ALL {total_rows} rows in dataset, find column containing X, get actual name
-- JSON Structure:
-  {{
-    "task": "conditional_format",
-    "conditional_format": {{
-      "format_type": "contains_text",
-      "config": {{
-        "column": "ActualColumnNameFromDataset",
-        "text": "X",
-        "bg_color": "#FFFF00"
-      }}
-    }}
-  }}
-- CRITICAL: The "text" field must contain the exact search text (e.g., "Car detailing service")
-- CRITICAL: The "column" field must be the actual column name from available_columns, not a description
-
-SCENARIO 4: User wants to remove/delete rows based on condition
-- Pattern: "remove rows which has X in column Y", "delete rows containing X in column Y", "remove rows where column Y has X"
-- Rule: 
-  * "remove rows which has X" = KEEP rows that DON'T have X (use filter with condition: "not_contains")
-  * Map column Y (can be Excel letter like "L" or column name) to actual column name
-  * If Y is Excel letter (A, B, C, L, etc.), convert to index and get actual column name
-- JSON Structure:
-  {{
-    "task": "filter",
-    "filters": {{
-      "column": "ActualColumnNameFromY",
-      "condition": "not_contains",
-      "value": "X"
-    }}
-  }}
-- Example: "remove rows which has website in column L" → 
-  * L = index 11, get actual column name from available_columns[11]
-  * {{"task": "filter", "filters": {{"column": "ActualColumnNameAtL", "condition": "not_contains", "value": "website"}}}}
-
-CRITICAL: These are RULES, not examples. Apply them to ANY similar pattern, even if you haven't seen it before.
-
-FUZZY MATCHING FOR COLUMN NAMES:
-- If user mentions a column name that doesn't exactly match, find the closest match from available_columns
-- Use case-insensitive matching
-- Handle partial matches ("phone" matches "Phone Numbers", "phone_num", etc.)
-- Handle typos in column names by finding closest match
-
-INTELLIGENT INFERENCE:
-- If user says "clean this" without specifics → perform comprehensive cleaning (duplicates, formatting, missing values)
-- If user says "fix dates" → detect date columns and standardize formats
-- If user says "make graph" → create appropriate chart based on data type
-- If user says "remove dot" → auto-detect which column likely has dots (phone numbers, IDs, etc.)
-- If user says "sort from small to big" → sort ascending
-- If user says "do it properly" → infer what "it" refers to from context
-- If user uses Indian-English ("make this only", "do one thing") → interpret meaning, not exact words
-
-MANDATORY EXAMPLES - Follow these EXACTLY:
-If available_columns = ["Name", "Age", "City", "Phone Numbers"]:
-- User: "delete first column" → {{"task": "delete_column", "delete_column": {{"column_name": "Name"}}}}
-- User: "delete second column" → {{"task": "delete_column", "delete_column": {{"column_name": "Age"}}}}
-- User: "delete 2nd column" → {{"task": "delete_column", "delete_column": {{"column_name": "Age"}}}}
-- User: "delete 2 column" → {{"task": "delete_column", "delete_column": {{"column_name": "Age"}}}}
-- User: "delet second colum" (typo) → {{"task": "delete_column", "delete_column": {{"column_name": "Age"}}}}
-- User: "delete third column" → {{"task": "delete_column", "delete_column": {{"column_name": "City"}}}}
-- User: "delete 3rd column" → {{"task": "delete_column", "delete_column": {{"column_name": "City"}}}}
-- User: "delete last column" → {{"task": "delete_column", "delete_column": {{"column_name": "Phone Numbers"}}}}
-- User: "remove dot from phone" → {{"task": "clean", "operations": [{{"type": "remove_characters", "params": {{"column": "Phone Numbers"}}}}]}}
-
-CRITICAL: In ALL cases above, you MUST return the actual column_name from available_columns. NEVER return empty column_name.
-
-Generate the action plan JSON now. Return ONLY valid JSON, no markdown, no code blocks, pure JSON."""
+Return ONLY valid JSON."""
     
     return prompt
 
