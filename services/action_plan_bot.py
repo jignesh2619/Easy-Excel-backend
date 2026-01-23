@@ -220,6 +220,6 @@ class ActionPlanBot:
                 if isinstance(exec_instructions, dict) and "code" in exec_instructions:
                     op["python_code"] = exec_instructions["code"]
                 elif "python_code" not in op:
-                logger.warning(f"Operation missing python_code: {op}")
+                    logger.warning(f"Operation missing python_code: {op}")
         
         return normalized
