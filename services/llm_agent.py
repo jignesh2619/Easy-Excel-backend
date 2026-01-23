@@ -243,6 +243,19 @@ class LLMAgent:
         if any(kw in prompt_lower for kw in ["vlookup", "index match", "nested formula"]):
             return True
         
+        # Multi-column filling operations (complex logic required)
+        if any(pattern in prompt_lower for pattern in [
+            "fill in col", "fill in column", "fill data in multiple columns",
+            "fill in col a", "fill in col b", "fill in col c",
+            "if sales then fill in col", "if finance then fill in col",
+            "multiple columns", "fill columns", "fill in all columns"
+        ]):
+            return True
+        
+        # Conditional filling based on values (requires proper indentation and logic)
+        if "if" in prompt_lower and ("fill" in prompt_lower or "col" in prompt_lower):
+            return True
+        
         return False
     
     def _llm_classify_complexity(self, user_prompt: str) -> bool:
@@ -263,7 +276,7 @@ class LLMAgent:
             classification_prompt = f"""Classify: SIMPLE or COMPLEX
 
 SIMPLE: Single operation (delete column, rename, add column, sort, filter, simple formula)
-COMPLEX: Multiple steps OR complex formulas (vlookup, nested, multiple conditions)
+COMPLEX: Multiple steps OR complex formulas (vlookup, nested, multiple conditions) OR filling data in multiple columns based on conditions OR conditional filling in different columns
 
 Request: "{user_prompt}"
 Answer:"""
