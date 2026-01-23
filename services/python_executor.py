@@ -568,13 +568,9 @@ class PythonExecutor:
                         matching_indent = len(prev_line) - len(prev_line.lstrip())
                         break
                 
-                # Use the matching indent (or existing if it's reasonable)
-                if existing_indent >= matching_indent - 4 and existing_indent <= matching_indent + 4:
-                    # Existing indent is close to matching - use existing
-                    fixed_lines.append(line)
-                else:
-                    # Use matching indent
-                    fixed_lines.append(' ' * matching_indent + stripped)
+                # CRITICAL: elif/else MUST be at the same indent as the matching if/for
+                # Don't use existing indent if it's wrong - always use matching indent
+                fixed_lines.append(' ' * matching_indent + stripped)
                 continue
             
             # For all other lines, preserve existing indentation if it looks reasonable
