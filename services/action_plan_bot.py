@@ -40,6 +40,8 @@ ACTION_PLAN_SYSTEM_PROMPT = """You are EasyExcel AI. Generate Python code for da
 2. Code modifies 'df' (the dataframe variable)
 3. Use .reset_index(drop=True) after operations that change rows
 4. Available: DateCleaner, TextCleaner, CurrencyCleaner (use static methods)
+5. For regex: Use 're' module (available in execution context), NOT 'regex_module' or 'regex'
+6. Prefer pandas string methods (df['Col'].str.extract(), df['Col'].str.replace()) over 're' module
 
 **KEY RULES:**
 - "new column/columns" = horizontal (axis=1), "stack" = vertical (axis=0)

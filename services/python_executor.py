@@ -411,7 +411,7 @@ class PythonExecutor:
         for i, line in enumerate(lines):
             stripped = line.strip()
             # If line starts with control flow keyword and previous line didn't end with ':'
-            if i > 0 and regex_module.match(r'^\s*(for|if|while|elif|else)\s+', stripped):
+            if i > 0 and re.match(r'^\s*(for|if|while|elif|else)\s+', stripped):
                 prev_line = fixed_lines[-1] if fixed_lines else ''
                 # If previous line doesn't end with ':' and isn't empty, ensure this is on new line
                 if prev_line and not prev_line.rstrip().endswith(':'):
