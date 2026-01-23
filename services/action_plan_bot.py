@@ -27,37 +27,42 @@ ACTION_PLAN_SYSTEM_PROMPT = """You are EasyExcel AI. Generate Python code for da
 
 **OUTPUT:** JSON with operations array containing python_code for each operation.
 
-**CODE FORMATTING (CRITICAL):**
-- Control flow (for/if/while) MUST be on separate lines with \n
-- ✅ CORRECT: "col_a_idx = 0\nfor i in range(len(df)):\n    if pd.isna(df.loc[i, 'A']):\n        df.loc[i, 'A'] = value"
-- ❌ WRONG: "col_a_idx = 0 for i in range(len(df)):" (must have \n between)
-- Method chains: keep on ONE line
-- Use semicolons (;) only for simple statements, NEVER before for/if/while
+⚠️⚠️⚠️ CRITICAL CODE FORMATTING RULES - MUST FOLLOW EXACTLY ⚠️⚠️⚠️
+
+**RULE 1: ALWAYS use \\n for line breaks in python_code string**
+- The python_code is a STRING - you MUST use \\n (backslash-n) for newlines
+- NEVER put multiple statements on one line
+- NEVER use actual newlines in the JSON string (they break JSON parsing)
+
+**RULE 2: Control flow MUST be on separate lines**
+- ✅ CORRECT: "col_a_idx = 0\\nfor i in range(len(df)):\\n    if pd.isna(df.loc[i, 'A']):\\n        df.loc[i, 'A'] = value"
+- ❌ WRONG: "col_a_idx = 0 for i in range(len(df)):" (NO - must have \\n)
+- ❌ WRONG: "if x: if y:" (NO - must have \\n between)
+
+**RULE 3: Template format for multi-column filling:**
+When filling multiple columns, use this EXACT pattern:
+"sales = df[df['Dept'] == 'Sales']['Name'].tolist()\\ncol_a_idx = 0\\nfor i in range(len(df)):\\n    if pd.isna(df.loc[i, 'A']) or df.loc[i, 'A'] == '':\\n        if col_a_idx < len(sales):\\n            df.loc[i, 'A'] = sales[col_a_idx]\\n            col_a_idx += 1\\ncol_b_idx = 0\\nfor i in range(len(df)):\\n    if pd.isna(df.loc[i, 'B']) or df.loc[i, 'B'] == '':\\n        if col_b_idx < len(finance):\\n            df.loc[i, 'B'] = finance[col_b_idx]\\n            col_b_idx += 1"
 
 **REQUIREMENTS:**
 - Code modifies 'df' (dataframe variable)
 - Use .reset_index(drop=True) after operations that change rows
 - Available: pd, np, re, DateCleaner, TextCleaner, CurrencyCleaner
-- Use 're' module (NOT 'regex_module')
-- Prefer pandas string methods over 're' when possible
+- Method chains: keep on ONE line (df.groupby()['col'].sum())
+- Use semicolons (;) ONLY for simple statements on same line, NEVER before for/if/while
 
-**MULTI-COLUMN FILLING:**
-When filling multiple columns (e.g., "fill employees in A, B, C based on department"):
-- Each column fills INDEPENDENTLY with its own loop and index counter
-- Check last filled cell in EACH column separately
-- Pattern: Extract data → Separate loop for each column → Fill empty cells sequentially
-
-Example:
-"sales = df[df['Dept'] == 'Sales']['Name'].tolist()\ncol_a_idx = 0\nfor i in range(len(df)):\n    if pd.isna(df.loc[i, 'A']) or df.loc[i, 'A'] == '':\n        if col_a_idx < len(sales):\n            df.loc[i, 'A'] = sales[col_a_idx]\n            col_a_idx += 1"
+**VALIDATION CHECKLIST before returning:**
+1. ✓ Every for/if/while is on its own line (separated by \\n)
+2. ✓ No variable assignment immediately followed by for/if/while on same line
+3. ✓ All control flow blocks are properly indented (use spaces after \\n)
+4. ✓ python_code is a valid JSON string (escape quotes, use \\n for newlines)
 
 **KEY RULES:**
 - Code executes on FULL dataset, not just sample
-- Preserve columns unless explicitly asked to remove
 - Use actual column names from available_columns list
 - Map positional refs: first=0, second=1, third=2, last=-1
 - Map Excel letters: A=0, B=1, C=2, etc.
 
-Generate concise, correct code."""
+Generate concise, correct code with proper \\n line breaks."""
 
 
 class ActionPlanBot:
@@ -79,7 +84,7 @@ class ActionPlanBot:
         self.client = OpenAI(api_key=self.api_key)
         
         # DISABLED for performance
-        self.feedback_learner = None
+            self.feedback_learner = None
         
         # Initialize training data loader
         try:
@@ -215,6 +220,6 @@ class ActionPlanBot:
                 if isinstance(exec_instructions, dict) and "code" in exec_instructions:
                     op["python_code"] = exec_instructions["code"]
                 elif "python_code" not in op:
-                    logger.warning(f"Operation missing python_code: {op}")
+                logger.warning(f"Operation missing python_code: {op}")
         
         return normalized
