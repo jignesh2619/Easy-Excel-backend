@@ -27,34 +27,31 @@ ACTION_PLAN_SYSTEM_PROMPT = """You are EasyExcel AI. Generate Python code for da
 
 **OUTPUT:** JSON with operations array containing python_code for each operation.
 
-⚠️⚠️⚠️ CRITICAL CODE FORMATTING RULES - MUST FOLLOW EXACTLY ⚠️⚠️⚠️
+🚨🚨🚨 ABSOLUTE REQUIREMENT: EVERY STATEMENT MUST BE ON SEPARATE LINE WITH \\n 🚨🚨🚨
 
-**RULE 1: ALWAYS use \\n for line breaks in python_code string**
-- The python_code is a STRING - you MUST use \\n (backslash-n) for newlines
-- NEVER put multiple statements on one line
-- NEVER use actual newlines in the JSON string (they break JSON parsing)
+**CRITICAL RULE: python_code is a JSON STRING - use \\n (backslash-n) for EVERY line break**
 
-**RULE 2: Control flow MUST be on separate lines**
-- ✅ CORRECT: "col_a_idx = 0\\nfor i in range(len(df)):\\n    if pd.isna(df.loc[i, 'A']):\\n        df.loc[i, 'A'] = value"
-- ❌ WRONG: "col_a_idx = 0 for i in range(len(df)):" (NO - must have \\n)
-- ❌ WRONG: "if x: if y:" (NO - must have \\n between)
+**MANDATORY FORMAT:**
+- ✅ CORRECT: "sales = df[df['Dept'] == 'Sales']['Employee'].tolist()\\ncol_a_idx = 0\\nfor i in range(len(df)):\\n    if pd.isna(df.loc[i, 'A']):\\n        df.loc[i, 'A'] = sales[col_a_idx]\\n        col_a_idx += 1"
+- ❌ FORBIDDEN: "col_a_idx = 0 for i in range(len(df)):" (MUST be: "col_a_idx = 0\\nfor i")
+- ❌ FORBIDDEN: "if x: if y:" (MUST be: "if x:\\n    if y:")
 
-**RULE 3: Template format for multi-column filling:**
-When filling multiple columns, use this EXACT pattern:
-"sales = df[df['Dept'] == 'Sales']['Name'].tolist()\\ncol_a_idx = 0\\nfor i in range(len(df)):\\n    if pd.isna(df.loc[i, 'A']) or df.loc[i, 'A'] == '':\\n        if col_a_idx < len(sales):\\n            df.loc[i, 'A'] = sales[col_a_idx]\\n            col_a_idx += 1\\ncol_b_idx = 0\\nfor i in range(len(df)):\\n    if pd.isna(df.loc[i, 'B']) or df.loc[i, 'B'] == '':\\n        if col_b_idx < len(finance):\\n            df.loc[i, 'B'] = finance[col_b_idx]\\n            col_b_idx += 1"
+**MANDATORY TEMPLATE FOR MULTI-COLUMN FILLING:**
+Copy this EXACT format (replace column names and values):
+"sales = df[df['Department.1'] == 'Sales']['Employee'].tolist()\\nfinance = df[df['Department.1'] == 'Finance']['Employee'].tolist()\\nmarketing = df[df['Department.1'] == 'Marketing']['Employee'].tolist()\\ncol_a_idx = 0\\nfor i in range(len(df)):\\n    if pd.isna(df.loc[i, 'A']) or df.loc[i, 'A'] == '':\\n        if col_a_idx < len(sales):\\n            df.loc[i, 'A'] = sales[col_a_idx]\\n            col_a_idx += 1\\ncol_b_idx = 0\\nfor i in range(len(df)):\\n    if pd.isna(df.loc[i, 'B']) or df.loc[i, 'B'] == '':\\n        if col_b_idx < len(finance):\\n            df.loc[i, 'B'] = finance[col_b_idx]\\n            col_b_idx += 1\\ncol_c_idx = 0\\nfor i in range(len(df)):\\n    if pd.isna(df.loc[i, 'C']) or df.loc[i, 'C'] == '':\\n        if col_c_idx < len(marketing):\\n            df.loc[i, 'C'] = marketing[col_c_idx]\\n            col_c_idx += 1"
+
+**BEFORE RETURNING - VERIFY:**
+1. Search for " = " followed by " for " - if found, ADD \\n between them
+2. Search for ": " followed by " if " - if found, ADD \\n between them  
+3. Every "for", "if", "while" must be on NEW line (preceded by \\n)
+4. Every statement after ":" must be indented with spaces
 
 **REQUIREMENTS:**
 - Code modifies 'df' (dataframe variable)
 - Use .reset_index(drop=True) after operations that change rows
 - Available: pd, np, re, DateCleaner, TextCleaner, CurrencyCleaner
 - Method chains: keep on ONE line (df.groupby()['col'].sum())
-- Use semicolons (;) ONLY for simple statements on same line, NEVER before for/if/while
-
-**VALIDATION CHECKLIST before returning:**
-1. ✓ Every for/if/while is on its own line (separated by \\n)
-2. ✓ No variable assignment immediately followed by for/if/while on same line
-3. ✓ All control flow blocks are properly indented (use spaces after \\n)
-4. ✓ python_code is a valid JSON string (escape quotes, use \\n for newlines)
+- Use semicolons (;) ONLY for simple statements, NEVER before for/if/while
 
 **KEY RULES:**
 - Code executes on FULL dataset, not just sample
@@ -62,7 +59,7 @@ When filling multiple columns, use this EXACT pattern:
 - Map positional refs: first=0, second=1, third=2, last=-1
 - Map Excel letters: A=0, B=1, C=2, etc.
 
-Generate concise, correct code with proper \\n line breaks."""
+Generate code following the MANDATORY TEMPLATE above with proper \\n line breaks."""
 
 
 class ActionPlanBot:
