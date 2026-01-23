@@ -558,6 +558,7 @@ class PythonExecutor:
             
             # Check if previous line ended with ':' - next line should be indented
             # BUT: Skip this check for elif/else (already handled above)
+            # CRITICAL: This must preserve function body indentation correctly
             if i > 0 and fixed_lines:
                 prev_line_stripped = fixed_lines[-1].strip()
                 if prev_line_stripped.endswith(':'):
@@ -566,6 +567,29 @@ class PythonExecutor:
                     prev_line = fixed_lines[-1]
                     prev_indent = len(prev_line) - len(prev_line.lstrip())
                     required_indent = prev_indent + 4
+                    
+                    # BUT: If this is a control flow statement (if/for/while) and we're inside a function,
+                    # it should be indented relative to the function, not just the previous line
+                    # Check if we're inside a function definition
+                    is_inside_function = False
+                    function_indent = 0
+                    for j in range(len(fixed_lines) - 1, -1, -1):
+                        check_line = fixed_lines[j]
+                        check_stripped = check_line.strip()
+                        if check_stripped.startswith('def ') or check_stripped.startswith('lambda '):
+                            function_indent = len(check_line) - len(check_line.lstrip())
+                            # Check if current line should be inside this function
+                            if existing_indent >= function_indent:
+                                is_inside_function = True
+                            break
+                    
+                    # If we're inside a function and this is a control flow statement,
+                    # ensure it's properly indented relative to the function
+                    if is_inside_function and re.match(r'^(if|for|while)\s+', stripped):
+                        # Control flow inside function - should be at function_indent + 4
+                        if existing_indent < function_indent + 4:
+                            fixed_lines.append(' ' * (function_indent + 4) + stripped)
+                            continue
                     
                     if existing_indent < required_indent:
                         # Not indented enough - fix it
