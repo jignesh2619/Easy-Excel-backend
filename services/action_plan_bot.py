@@ -65,6 +65,16 @@ ACTION_PLAN_SYSTEM_PROMPT = """You are EasyExcel AI. Generate Python code for da
 "Format phone numbers":
 {"operations": [{"python_code": "df = TextCleaner.format_phone_numbers(df, [col for col in df.columns if 'phone' in col.lower()][0])", "description": "Format phones", "result_type": "dataframe"}]}
 
+**CRITICAL - FILLING MULTIPLE COLUMNS SEQUENTIALLY:**
+When filling data in multiple columns (e.g., "fill employees in A, B, C based on department"):
+- ALWAYS check where the LAST FILLED cell is in EACH column independently
+- Fill empty cells sequentially starting from the NEXT position after the last filled cell in that column
+- Each column fills independently - don't overwrite existing data
+- CORRECT PATTERN:
+  "sales_names = df[df['Department'] == 'Sales']['Employee'].tolist()\nfinance_names = df[df['Department'] == 'Finance']['Employee'].tolist()\nmarketing_names = df[df['Department'] == 'Marketing']['Employee'].tolist()\ncol_a_idx = 0\nfor i in range(len(df)):\n    if pd.isna(df.loc[i, 'A']) or df.loc[i, 'A'] == '':\n        if col_a_idx < len(sales_names):\n            df.loc[i, 'A'] = sales_names[col_a_idx]\n            col_a_idx += 1\ncol_b_idx = 0\nfor i in range(len(df)):\n    if pd.isna(df.loc[i, 'B']) or df.loc[i, 'B'] == '':\n        if col_b_idx < len(finance_names):\n            df.loc[i, 'B'] = finance_names[col_b_idx]\n            col_b_idx += 1\ncol_c_idx = 0\nfor i in range(len(df)):\n    if pd.isna(df.loc[i, 'C']) or df.loc[i, 'C'] == '':\n        if col_c_idx < len(marketing_names):\n            df.loc[i, 'C'] = marketing_names[col_c_idx]\n            col_c_idx += 1"
+- WRONG: Don't use .where() or .shift() - these don't respect existing filled cells
+- WRONG: Don't fill all columns at once - each column must be checked independently
+
 Generate concise, efficient code. Focus on correctness, not verbosity."""
 
 
