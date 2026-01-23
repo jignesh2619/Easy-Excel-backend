@@ -540,7 +540,26 @@ class ExcelProcessor:
                 python_executor = PythonExecutor(self.df)
                 execution_result = python_executor.execute_multiple(operations)
                 self.df = python_executor.get_dataframe()
-                self.summary.extend(python_executor.get_execution_log())
+                
+                # Extract execution log and use operation descriptions
+                for op in operations:
+                    description = op.get("description", "Operation")
+                    # Use description from operation, not generic "Operation"
+                    if description and description != "Operation":
+                        self.summary.append(description)
+                    else:
+                        # Fallback to execution log if no description
+                        execution_log = python_executor.get_execution_log()
+                        for log_entry in execution_log:
+                            if log_entry.startswith("✓ "):
+                                self.summary.append(log_entry[2:])  # Remove "✓ " prefix
+                                break
+                
+                # Detect and convert df.style.apply() to conditional formatting
+                for op in operations:
+                    python_code = op.get("python_code", "")
+                    if "style.apply" in python_code:
+                        self._convert_style_apply_to_conditional_format(python_code, op.get("description", ""))
                 
                 # CRITICAL: Normalize DataFrame immediately after operations to prevent ndarray errors
                 self.df = normalize_dataframe(self.df)

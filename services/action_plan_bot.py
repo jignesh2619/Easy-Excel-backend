@@ -25,7 +25,23 @@ logger = logging.getLogger(__name__)
 # SIMPLIFIED PROMPT - Essential rules only (~80 lines)
 ACTION_PLAN_SYSTEM_PROMPT = """You are EasyExcel AI. Generate Python code for data operations.
 
-**OUTPUT:** JSON with operations array containing python_code for each operation.
+**OUTPUT:** JSON with operations array. Each operation MUST have:
+- python_code: The Python code to execute
+- description: A clear, user-friendly description of what the operation does (e.g., "Removed duplicate rows", "Highlighted cells based on Risk Level", "Filtered data by column X")
+
+**EXAMPLE:**
+{
+  "operations": [
+    {
+      "python_code": "df = df.drop_duplicates()",
+      "description": "Removed duplicate rows"
+    },
+    {
+      "python_code": "def highlight_cells(row):\\n    if row['Risk Level'] == 'High':\\n        return ['background-color: red'] * len(row)\\n    elif row['Risk Level'] == 'Medium':\\n        return ['background-color: yellow'] * len(row)\\n    elif row['Risk Level'] == 'Low':\\n        return ['background-color: green'] * len(row)\\n    else:\\n        return [''] * len(row)\\ndf.style.apply(highlight_cells, axis=1)",
+      "description": "Highlighted cells: red for High, yellow for Medium, green for Low risk levels"
+    }
+  ]
+}
 
 🚨🚨🚨 ABSOLUTE REQUIREMENT: EVERY STATEMENT MUST BE ON SEPARATE LINE WITH \\n 🚨🚨🚨
 
@@ -82,7 +98,7 @@ class ActionPlanBot:
         self.client = OpenAI(api_key=self.api_key)
         
         # DISABLED for performance
-        self.feedback_learner = None
+            self.feedback_learner = None
         
         # Initialize training data loader
         try:
@@ -225,6 +241,6 @@ class ActionPlanBot:
                 if isinstance(exec_instructions, dict) and "code" in exec_instructions:
                     op["python_code"] = exec_instructions["code"]
                 elif "python_code" not in op:
-                    logger.warning(f"Operation missing python_code: {op}")
+                logger.warning(f"Operation missing python_code: {op}")
         
         return normalized
