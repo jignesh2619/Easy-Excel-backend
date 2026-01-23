@@ -335,30 +335,28 @@ class PythonExecutor:
         code = extract_pattern.sub(fix_extract_match, code)
         
         # 3. Fix for/if statements on same line with semicolons (CRITICAL - Python syntax requirement)
-        if ';' in code and (re.search(r';\s*for\s+\w+\s+in\s+', code) or re.search(r';\s*if\s+', code) or re.search(r';\s*elif\s+', code) or re.search(r';\s*else\s*:', code)):
+        # Also handle cases where semicolon is followed by assignment then control flow: "; var = 0 for i"
+        if ';' in code:
+            # First, split on semicolons
+            segments = code.split(';')
             parts = []
-            current_part = ''
-            in_block = False
             
-            for segment in code.split(';'):
+            for segment in segments:
                 segment = segment.strip()
                 if not segment:
                     continue
                 
-                # Check for control flow statements
-                if re.match(r'(for|if|elif|else)\s+', segment) or re.match(r'else\s*:', segment):
-                    if current_part:
-                        parts.append(current_part)
-                        current_part = ''
-                    in_block = True
-                    parts.append(segment)
-                elif in_block:
-                    parts.append('    ' + segment)  # Indent block body
-                else:
-                    current_part = current_part + '; ' + segment if current_part else segment
+                # Check if segment contains concatenated control flow (e.g., "col_a_idx = 0 for i")
+                # This handles: "; col_a_idx = 0 for i in range"
+                if re.search(r'\s+(for|if|while|elif|else)\s+', segment):
+                    # Split the segment further - find where control flow starts
+                    # Pattern: "var = value for" -> "var = value\nfor"
+                    segment = re.sub(r'(\w+\s*=\s*[^\s]+?)\s+(for|if|while|elif|else)\s+', r'\1\n\2 ', segment)
+                    # Also handle: "condition: if" -> "condition:\nif"
+                    segment = re.sub(r'([^:]):\s+(if|for|while|elif|else)\s+', r'\1:\n\2 ', segment)
+                
+                parts.append(segment)
             
-            if current_part:
-                parts.append(current_part)
             code = '\n'.join(parts)
         
         # 4. Fix method chains split across lines (common LLM error)
@@ -407,19 +405,18 @@ class PythonExecutor:
         # First, fix patterns where control flow appears after variable assignments
         # Pattern: variable = value for|variable = value if|variable = value while
         # Example: col_a_idx = 0 for i in range(len(df)):
-        # Also handles: variable = value\nfor (with newline but no proper separation)
-        # More robust pattern that handles both same-line and newline cases
-        pattern_assign = r'(\w+\s*=\s*[^\n;]+?)\s+(for|if|while|elif|else)\s+'
-        def split_after_assignment(match):
-            assignment = match.group(1).strip()
-            keyword = match.group(2)
-            return f'{assignment}\n{keyword} '
-        code = re.sub(pattern_assign, split_after_assignment, code)
+        # More aggressive pattern that handles various cases
+        # Pattern 1: "var = value for" -> "var = value\nfor"
+        code = re.sub(r'(\w+\s*=\s*[^\n;:]+?)\s+(for|if|while|elif|else)\s+', r'\1\n\2 ', code)
         
-        # Also fix cases where assignment and control flow are on same line but separated by space
-        # Pattern: "col_a_idx = 0 for i" -> "col_a_idx = 0\nfor i"
-        # This is a more aggressive pattern that catches edge cases
-        code = re.sub(r'(\w+\s*=\s*\w+)\s+(for|if|while|elif|else)\s+', r'\1\n\2 ', code)
+        # Pattern 2: Handle cases with more complex assignments: "var = df[...].tolist() for"
+        code = re.sub(r'(\w+\s*=\s*[^=]+?\.\w+\(\))\s+(for|if|while|elif|else)\s+', r'\1\n\2 ', code)
+        
+        # Pattern 3: Handle cases where if statement is followed by another if: "if condition: if condition2:"
+        code = re.sub(r'(if\s+[^:]+):\s+(if|for|while|elif|else)\s+', r'\1:\n\2 ', code)
+        
+        # Pattern 4: Handle cases where statement ends with colon followed by control flow: "statement: if"
+        code = re.sub(r'([^:]):\s+(if|for|while|elif|else)\s+', r'\1:\n\2 ', code)
         
         # Split on control flow keywords that appear after closing parentheses/brackets
         # Pattern: ) for|) if|) while|) elif|) else
@@ -502,6 +499,34 @@ class PythonExecutor:
         code = re.sub(r'\bgrouped\.co\b', 'grouped.columns', code)  # grouped.co -> grouped.columns
         code = re.sub(r'\bfor_in\b', 'for _ in', code)  # for_in -> for _ in
         code = re.sub(r'\bfor\s+_in\b', 'for _ in', code)  # for _in -> for _ in
+        
+        # 6. Final pass: Fix any remaining concatenated control flow statements
+        # Handle cases like: "statement if condition:" -> "statement\nif condition:"
+        # But be careful not to break valid code like "if x in y:"
+        code = re.sub(r'([^:\n])\s+(for|if|while|elif|else)\s+([^i][^n]|i[^n]|in[^\s])', r'\1\n\2 \3', code)
+        
+        # 7. Fix indentation: Ensure proper indentation after control flow
+        lines = code.split('\n')
+        fixed_lines = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                fixed_lines.append('')
+                continue
+            
+            # If line starts with control flow, it should be at base level (0 indent)
+            if re.match(r'^(for|if|while|elif|else)\s+', stripped):
+                fixed_lines.append(stripped)
+            # If previous line ended with ':', this line should be indented
+            elif i > 0 and fixed_lines and fixed_lines[-1].strip().endswith(':'):
+                if not stripped.startswith('    '):
+                    fixed_lines.append('    ' + stripped)
+                else:
+                    fixed_lines.append(line)
+            else:
+                fixed_lines.append(line)
+        
+        code = '\n'.join(fixed_lines)
         
         return code.strip()
     
