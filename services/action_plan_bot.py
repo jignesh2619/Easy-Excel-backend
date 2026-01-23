@@ -28,12 +28,17 @@ ACTION_PLAN_SYSTEM_PROMPT = """You are EasyExcel AI. Generate Python code for da
 **OUTPUT (JSON only):**
 {"operations": [{"python_code": "df = df.drop_duplicates().reset_index(drop=True)", "description": "Remove duplicates", "result_type": "dataframe"}]}
 
-**CODE FORMATTING (CRITICAL):**
+**CODE FORMATTING (CRITICAL - MUST FOLLOW):**
+⚠️⚠️⚠️ CONTROL FLOW MUST BE ON SEPARATE LINES ⚠️⚠️⚠️
 - Method chains on ONE line: df.groupby(['A'])['B'].sum().reset_index()
-- Control flow (for/if/while) on SEPARATE lines:
-  ✅ "grouped = df.groupby(['A'])['B'].sum()\nfor col in df.columns:\n    if col not in grouped.columns:\n        grouped[col] = None"
-  ❌ "grouped = df.groupby(['A'])['B'].sum() for col in df.columns: grouped[col] = None"
-- Use semicolons (;) for simple statements only
+- Control flow (for/if/while/elif/else) MUST be on SEPARATE lines with \n:
+  ✅ CORRECT: "grouped = df.groupby(['A'])['B'].sum()\nfor col in df.columns:\n    if col not in grouped.columns:\n        grouped[col] = None"
+  ✅ CORRECT: "col_a_idx = 0\nfor i in range(len(df)):\n    if pd.isna(df.loc[i, 'A']):\n        df.loc[i, 'A'] = value"
+  ❌ WRONG: "col_a_idx = 0 for i in range(len(df)):" (NO - must have \n between)
+  ❌ WRONG: "grouped = df.groupby(['A'])['B'].sum() for col in df.columns:" (NO - must have \n between)
+- NEVER put variable assignment and for/if/while on same line
+- ALWAYS use \n (newline) between statements and control flow keywords
+- Use semicolons (;) ONLY for simple statements, NEVER before for/if/while
 
 **REQUIREMENTS:**
 1. Always generate python_code for every operation

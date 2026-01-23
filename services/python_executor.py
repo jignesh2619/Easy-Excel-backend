@@ -382,9 +382,21 @@ class PythonExecutor:
         
         # 4.5. CRITICAL: Fix statements concatenated without line breaks
         # Pattern: statement) for col in ... or statement) if condition: ...
+        # OR: variable = value for i in ... (like col_a_idx = 0 for i in range)
         # This happens when LLM generates code without proper newlines
         # Detect patterns like: ...) for ... or ...) if ... or ...) while ...
+        # OR: ... = ... for ... (variable assignment followed by for loop)
         # These need to be split into separate lines
+        
+        # First, fix patterns where control flow appears after variable assignments
+        # Pattern: variable = value for|variable = value if|variable = value while
+        # Example: col_a_idx = 0 for i in range(len(df)):
+        pattern_assign = r'(\w+\s*=\s*[^\n;]+?)\s+(for|if|while|elif|else)\s+'
+        def split_after_assignment(match):
+            assignment = match.group(1).strip()
+            keyword = match.group(2)
+            return f'{assignment}\n{keyword} '
+        code = re.sub(pattern_assign, split_after_assignment, code)
         
         # Split on control flow keywords that appear after closing parentheses/brackets
         # Pattern: ) for|) if|) while|) elif|) else
@@ -403,6 +415,14 @@ class PythonExecutor:
         # Pattern: .method() for or .method() if
         pattern2 = r'(\))\s+(for|if|while|elif|else)\s+'
         code = re.sub(pattern2, lambda m: f'{m.group(1)}\n{m.group(2)} ', code)
+        
+        # Additional fix: Any statement ending with identifier/number followed by control flow
+        # Pattern: identifier for|number for|identifier if|number if
+        # This catches cases like: col_a_idx = 0 for (already handled above) or other edge cases
+        # But be careful not to match things like "for x in range(10)" which is valid
+        # Only match if it's clearly a statement followed by control flow (not part of the control flow itself)
+        pattern3 = r'(\b\w+\b|\d+)\s+(for|if|while|elif|else)\s+(?!\w+\s+in\s+|\w+\s*\(|\w+\s*:)'
+        # Actually, this is too risky - might break valid code. Let's skip this and rely on the assignment pattern above.
         
         # Fix indentation issues: if a line starts with 'if', 'for', 'while' after another statement,
         # it should be on a new line (already handled above) but also ensure proper indentation
